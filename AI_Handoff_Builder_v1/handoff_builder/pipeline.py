@@ -1,0 +1,469 @@
+from __future__ import annotations
+
+import datetime as dt
+import threading
+import zipfile
+from concurrent.futures import ThreadPoolExecutor, as_completed
+from pathlib import Path
+from typing import Callable, Iterable
+
+from PIL import Image, ImageOps
+
+from .contact_sheets import build_contact_sheet, paginate_contact_sheets
+from .ffmpeg_tools import FFmpegTools
+from .models import AssetRecord, BuildResult, BuilderConfig, SceneRecord
+from .utils import (
+    human_bytes,
+    iter_media,
+    json_dump,
+    media_type_for,
+    relative_posix,
+    safe_extract_zip,
+    slugify,
+    stable_asset_id,
+)
+
+
+ProgressCallback = Callable[[float, str], None]
+LogCallback = Callable[[str], None]
+
+
+def _noop_progress(value: float, message: str) -> None:
+    pass
+
+
+def _noop_log(message: str) -> None:
+    pass
+
+
+class HandoffBuilder:
+    def __init__(
+        self,
+        config: BuilderConfig,
+        *,
+        progress: ProgressCallback | None = None,
+        log: LogCallback | None = None,
+        project_root: Path | None = None,
+    ) -> None:
+        self.config = config
+        self.progress = progress or _noop_progress
+        self.log = log or _noop_log
+        self.project_root = project_root
+        self.cancel_event = threading.Event()
+        self.ffmpeg = FFmpegTools(project_root, cancel_event=self.cancel_event)
+
+    def cancel(self) -> None:
+        self.cancel_event.set()
+
+    def _ensure_not_canceled(self) -> None:
+        if self.cancel_event.is_set():
+            raise RuntimeError("Processing was canceled by the user.")
+
+    def _prepare_sources(self, inputs: Iterable[Path], workspace: Path) -> tuple[list[Path], Path]:
+        source_root = workspace / "source"
+        source_root.mkdir(parents=True, exist_ok=True)
+        prepared: list[Path] = []
+
+        for index, item in enumerate(inputs, start=1):
+            self._ensure_not_canceled()
+            item = item.resolve()
+            if item.suffix.lower() == ".zip":
+                target = source_root / f"zip_{index:03d}_{slugify(item.stem)}"
+                self.log(f"Extracting ZIP: {item.name}")
+                safe_extract_zip(item, target)
+                prepared.append(target)
+            elif item.is_dir():
+                target = source_root / f"folder_{index:03d}_{slugify(item.name)}"
+                self.log(f"Copying folder registry: {item}")
+                # Do not duplicate large media. A marker/symlink is not reliable on Windows,
+                # so we scan the original directory directly.
+                prepared.append(item)
+            elif item.is_file():
+                prepared.append(item)
+            else:
+                self.log(f"Skipped missing input: {item}")
+
+        return prepared, source_root
+
+    def _process_photo(self, source: Path, asset: AssetRecord, package_root: Path) -> None:
+        self._ensure_not_canceled()
+        destination = package_root / "photo_analysis_copies" / f"asset_{asset.asset_id}.jpg"
+        destination.parent.mkdir(parents=True, exist_ok=True)
+
+        with Image.open(source) as image:
+            image = ImageOps.exif_transpose(image)
+            image = image.convert("RGB")
+            width, height = image.size
+            asset.width, asset.height = width, height
+            longest = max(width, height)
+            if longest > self.config.photo_long_side:
+                scale = self.config.photo_long_side / longest
+                image = image.resize(
+                    (max(1, round(width * scale)), max(1, round(height * scale))),
+                    Image.Resampling.LANCZOS,
+                )
+            image.save(
+                destination,
+                "JPEG",
+                quality=self.config.photo_quality,
+                optimize=True,
+            )
+
+        asset.analysis_copy = relative_posix(destination, package_root)
+        asset.status = "processed"
+
+    def _process_video(
+        self,
+        source: Path,
+        asset: AssetRecord,
+        package_root: Path,
+    ) -> list[SceneRecord]:
+        self._ensure_not_canceled()
+        meta = self.ffmpeg.probe(source)
+        duration = float(meta["duration"])
+        asset.duration_ms = round(duration * 1000)
+        asset.width = meta["width"]
+        asset.height = meta["height"]
+        asset.rotation = meta["rotation"]
+
+        if self.config.include_video_proxies:
+            proxy = package_root / "video_proxies" / f"asset_{asset.asset_id}.mp4"
+            self.ffmpeg.make_proxy(source, proxy, self.config.proxy_height)
+            asset.proxy = relative_posix(proxy, package_root)
+
+        segments, mode = self.ffmpeg.scene_segments(
+            source,
+            duration,
+            threshold=self.config.scene_threshold,
+            short_seconds=self.config.short_video_seconds,
+            fallback_segment_seconds=self.config.fallback_segment_seconds,
+            max_segments=self.config.max_segments_per_video,
+        )
+
+        scenes: list[SceneRecord] = []
+        storyboard_items: list[tuple[Path, str]] = []
+        for index, (start, end) in enumerate(segments, start=1):
+            self._ensure_not_canceled()
+            scene_id = f"{asset.asset_id}_s{index:04d}"
+            midpoint = start + (end - start) / 2
+            keyframe = package_root / "scene_keyframes" / f"{scene_id}.jpg"
+            preview = package_root / "scene_previews" / f"{scene_id}.mp4"
+            self.ffmpeg.extract_frame(source, midpoint, keyframe)
+
+            preview_duration = min(
+                self.config.preview_seconds,
+                max(0.35, end - start),
+            )
+            preview_start = max(start, midpoint - preview_duration / 2)
+            if preview_start + preview_duration > end:
+                preview_start = max(start, end - preview_duration)
+            self.ffmpeg.make_preview(source, preview_start, preview_duration, preview)
+
+            scene = SceneRecord(
+                scene_id=scene_id,
+                asset_id=asset.asset_id,
+                scene_index=index,
+                start_ms=round(start * 1000),
+                end_ms=round(end * 1000),
+                duration_ms=round((end - start) * 1000),
+                detection_mode=mode,
+                keyframe_time_ms=round(midpoint * 1000),
+                keyframe_path=relative_posix(keyframe, package_root),
+                preview_path=relative_posix(preview, package_root),
+            )
+            scenes.append(scene)
+            asset.scene_ids.append(scene_id)
+            storyboard_items.append((keyframe, f"{index:02d}  {start:.1f}–{end:.1f}s"))
+
+        storyboard = package_root / "video_storyboards" / f"asset_{asset.asset_id}.jpg"
+        build_contact_sheet(
+            storyboard_items[: self.config.storyboard_frames],
+            storyboard,
+            columns=4,
+            thumb_size=(320, 220),
+        )
+        asset.storyboard = relative_posix(storyboard, package_root)
+        asset.status = "processed"
+        return scenes
+
+    def _process_asset(
+        self,
+        source: Path,
+        asset: AssetRecord,
+        package_root: Path,
+    ) -> list[SceneRecord]:
+        if asset.media_type == "photo":
+            self._process_photo(source, asset, package_root)
+            return []
+        return self._process_video(source, asset, package_root)
+
+    def build(self, inputs: list[Path]) -> BuildResult:
+        if not inputs:
+            raise ValueError("No input files or folders were selected.")
+
+        self.cancel_event.clear()
+        timestamp = dt.datetime.now().strftime("%Y%m%d_%H%M%S")
+        project_slug = slugify(self.config.project_name)
+        job_root = self.config.output_dir.resolve() / f"{project_slug}_{timestamp}"
+        package_root = job_root / "package"
+        package_root.mkdir(parents=True, exist_ok=False)
+
+        self.log(f"Project workspace: {job_root}")
+        prepared, source_root = self._prepare_sources(inputs, job_root)
+        media_files = iter_media(prepared)
+        if not media_files:
+            raise ValueError("No supported photo or video files were found.")
+
+        assets: list[AssetRecord] = []
+        scenes: list[SceneRecord] = []
+        work_items: list[tuple[Path, AssetRecord]] = []
+        registry_failures: list[tuple[Path, str]] = []
+
+        total = len(media_files)
+        for source in media_files:
+            self._ensure_not_canceled()
+            media_type = media_type_for(source)
+            assert media_type is not None
+            root_for_id = source.parent
+            asset_id = stable_asset_id(source, root_for_id)
+            try:
+                relative_source = source.name
+                for prepared_root in prepared:
+                    if prepared_root.is_dir():
+                        try:
+                            relative_source = source.relative_to(prepared_root).as_posix()
+                            break
+                        except ValueError:
+                            pass
+                category = Path(relative_source).parts[0] if len(Path(relative_source).parts) > 1 else None
+                asset = AssetRecord(
+                    asset_id=asset_id,
+                    media_type=media_type,
+                    original_name=source.name,
+                    source_path=str(source),
+                    relative_source_path=relative_source,
+                    extension=source.suffix.lower(),
+                    size_bytes=source.stat().st_size,
+                    folder_category=category,
+                )
+                assets.append(asset)
+                work_items.append((source, asset))
+            except Exception as exc:
+                registry_failures.append((source, str(exc)))
+                self.log(f"REGISTRY FAILED: {source}: {exc}")
+
+        completed = 0
+        max_workers = max(1, min(int(self.config.worker_count or 1), 2))
+        if max_workers == 1:
+            for source, asset in work_items:
+                self._ensure_not_canceled()
+                self.log(f"[{completed + 1}/{total}] {asset.media_type}: {source}")
+                try:
+                    scenes.extend(self._process_asset(source, asset, package_root))
+                except Exception as exc:
+                    asset.status = "failed"
+                    asset.error = str(exc)
+                    self.log(f"FAILED: {source.name}: {exc}")
+                completed += 1
+                self.progress(completed / total, f"{completed}/{total}: {source.name}")
+        else:
+            with ThreadPoolExecutor(max_workers=max_workers) as executor:
+                futures = {
+                    executor.submit(self._process_asset, source, asset, package_root): (source, asset)
+                    for source, asset in work_items
+                }
+                for future in as_completed(futures):
+                    source, asset = futures[future]
+                    self._ensure_not_canceled()
+                    self.log(f"[{completed + 1}/{total}] {asset.media_type}: {source}")
+                    try:
+                        scenes.extend(future.result())
+                    except Exception as exc:
+                        asset.status = "failed"
+                        asset.error = str(exc)
+                        self.log(f"FAILED: {source.name}: {exc}")
+                    completed += 1
+                    self.progress(completed / total, f"{completed}/{total}: {source.name}")
+
+        photo_items = [
+            (package_root / asset.analysis_copy, asset.relative_source_path)
+            for asset in assets
+            if asset.media_type == "photo" and asset.analysis_copy
+        ]
+        video_items = [
+            (package_root / asset.storyboard, asset.relative_source_path)
+            for asset in assets
+            if asset.media_type == "video" and asset.storyboard
+        ]
+        keyframe_items = [
+            (package_root / scene.keyframe_path, scene.scene_id)
+            for scene in scenes
+        ]
+
+        contact_dir = package_root / "contact_sheets"
+        photo_sheets = paginate_contact_sheets(
+            photo_items, contact_dir, prefix="photos", page_size=20
+        )
+        video_sheets = paginate_contact_sheets(
+            video_items, contact_dir, prefix="videos", page_size=12
+        )
+        scene_sheets = paginate_contact_sheets(
+            keyframe_items, contact_dir, prefix="scenes", page_size=20
+        )
+
+        source_videos = [asset for asset in assets if asset.media_type == "video"]
+        source_photos = [asset for asset in assets if asset.media_type == "photo"]
+        failed = [asset for asset in assets if asset.status != "processed"]
+        for source, error in registry_failures:
+            failed.append(
+                AssetRecord(
+                    asset_id=stable_asset_id(source),
+                    media_type=media_type_for(source) or "unknown",
+                    original_name=source.name,
+                    source_path=str(source),
+                    relative_source_path=source.name,
+                    extension=source.suffix.lower(),
+                    size_bytes=source.stat().st_size if source.exists() else 0,
+                    status="failed",
+                    error=error,
+                )
+            )
+        videos_without_scenes = [
+            asset for asset in source_videos if not asset.scene_ids
+        ]
+        photos_without_copies = [
+            asset for asset in source_photos if not asset.analysis_copy
+        ]
+        missing_paths: list[str] = []
+        for asset in assets:
+            for rel in (asset.analysis_copy, asset.proxy, asset.storyboard):
+                if rel and not (package_root / rel).exists():
+                    missing_paths.append(rel)
+        for scene in scenes:
+            for rel in (scene.keyframe_path, scene.preview_path):
+                if not (package_root / rel).exists():
+                    missing_paths.append(rel)
+
+        validation = {
+            "schema_version": "1.0",
+            "project_name": self.config.project_name,
+            "source_asset_count": len(assets),
+            "source_video_count": len(source_videos),
+            "source_photo_count": len(source_photos),
+            "processed_asset_count": len([a for a in assets if a.status == "processed"]),
+            "failed_asset_count": len(failed),
+            "video_assets_represented": len(source_videos) - len(videos_without_scenes),
+            "photo_assets_represented": len(source_photos) - len(photos_without_copies),
+            "scene_count": len(scenes),
+            "videos_without_scenes": [a.asset_id for a in videos_without_scenes],
+            "photos_without_analysis_copies": [a.asset_id for a in photos_without_copies],
+            "failed_assets": [
+                {
+                    "asset_id": asset.asset_id,
+                    "source_path": asset.source_path,
+                    "error": asset.error,
+                }
+                for asset in failed
+            ],
+            "missing_artifact_paths": missing_paths,
+            "coverage_ok": (
+                not failed
+                and not videos_without_scenes
+                and not photos_without_copies
+                and not missing_paths
+            ),
+        }
+
+        manifest = {
+            "schema_version": "1.0",
+            "project_name": self.config.project_name,
+            "created_at": dt.datetime.now(dt.timezone.utc).isoformat(),
+            "settings": {
+                "include_video_proxies": self.config.include_video_proxies,
+                "photo_long_side": self.config.photo_long_side,
+                "photo_quality": self.config.photo_quality,
+                "proxy_height": self.config.proxy_height,
+                "scene_threshold": self.config.scene_threshold,
+                "short_video_seconds": self.config.short_video_seconds,
+                "fallback_segment_seconds": self.config.fallback_segment_seconds,
+                "max_segments_per_video": self.config.max_segments_per_video,
+            },
+            "summary": validation,
+            "assets": [asset.to_dict() for asset in assets],
+            "contact_sheets": [
+                relative_posix(path, package_root)
+                for path in photo_sheets + video_sheets + scene_sheets
+            ],
+        }
+        scene_manifest = {
+            "schema_version": "1.0",
+            "project_name": self.config.project_name,
+            "scene_count": len(scenes),
+            "scenes": [scene.to_dict() for scene in scenes],
+        }
+
+        json_dump(package_root / "handoff_manifest.json", manifest)
+        json_dump(package_root / "scene_manifest.json", scene_manifest)
+        json_dump(package_root / "validation_report.json", validation)
+
+        readme = f"""AI HANDOFF BUILDER v1
+
+PROJECT
+{self.config.project_name}
+
+SUMMARY
+- Assets: {len(assets)}
+- Videos: {len(source_videos)}
+- Photos: {len(source_photos)}
+- Scenes/coverage segments: {len(scenes)}
+- Failed assets: {len(failed)}
+- Coverage OK: {validation['coverage_ok']}
+
+IMPORTANT
+Every source video must have at least one keyframe and one preview.
+Short videos are represented as one full-video scene.
+Long videos use detected cuts or uniform coverage segments.
+Photos are resized from every source folder, not just one category.
+
+FILES
+- handoff_manifest.json
+- scene_manifest.json
+- validation_report.json
+- photo_analysis_copies/
+- video_proxies/
+- scene_keyframes/
+- scene_previews/
+- video_storyboards/
+- contact_sheets/
+"""
+        (package_root / "README.txt").write_text(readme, encoding="utf-8")
+
+        archive_path = self.config.output_dir.resolve() / f"{project_slug}_ANALYSIS_HANDOFF.zip"
+        if archive_path.exists():
+            archive_path.unlink()
+        self.progress(0.98, "Creating final ZIP...")
+        with zipfile.ZipFile(
+            archive_path,
+            "w",
+            compression=zipfile.ZIP_DEFLATED,
+            compresslevel=6,
+            allowZip64=True,
+        ) as archive:
+            for file_path in sorted(package_root.rglob("*")):
+                if file_path.is_file():
+                    archive.write(file_path, file_path.relative_to(package_root).as_posix())
+
+        self.progress(1.0, f"Done: {archive_path.name}")
+        self.log(
+            f"Created {archive_path} ({human_bytes(archive_path.stat().st_size)}), "
+            f"coverage_ok={validation['coverage_ok']}"
+        )
+        return BuildResult(
+            archive_path=archive_path,
+            job_root=job_root,
+            package_root=package_root,
+            validation_path=package_root / "validation_report.json",
+            validation=validation,
+            failed_sources=[asset.source_path for asset in failed if asset.source_path],
+            canceled=False,
+        )

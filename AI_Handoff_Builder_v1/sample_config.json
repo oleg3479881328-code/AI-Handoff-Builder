@@ -1,0 +1,11 @@
+{
+  "project_name": "JEFF BREANNA",
+  "include_video_proxies": true,
+  "photo_long_side": 1280,
+  "photo_quality": 85,
+  "proxy_height": 720,
+  "scene_threshold": 0.35,
+  "short_video_seconds": 12.0,
+  "fallback_segment_seconds": 10.0,
+  "max_segments_per_video": 30
+}

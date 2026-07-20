@@ -1,0 +1,10 @@
+.venv/
+__pycache__/
+.pytest_cache/
+dist/
+build/
+*.spec
+*_ANALYSIS_HANDOFF.zip
+*.pyc
+tmp_smoke_*/
+Thumbs.db
