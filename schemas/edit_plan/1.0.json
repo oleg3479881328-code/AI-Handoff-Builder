@@ -21,6 +21,10 @@
     "handoff_id": { "type": "string", "minLength": 1 },
     "handoff_sha256": { "type": "string", "pattern": "^[a-f0-9]{64}$" },
     "plan_id": { "type": "string", "minLength": 1 },
+    "plan_version": { "type": "integer", "minimum": 1 },
+    "parent_plan_id": { "type": "string", "minLength": 1 },
+    "base_plan_hash": { "type": "string", "pattern": "^[a-f0-9]{64}$" },
+    "patch_id": { "type": "string", "minLength": 1 },
     "created_at": { "type": "string", "format": "date-time" },
     "mode": {
       "type": "string",
@@ -49,6 +53,7 @@
         "additionalProperties": false,
         "required": ["op", "asset_id", "source_in_ms", "source_out_ms"],
         "properties": {
+          "operation_id": { "type": "string", "minLength": 1 },
           "op": {
             "type": "string",
             "enum": ["video_segment"]

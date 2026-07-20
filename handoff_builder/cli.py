@@ -7,7 +7,14 @@ from pathlib import Path
 
 from .models import BuilderConfig
 from .pipeline import HandoffBuilder
-from .v2.services import import_package_into_workspace, render_job, render_next_pending_job
+from .v2.services import (
+    apply_patch_in_workspace,
+    import_package_into_workspace,
+    list_plans,
+    render_job,
+    render_next_pending_job,
+    show_plan,
+)
 from .v2.storage.db import connect_workspace_db
 from .v2.storage.repositories import SqliteRenderQueueRepository
 from .v2.workspace import init_project_workspace
@@ -59,7 +66,7 @@ def _build_v2_parser() -> argparse.ArgumentParser:
     subparsers = parser.add_subparsers(dest="command", required=True)
 
     init_parser = subparsers.add_parser("init-project", help="Initialize a v2 project workspace.")
-    init_parser.add_argument("workspace", help="Root work directory where the project workspace will be created.")
+    init_parser.add_argument("workspace", help="Exact workspace directory to initialize or reopen.")
     init_parser.add_argument("--project-id", required=True, help="Stable project ID.")
 
     import_parser = subparsers.add_parser("import-package", help="Import an AI edit package into a v2 workspace.")
@@ -84,6 +91,18 @@ def _build_v2_parser() -> argparse.ArgumentParser:
     render_job_parser.add_argument("--workspace", required=True, help="Path to the initialized project workspace.")
     render_job_parser.add_argument("--ffmpeg-path", help="Optional path to ffmpeg executable.")
     render_job_parser.add_argument("--ffprobe-path", help="Optional path to ffprobe executable.")
+
+    apply_patch_parser = subparsers.add_parser("apply-patch", help="Apply an immutable edit patch in a v2 workspace.")
+    apply_patch_parser.add_argument("patch_source", help="Path to AI_EDIT_PATCH.json or AI_EDIT_PATCH.zip")
+    apply_patch_parser.add_argument("--workspace", required=True, help="Path to the initialized project workspace.")
+
+    plan_list_parser = subparsers.add_parser("plan-list", help="List plan versions for a project.")
+    plan_list_parser.add_argument("--workspace", required=True, help="Path to the initialized project workspace.")
+    plan_list_parser.add_argument("--project-id", required=True, help="Project ID to filter by.")
+
+    plan_show_parser = subparsers.add_parser("plan-show", help="Show one plan version and payload.")
+    plan_show_parser.add_argument("plan_id", help="Plan ID.")
+    plan_show_parser.add_argument("--workspace", required=True, help="Path to the initialized project workspace.")
 
     return parser
 
@@ -120,6 +139,26 @@ def _main_v2(argv: list[str]) -> int:
                 "package_root": str(result.package_root),
                 "package_sha256": result.package_sha256,
                 "plan_hash": result.plan_hash,
+                "duplicate": result.duplicate,
+            }
+        )
+        return 0
+    if args.command == "apply-patch":
+        result = apply_patch_in_workspace(Path(args.patch_source), Path(args.workspace))
+        _print_json(
+            {
+                "project_id": result.project_id,
+                "package_id": result.package_id,
+                "handoff_id": result.handoff_id,
+                "patch_id": result.patch_id,
+                "patch_sha256": result.patch_sha256,
+                "base_plan_id": result.base_plan_id,
+                "base_plan_hash": result.base_plan_hash,
+                "new_plan_id": result.new_plan_id,
+                "new_plan_hash": result.new_plan_hash,
+                "render_job_id": result.render_job_id,
+                "render_report_path": str(result.render_report_path),
+                "patch_root": str(result.patch_root),
                 "duplicate": result.duplicate,
             }
         )
@@ -162,6 +201,12 @@ def _main_v2(argv: list[str]) -> int:
         if args.command == "queue-show":
             row = queue_repo.get_by_id(args.job_id)
             _print_json(_row_to_dict(row))
+            return 0
+        if args.command == "plan-list":
+            _print_json(list_plans(Path(args.workspace), project_id=args.project_id))
+            return 0
+        if args.command == "plan-show":
+            _print_json(show_plan(Path(args.workspace), args.plan_id))
             return 0
     finally:
         connection.close()

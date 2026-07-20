@@ -6,7 +6,7 @@ from pathlib import Path
 
 from ..common import stable_v2_id, utc_now_iso
 from ..domain.enums import QueueItemStatus
-from ..domain.records import ProjectRecord, RenderQueueItem
+from ..domain.records import PlanSummary, ProjectRecord, RenderQueueItem
 from ..errors import InvalidQueueTransitionError, UnsafePackageError
 
 
@@ -89,14 +89,19 @@ class WorkspaceRepository:
         plan_sha256: str,
         plan_hash: str,
         plan_path: Path,
+        plan_version: int = 1,
+        parent_plan_id: str | None = None,
+        patch_id: str | None = None,
+        base_plan_hash: str | None = None,
     ) -> None:
         self.connection.execute(
             """
             INSERT INTO edit_plans (
                 edit_plan_id, project_id, package_id, handoff_id, schema_version,
-                plan_sha256, plan_hash, plan_path, created_at
+                plan_sha256, plan_hash, plan_path, created_at,
+                plan_version, parent_plan_id, patch_id, base_plan_hash
             )
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             """,
             (
                 edit_plan_id,
@@ -108,6 +113,10 @@ class WorkspaceRepository:
                 plan_hash,
                 str(plan_path),
                 utc_now_iso(),
+                plan_version,
+                parent_plan_id,
+                patch_id,
+                base_plan_hash,
             ),
         )
 
@@ -120,6 +129,57 @@ class WorkspaceRepository:
             raise UnsafePackageError(f"Unknown edit plan: {edit_plan_id}")
         return row
 
+    def list_plans(self, project_id: str) -> list[PlanSummary]:
+        rows = self.connection.execute(
+            """
+            SELECT
+                edit_plan_id,
+                project_id,
+                package_id,
+                handoff_id,
+                schema_version,
+                plan_sha256,
+                plan_hash,
+                plan_path,
+                created_at,
+                COALESCE(plan_version, 1) AS plan_version,
+                parent_plan_id,
+                patch_id,
+                base_plan_hash
+            FROM edit_plans
+            WHERE project_id = ?
+            ORDER BY COALESCE(plan_version, 1), created_at, edit_plan_id
+            """,
+            (project_id,),
+        ).fetchall()
+        return [
+            PlanSummary(
+                edit_plan_id=row["edit_plan_id"],
+                project_id=row["project_id"],
+                package_id=row["package_id"],
+                handoff_id=row["handoff_id"],
+                schema_version=row["schema_version"],
+                plan_sha256=row["plan_sha256"],
+                plan_hash=row["plan_hash"],
+                plan_path=Path(row["plan_path"]),
+                created_at=row["created_at"],
+                plan_version=int(row["plan_version"] or 1),
+                parent_plan_id=row["parent_plan_id"],
+                patch_id=row["patch_id"],
+                base_plan_hash=row["base_plan_hash"],
+            )
+            for row in rows
+        ]
+
+    def get_package(self, package_id: str) -> sqlite3.Row:
+        row = self.connection.execute(
+            "SELECT * FROM ai_packages WHERE package_id = ?",
+            (package_id,),
+        ).fetchone()
+        if row is None:
+            raise UnsafePackageError(f"Unknown package: {package_id}")
+        return row
+
     def add_event(
         self,
         *,
@@ -129,7 +189,14 @@ class WorkspaceRepository:
         package_id: str | None = None,
         render_job_id: str | None = None,
     ) -> str:
-        event_id = stable_v2_id(project_id, event_type, utc_now_iso(), length=20)
+        event_id = stable_v2_id(
+            project_id,
+            event_type,
+            render_job_id or "",
+            package_id or "",
+            utc_now_iso(),
+            length=20,
+        )
         self.connection.execute(
             """
             INSERT INTO events (event_id, project_id, package_id, render_job_id, event_type, payload_json, created_at)
@@ -179,6 +246,89 @@ class WorkspaceRepository:
             """,
             (project_id, package_sha256),
         ).fetchone()
+
+    def get_existing_patch_result(self, project_id: str, patch_sha256: str, base_plan_id: str) -> sqlite3.Row | None:
+        return self.connection.execute(
+            """
+            SELECT
+                ep.patch_id,
+                ep.patch_sha256,
+                ep.base_plan_id,
+                ep.base_plan_hash,
+                ep.new_plan_id,
+                ep.new_plan_hash,
+                ep.patch_source_path,
+                ep.patch_payload_path,
+                ep.status,
+                ep.error_code,
+                ep.error_message,
+                ep.applied_at,
+                p.project_id,
+                p.package_id,
+                p.handoff_id,
+                rj.render_job_id,
+                ro.report_path
+            FROM edit_patches ep
+            JOIN edit_plans p ON p.edit_plan_id = ep.new_plan_id
+            JOIN render_jobs rj ON rj.edit_plan_id = ep.new_plan_id
+            JOIN render_outputs ro ON ro.render_job_id = rj.render_job_id
+            WHERE ep.project_id = ? AND ep.patch_sha256 = ? AND ep.base_plan_id = ?
+            ORDER BY rj.attempt_number
+            LIMIT 1
+            """,
+            (project_id, patch_sha256, base_plan_id),
+        ).fetchone()
+
+    def insert_patch(
+        self,
+        *,
+        patch_row_id: str,
+        patch_id: str,
+        project_id: str,
+        package_id: str,
+        handoff_id: str,
+        patch_sha256: str,
+        base_plan_id: str,
+        base_plan_hash: str,
+        new_plan_id: str,
+        new_plan_hash: str,
+        patch_source_path: Path,
+        patch_payload_path: Path,
+        status: str,
+        error_code: str | None = None,
+        error_message: str | None = None,
+    ) -> None:
+        timestamp = utc_now_iso()
+        self.connection.execute(
+            """
+            INSERT INTO edit_patches (
+                patch_row_id, patch_id, project_id, package_id, handoff_id,
+                patch_sha256, base_plan_id, base_plan_hash, new_plan_id, new_plan_hash,
+                patch_source_path, patch_payload_path, status, error_code, error_message,
+                created_at, applied_at
+            )
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            """,
+            (
+                patch_row_id,
+                patch_id,
+                project_id,
+                package_id,
+                handoff_id,
+                patch_sha256,
+                base_plan_id,
+                base_plan_hash,
+                new_plan_id,
+                new_plan_hash,
+                str(patch_source_path),
+                str(patch_payload_path),
+                status,
+                error_code,
+                error_message,
+                timestamp,
+                timestamp,
+            ),
+        )
 
 
 class SqliteRenderQueueRepository:

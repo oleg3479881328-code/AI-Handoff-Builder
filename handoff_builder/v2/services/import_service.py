@@ -106,6 +106,10 @@ def import_package_into_workspace(package_zip: Path, workspace: Path) -> ImportR
                 plan_sha256=compute_sha256(plan_path),
                 plan_hash=plan_hash,
                 plan_path=plan_path,
+                plan_version=int(plan_payload.get("plan_version") or 1),
+                parent_plan_id=str(plan_payload["parent_plan_id"]) if plan_payload.get("parent_plan_id") else None,
+                patch_id=str(plan_payload["patch_id"]) if plan_payload.get("patch_id") else None,
+                base_plan_hash=str(plan_payload["base_plan_hash"]) if plan_payload.get("base_plan_hash") else None,
             )
             queue_repo.enqueue(
                 RenderQueueItem(

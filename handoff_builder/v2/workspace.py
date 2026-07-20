@@ -6,13 +6,25 @@ from pathlib import Path
 from .common import utc_now_iso
 from .storage import apply_migrations, connect_workspace_db
 from .storage.repositories import WorkspaceRepository
+from .errors import UnsafePackageError
 
 
-def init_project_workspace(work_dir: Path, project_id: str) -> Path:
-    project_root = work_dir / project_id
+def init_project_workspace(workspace_dir: Path, project_id: str) -> Path:
+    project_root = workspace_dir.resolve()
+    project_file = project_root / "project.json"
+    if project_file.exists():
+        config = json.loads(project_file.read_text(encoding="utf-8"))
+        existing_project_id = str(config["project_id"])
+        if existing_project_id != project_id:
+            raise UnsafePackageError(
+                f"Workspace already belongs to another project: {existing_project_id} != {project_id}"
+            )
+    else:
+        project_root.mkdir(parents=True, exist_ok=True)
     for relative in (
         "handoffs",
         "ai_packages",
+        "patches",
         "renders",
         "logs",
         "cache",
@@ -21,7 +33,7 @@ def init_project_workspace(work_dir: Path, project_id: str) -> Path:
     ):
         (project_root / relative).mkdir(parents=True, exist_ok=True)
 
-    (project_root / "project.json").write_text(
+    project_file.write_text(
         json.dumps(
             {
                 "project_id": project_id,

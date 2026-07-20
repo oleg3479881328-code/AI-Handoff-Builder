@@ -3,8 +3,8 @@
 - Date: 2026-07-20
 - Repository: `oleg3479881328-code/AI-Handoff-Builder`
 - Active contract: `Yt-Dlp-Download-Manager` issue `#67`
-- Current branch: `feat/v2-preview-render-worker`
-- Current phase: milestone 4 preview worker implemented locally; pending review push/report
+- Current branch: `feat/v2-gui-patch-loop`
+- Current phase: milestone 5 desktop GUI workflow and immutable patch rerender loop implemented locally; pending review push/report
 
 ## What Exists Now
 
@@ -18,13 +18,13 @@
 
 ## Current Focus
 
-Land the first real local FFmpeg preview worker without changing accepted v1 behavior.
+Land the first owner-facing v2 desktop workflow without changing accepted v1 behavior.
 
 ## Immediate Next Actions
 
-1. Push and report the milestone 4 branch.
-2. Review the preview renderer and QC boundaries before widening supported operations.
-3. Keep GUI wiring, effect families, patches, and final/full-quality rendering deferred until this worker slice is accepted.
+1. Push and report the milestone 5 branch.
+2. Review the desktop patch loop and exact-workspace contract before widening supported operations.
+3. Keep broader effects, music/text/TTS families, and final/full-quality rendering deferred until this slice is accepted.
 
 ## Published Baseline
 
@@ -120,3 +120,54 @@ Land the first real local FFmpeg preview worker without changing accepted v1 beh
 - No new second application.
 - No cloud rendering.
 - Keep scope inside the issue `#67` contract unless the owner changes it.
+
+## Milestone 5 Results
+
+- Added `docs/milestone-5-gui-patch-decision.md` documenting reuse from Tkinter worker queues, v2 services, SQLite transactions, and the rejection of generic JSON Patch as the live mutation layer.
+- Switched `v2 init-project` to an exact-workspace contract so the selected path is the real workspace root and no extra `project_id` folder is appended.
+- Added immutable patch support for:
+  - `AI_EDIT_PATCH.json`
+  - `AI_EDIT_PATCH.zip`
+- Added additive persistence for:
+  - `edit_patches`
+  - plan lineage on `edit_plans`
+  - base plan hash / parent plan / patch ID / plan version
+- Added patch allowlist operations:
+  - `update_segment`
+  - `remove_segment`
+  - `duplicate_segment`
+  - `reorder_segments`
+- Added v2 services for:
+  - apply patch in workspace
+  - list/show plans
+  - list/show render jobs
+  - retry render job
+  - request cancel render job
+- Added cancel-aware FFmpeg rendering through a propagated cancel event.
+- Added Tkinter v2 owner-facing workflow inside the same app:
+  - create/open workspace
+  - import package
+  - inspect plan summary
+  - run selected job / next pending job
+  - refresh queue
+  - retry / cancel
+  - open output directory / reel / report / FFmpeg command
+  - preview `first_frame.jpg`
+  - inspect QC and error details
+  - import patch and rerender
+- Added a headless-testable `V2RunnerController` for state transitions outside widget callbacks.
+- Added CLI commands:
+  - `v2 apply-patch`
+  - `v2 plan-list`
+  - `v2 plan-show`
+- Validation on branch:
+  - `python -m pytest -q` -> `50 passed`
+  - legacy and v2 CLI help commands -> success
+  - `python -c "import handoff_builder.v2"` -> success
+  - real Windows Tkinter GUI smoke -> completed on July 20, 2026
+    - workspace path included Cyrillic, spaces, `&`, and apostrophe characters
+    - package import completed through the desktop app
+    - base preview render completed with QC artifacts preserved
+    - patch import created immutable plan v2 and a new render job
+    - rerender completed with a different plan hash and different render job ID
+    - both old and new outputs remained available

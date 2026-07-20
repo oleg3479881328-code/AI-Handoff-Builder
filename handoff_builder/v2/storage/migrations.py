@@ -93,6 +93,42 @@ MIGRATIONS: tuple[tuple[str, str], ...] = (
         ALTER TABLE render_jobs ADD COLUMN ffmpeg_exit_code INTEGER;
         """,
     ),
+    (
+        "0003_patch_lineage",
+        """
+        ALTER TABLE edit_plans ADD COLUMN plan_version INTEGER NOT NULL DEFAULT 1;
+        ALTER TABLE edit_plans ADD COLUMN parent_plan_id TEXT REFERENCES edit_plans(edit_plan_id) ON DELETE RESTRICT;
+        ALTER TABLE edit_plans ADD COLUMN patch_id TEXT;
+        ALTER TABLE edit_plans ADD COLUMN base_plan_hash TEXT;
+
+        CREATE TABLE IF NOT EXISTS edit_patches (
+            patch_row_id TEXT PRIMARY KEY,
+            patch_id TEXT NOT NULL,
+            project_id TEXT NOT NULL REFERENCES projects(project_id) ON DELETE RESTRICT,
+            package_id TEXT NOT NULL REFERENCES ai_packages(package_id) ON DELETE RESTRICT,
+            handoff_id TEXT NOT NULL,
+            patch_sha256 TEXT NOT NULL,
+            base_plan_id TEXT NOT NULL REFERENCES edit_plans(edit_plan_id) ON DELETE RESTRICT,
+            base_plan_hash TEXT NOT NULL,
+            new_plan_id TEXT NOT NULL REFERENCES edit_plans(edit_plan_id) ON DELETE RESTRICT,
+            new_plan_hash TEXT NOT NULL,
+            patch_source_path TEXT NOT NULL,
+            patch_payload_path TEXT NOT NULL,
+            status TEXT NOT NULL,
+            error_code TEXT,
+            error_message TEXT,
+            created_at TEXT NOT NULL,
+            applied_at TEXT NOT NULL,
+            UNIQUE (project_id, patch_sha256, base_plan_id),
+            UNIQUE (new_plan_id)
+        );
+
+        CREATE INDEX IF NOT EXISTS idx_edit_plans_parent_plan ON edit_plans(parent_plan_id);
+        CREATE INDEX IF NOT EXISTS idx_edit_plans_patch_id ON edit_plans(patch_id);
+        CREATE INDEX IF NOT EXISTS idx_edit_patches_project ON edit_patches(project_id, applied_at);
+        CREATE INDEX IF NOT EXISTS idx_edit_patches_base_plan ON edit_patches(base_plan_id, applied_at);
+        """,
+    ),
 )
 
 

@@ -14,3 +14,6 @@
 - Added semantic plan validation, deterministic FFmpeg preview compilation, worker lifecycle, QC, render artifact persistence, and preview-worker tests.
 - Finalized Milestone 4 validation with a real local FFmpeg smoke on a workspace path containing Cyrillic, spaces, `&`, and apostrophe characters.
 - Tightened the queue claim lifecycle so `started_at` is persisted for jobs rendered via `v2 render-next`.
+- Completed Milestone 5 desktop GUI workflow + immutable patch rerender loop on branch `feat/v2-gui-patch-loop`.
+- Added exact-workspace initialization, immutable patch lineage, patch CLI commands, queue query/retry/cancel services, and a cancel-aware FFmpeg path.
+- Extended the existing Tkinter app with owner-facing v2 workspace import/render/QC/patch sections and validated the full GUI loop on a real Windows path containing Cyrillic, spaces, `&`, and apostrophe characters.

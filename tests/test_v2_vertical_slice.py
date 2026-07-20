@@ -283,7 +283,7 @@ def test_controlled_workspace_paths_and_unicode_project_path(tmp_path: Path):
 
     assert str(result.package_root).startswith(str(workspace))
     assert str(result.render_report_path).startswith(str(workspace))
-    assert workspace.name == "проект-1"
+    assert workspace.name == "рабочая зона"
 
 
 def test_cli_v2_vertical_slice(tmp_path: Path, capsys: pytest.CaptureFixture[str]):

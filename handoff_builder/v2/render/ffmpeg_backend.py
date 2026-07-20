@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import threading
 from pathlib import Path
 
 from handoff_builder.ffmpeg_tools import FFmpegError, run_command
@@ -14,9 +15,11 @@ class FFmpegBackend:
         project_root: Path | None = None,
         ffmpeg_path: str | None = None,
         ffprobe_path: str | None = None,
+        cancel_event: threading.Event | None = None,
     ) -> None:
         self.ffmpeg = ffmpeg_path or find_executable("ffmpeg", project_root)
         self.ffprobe = ffprobe_path or find_executable("ffprobe", project_root)
+        self.cancel_event = cancel_event
 
     def probe(self, source: Path) -> dict:
         proc = run_command(
@@ -29,7 +32,8 @@ class FFmpegBackend:
                 "-of",
                 "json",
                 str(source),
-            ]
+            ],
+            cancel_event=self.cancel_event,
         )
         data = json.loads(proc.stdout or "{}")
         video_stream = next(
@@ -62,7 +66,7 @@ class FFmpegBackend:
         }
 
     def run_ffmpeg(self, args: list[str]) -> tuple[int, str, str]:
-        proc = run_command(args, check=False)
+        proc = run_command(args, check=False, cancel_event=self.cancel_event)
         return proc.returncode, proc.stdout or "", proc.stderr or ""
 
     def extract_first_frame(self, source: Path, destination: Path) -> None:
@@ -80,7 +84,8 @@ class FFmpegBackend:
                 "-q:v",
                 "3",
                 str(destination),
-            ]
+            ],
+            cancel_event=self.cancel_event,
         )
         if proc.returncode != 0:
             raise FFmpegError("Failed to extract first frame.")

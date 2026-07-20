@@ -1,7 +1,10 @@
 from __future__ import annotations
 
 import json
+import threading
 from pathlib import Path
+
+from handoff_builder.ffmpeg_tools import FFmpegError
 
 from ..common import utc_now_iso
 from ..errors import InvalidQueueTransitionError, UnsafePackageError
@@ -18,6 +21,7 @@ def render_next_pending_job(
     *,
     ffmpeg_path: str | None = None,
     ffprobe_path: str | None = None,
+    cancel_event: threading.Event | None = None,
 ) -> dict:
     project_root = workspace.resolve()
     project_id = json.loads((project_root / "project.json").read_text(encoding="utf-8"))["project_id"]
@@ -32,6 +36,7 @@ def render_next_pending_job(
             claimed["render_job_id"],
             ffmpeg_path=ffmpeg_path,
             ffprobe_path=ffprobe_path,
+            cancel_event=cancel_event,
         )
     finally:
         connection.close()
@@ -43,6 +48,7 @@ def render_job(
     *,
     ffmpeg_path: str | None = None,
     ffprobe_path: str | None = None,
+    cancel_event: threading.Event | None = None,
 ) -> dict:
     project_root = workspace.resolve()
     return _process_job_row(
@@ -50,6 +56,7 @@ def render_job(
         render_job_id,
         ffmpeg_path=ffmpeg_path,
         ffprobe_path=ffprobe_path,
+        cancel_event=cancel_event,
     )
 
 
@@ -59,8 +66,14 @@ def _process_job_row(
     *,
     ffmpeg_path: str | None = None,
     ffprobe_path: str | None = None,
+    cancel_event: threading.Event | None = None,
 ) -> dict:
-    backend = FFmpegBackend(project_root=Path(__file__).resolve().parents[3], ffmpeg_path=ffmpeg_path, ffprobe_path=ffprobe_path)
+    backend = FFmpegBackend(
+        project_root=Path(__file__).resolve().parents[3],
+        ffmpeg_path=ffmpeg_path,
+        ffprobe_path=ffprobe_path,
+        cancel_event=cancel_event,
+    )
     connection = connect_workspace_db(project_root / "project.sqlite")
     workspace_repo = WorkspaceRepository(connection)
     queue_repo = SqliteRenderQueueRepository(connection)
@@ -173,11 +186,12 @@ def _process_job_row(
     except Exception as exc:
         failed_stage = _classify_failure_stage(exc)
         error_code = _classify_error_code(exc)
+        cancelled = error_code == "cancelled"
         report = json.loads(report_path.read_text(encoding="utf-8"))
         report.update(
             {
-                "status": "failed",
-                "renderer_status": "failed",
+                "status": "cancelled" if cancelled else "failed",
+                "renderer_status": "cancelled" if cancelled else "failed",
                 "failed_stage": failed_stage,
                 "error_code": error_code,
                 "error_message": str(exc),
@@ -188,21 +202,24 @@ def _process_job_row(
             report["ffmpeg_stderr_tail"] = str(exc)[-4000:]
         report_path.write_text(json.dumps(report, ensure_ascii=False, indent=2), encoding="utf-8")
         try:
-            queue_repo.mark_failed(
-                render_job_id,
-                failed_stage=failed_stage,
-                error_code=error_code,
-                error_message=str(exc),
-            )
+            if cancelled:
+                queue_repo.mark_cancelled(render_job_id)
+            else:
+                queue_repo.mark_failed(
+                    render_job_id,
+                    failed_stage=failed_stage,
+                    error_code=error_code,
+                    error_message=str(exc),
+                )
             connection.execute(
                 "UPDATE render_outputs SET renderer_status = ? WHERE render_job_id = ?",
-                ("failed", render_job_id),
+                ("cancelled" if cancelled else "failed", render_job_id),
             )
             workspace_repo.add_event(
                 project_id=job["project_id"],
                 package_id=job["package_id"],
                 render_job_id=render_job_id,
-                event_type="render_failed",
+                event_type="render_cancelled" if cancelled else "render_failed",
                 payload={
                     "render_job_id": render_job_id,
                     "error_code": error_code,
@@ -223,6 +240,8 @@ def _process_job_row(
 
 def _classify_failure_stage(exc: Exception) -> str:
     message = str(exc)
+    if isinstance(exc, FFmpegError) and "canceled by the user" in message:
+        return "cancel_requested"
     if "FFmpeg preview render failed" in message:
         return "ffmpeg_execute"
     if "duration" in message or "Unsupported operation" in message or "Forbidden" in message:
@@ -232,6 +251,8 @@ def _classify_failure_stage(exc: Exception) -> str:
 
 def _classify_error_code(exc: Exception) -> str:
     message = str(exc)
+    if isinstance(exc, FFmpegError) and "canceled by the user" in message:
+        return "cancelled"
     if "Unsupported operation" in message or "Forbidden" in message:
         return "unsupported_operation"
     if "Asset file does not exist" in message or "unknown asset_id" in message:

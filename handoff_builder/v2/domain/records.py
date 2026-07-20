@@ -59,3 +59,37 @@ class ImportResult:
     package_sha256: str
     plan_hash: str
     duplicate: bool = False
+
+
+@dataclass(frozen=True, slots=True)
+class PatchApplyResult:
+    project_id: str
+    package_id: str
+    handoff_id: str
+    patch_id: str
+    patch_sha256: str
+    base_plan_id: str
+    base_plan_hash: str
+    new_plan_id: str
+    new_plan_hash: str
+    render_job_id: str
+    render_report_path: Path
+    patch_root: Path
+    duplicate: bool = False
+
+
+@dataclass(frozen=True, slots=True)
+class PlanSummary:
+    edit_plan_id: str
+    project_id: str
+    package_id: str
+    handoff_id: str
+    schema_version: str
+    plan_sha256: str
+    plan_hash: str
+    plan_path: Path
+    created_at: str
+    plan_version: int = 1
+    parent_plan_id: str | None = None
+    patch_id: str | None = None
+    base_plan_hash: str | None = None

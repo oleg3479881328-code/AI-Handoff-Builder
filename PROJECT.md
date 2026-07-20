@@ -23,8 +23,8 @@ Current success for this stage means:
 ## Current Status
 
 - Mode: active execution
-- Phase: first real local preview renderer implemented on feature branch; broader effects/final render still deferred
-- Health: v1 remains stable and v2 now has a real preview worker over the persisted queue backbone
+- Phase: owner-facing v2 desktop workflow and immutable patch rerender loop implemented on feature branch `feat/v2-gui-patch-loop`
+- Health: v1 remains stable and v2 now supports workspace → package import → preview render → QC → patch → rerender inside the same Tkinter app
 
 ## Done So Far
 
@@ -35,14 +35,15 @@ Current success for this stage means:
 - Completed the milestone 2 existing-solution scan and v2 architecture skeleton on feature branch `feat/v2-architecture-skeleton`.
 - Completed the milestone 3 first vertical slice on feature branch `feat/v2-import-persist-queue`: safe package import, SQLite persistence, queue operations, render report stub, and CLI commands.
 - Completed Milestone 4 on feature branch `feat/v2-preview-render-worker`: semantic plan validation, deterministic FFmpeg compilation, real 720x1280 preview rendering, basic QC, queue terminal states, and render report finalization.
+- Completed Milestone 5 on feature branch `feat/v2-gui-patch-loop`: Tkinter v2 workspace workflow, immutable patch lineage, rerender loop, exact-workspace path contract, patch CLI commands, and GUI/controller tests.
 
 ## Current Focus
 
-Keep the milestone 4 branch review-ready and use it as the base for wider renderer capability only after owner review.
+Keep the milestone 5 branch review-ready and use it as the base for wider renderer capability only after owner review.
 
 ## Next Practical Step
 
-Review and accept the milestone 4 preview worker, then expand supported operations incrementally without weakening the allowlisted compiler boundary.
+Review and accept the milestone 5 desktop patch loop, then widen supported renderer operations incrementally without weakening the allowlisted compiler boundary.
 
 ## Key Decisions And Constraints
 
@@ -50,6 +51,7 @@ Review and accept the milestone 4 preview worker, then expand supported operatio
 - Use bundled `ffmpeg` / `ffprobe` as the production renderer.
 - Do not introduce Remotion, browser rendering, PostgreSQL, microservices, or cloud rendering in this MVP.
 - The renderer must compile only allowlisted operations into safe FFmpeg argument arrays and must not use `shell=True`.
+- Patch application must remain immutable and allowlisted; no generic JSON Patch or arbitrary file writes.
 - GitHub is the execution source of truth for this project.
 - Existing Solution First applies before inventing new renderer/schema patterns.
 

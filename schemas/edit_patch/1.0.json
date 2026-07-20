@@ -10,7 +10,8 @@
     "handoff_id",
     "handoff_sha256",
     "patch_id",
-    "plan_id",
+    "base_plan_id",
+    "base_plan_hash",
     "created_at",
     "operations"
   ],
@@ -19,8 +20,10 @@
     "project_id": { "type": "string", "minLength": 1 },
     "handoff_id": { "type": "string", "minLength": 1 },
     "handoff_sha256": { "type": "string", "pattern": "^[a-f0-9]{64}$" },
+    "package_id": { "type": "string", "minLength": 1 },
     "patch_id": { "type": "string", "minLength": 1 },
-    "plan_id": { "type": "string", "minLength": 1 },
+    "base_plan_id": { "type": "string", "minLength": 1 },
+    "base_plan_hash": { "type": "string", "pattern": "^[a-f0-9]{64}$" },
     "created_at": { "type": "string", "format": "date-time" },
     "operations": {
       "type": "array",
@@ -29,8 +32,19 @@
         "additionalProperties": false,
         "required": ["op"],
         "properties": {
-          "op": { "type": "string", "minLength": 1 },
-          "params": { "type": "object" }
+          "op": {
+            "type": "string",
+            "enum": ["update_segment", "remove_segment", "duplicate_segment", "reorder_segments"]
+          },
+          "target_operation_id": { "type": "string", "minLength": 1 },
+          "new_operation_id": { "type": "string", "minLength": 1 },
+          "asset_id": { "type": "string", "minLength": 1 },
+          "source_in_ms": { "type": "integer", "minimum": 0 },
+          "source_out_ms": { "type": "integer", "minimum": 1 },
+          "order": {
+            "type": "array",
+            "items": { "type": "string", "minLength": 1 }
+          }
         }
       }
     }
