@@ -23,3 +23,7 @@ class ChecksumMismatchError(HandoffBuilderV2Error):
 
 class InternalRenderBoundaryError(HandoffBuilderV2Error):
     """Raised when a renderer/compiler boundary is crossed unsafely."""
+
+
+class InvalidQueueTransitionError(HandoffBuilderV2Error):
+    """Raised when a queue job transition is invalid."""

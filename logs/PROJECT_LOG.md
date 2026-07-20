@@ -8,3 +8,5 @@
 - Published the baseline to `main` at `dbaa4199d45137370166c716b40f33b2eafa7c7c`.
 - Completed Milestone 2 architecture skeleton on branch `feat/v2-architecture-skeleton`.
 - Added existing solution scan, v2 architecture doc, versioned schema skeletons, v2 package boundaries, and bounded architecture/security tests.
+- Completed Milestone 3 first vertical slice on branch `feat/v2-import-persist-queue`.
+- Added SQLite persistence, atomic import orchestration, queue operations, render report stub generation, v2 CLI commands, and bounded persistence/queue tests.

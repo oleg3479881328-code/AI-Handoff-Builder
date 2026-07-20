@@ -23,8 +23,8 @@ Current success for this stage means:
 ## Current Status
 
 - Mode: active execution
-- Phase: milestone 2 architecture skeleton completed on feature branch; full v2 renderer still deferred
-- Health: good baseline for v1 packaging flow; v2 boundaries are now scaffolded without changing v1 behavior
+- Phase: first v2 vertical slice implemented on feature branch; full renderer still deferred
+- Health: v1 remains stable and v2 now has a working import -> SQLite -> queue -> render-report backbone
 
 ## Done So Far
 
@@ -33,14 +33,15 @@ Current success for this stage means:
 - Created the dedicated GitHub repository `AI-Handoff-Builder` on July 20, 2026.
 - Published the initial baseline to `main` with remote commit `dbaa4199d45137370166c716b40f33b2eafa7c7c`.
 - Completed the milestone 2 existing-solution scan and v2 architecture skeleton on feature branch `feat/v2-architecture-skeleton`.
+- Completed the milestone 3 first vertical slice on feature branch `feat/v2-import-persist-queue`: safe package import, SQLite persistence, queue operations, render report stub, and CLI commands.
 
 ## Current Focus
 
-Keep the additive v2 architecture branch review-ready and use it as the base for the first import -> persist -> queue vertical slice after owner approval.
+Keep the milestone 3 branch review-ready and use it as the base for the first non-stub render execution slice after owner approval.
 
 ## Next Practical Step
 
-Review and accept the architecture skeleton, then implement the first v2 vertical slice: safe package import -> persisted handoff -> queued render job contract.
+Review and accept the milestone 3 backbone, then implement the next slice: queued job execution and stub-to-real render progression without breaking current persistence contracts.
 
 ## Key Decisions And Constraints
 

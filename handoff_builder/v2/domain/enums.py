@@ -11,10 +11,8 @@ class PackageImportStatus(StrEnum):
 
 class QueueItemStatus(StrEnum):
     PENDING = "pending"
-    VALIDATING = "validating"
-    READY = "ready"
-    RENDERING = "rendering"
-    QC_PENDING = "qc_pending"
+    RUNNING = "running"
     COMPLETED = "completed"
     FAILED = "failed"
-    CANCELED = "canceled"
+    CANCEL_REQUESTED = "cancel_requested"
+    CANCELLED = "cancelled"

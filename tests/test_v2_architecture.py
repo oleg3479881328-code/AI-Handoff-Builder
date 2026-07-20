@@ -33,7 +33,11 @@ def _build_package_zip(
     project_id: str = "project-1",
     handoff_id: str = "handoff-1",
     manifest_sha: str = "a" * 64,
-    plan_bytes: bytes = b'{"schema_version":"1.0","plan_id":"plan-1"}',
+    plan_bytes: bytes = (
+        b'{"schema_version":"1.0","project_id":"project-1","handoff_id":"handoff-1",'
+        b'"handoff_sha256":"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",'
+        b'"plan_id":"plan-1","created_at":"2026-07-20T12:00:00Z","operations":[{"op":"trim"}]}'
+    ),
     declared_plan_sha: str | None = None,
 ) -> None:
     declared_plan_sha = declared_plan_sha or _sha256(plan_bytes)

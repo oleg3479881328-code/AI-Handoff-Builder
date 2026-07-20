@@ -7,25 +7,58 @@
   "required": [
     "schema_version",
     "project_id",
+    "package_id",
     "handoff_id",
     "handoff_sha256",
+    "edit_plan_id",
     "plan_id",
     "created_at",
+    "render_job_id",
     "render_id",
+    "plan_hash",
+    "mode",
     "status",
-    "outputs"
+    "output_directory",
+    "validation_summary",
+    "outputs",
+    "renderer_status"
   ],
   "properties": {
     "schema_version": { "const": "1.0" },
     "project_id": { "type": "string", "minLength": 1 },
+    "package_id": { "type": "string", "minLength": 1 },
     "handoff_id": { "type": "string", "minLength": 1 },
     "handoff_sha256": { "type": "string", "pattern": "^[a-f0-9]{64}$" },
+    "edit_plan_id": { "type": "string", "minLength": 1 },
     "plan_id": { "type": "string", "minLength": 1 },
     "created_at": { "type": "string", "format": "date-time" },
+    "render_job_id": { "type": "string", "minLength": 1 },
     "render_id": { "type": "string", "minLength": 1 },
+    "plan_hash": { "type": "string", "pattern": "^[a-f0-9]{64}$" },
+    "mode": {
+      "type": "string",
+      "enum": ["preview", "final"]
+    },
     "status": {
       "type": "string",
-      "enum": ["pending", "rendering", "completed", "failed", "canceled"]
+      "enum": ["pending", "running", "completed", "failed", "cancel_requested", "cancelled"]
+    },
+    "output_directory": { "type": "string", "minLength": 1 },
+    "validation_summary": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["package_validated", "queue_enqueued", "renderer_status"],
+      "properties": {
+        "package_validated": {
+          "type": "integer",
+          "enum": [0, 1]
+        },
+        "queue_enqueued": {
+          "type": "integer",
+          "enum": [0, 1]
+        },
+        "renderer_status": { "type": "string", "minLength": 1 }
+      }
     },
     "outputs": {
       "type": "array",
@@ -42,6 +75,7 @@
     "warnings": {
       "type": "array",
       "items": { "type": "string" }
-    }
+    },
+    "renderer_status": { "type": "string", "minLength": 1 }
   }
 }
