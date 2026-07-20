@@ -250,7 +250,11 @@ class SqliteRenderQueueRepository:
             if row is None:
                 self.connection.commit()
                 return None
-            self._transition(render_job_id=row["render_job_id"], new_status=QueueItemStatus.RUNNING)
+            self._transition(
+                render_job_id=row["render_job_id"],
+                new_status=QueueItemStatus.RUNNING,
+                extra_updates={"started_at": utc_now_iso()},
+            )
             claimed = self.get_by_id(row["render_job_id"])
             self.connection.commit()
             return claimed
@@ -259,19 +263,48 @@ class SqliteRenderQueueRepository:
             raise
 
     def mark_running(self, render_job_id: str) -> None:
-        self._transition(render_job_id=render_job_id, new_status=QueueItemStatus.RUNNING)
+        self._transition(
+            render_job_id=render_job_id,
+            new_status=QueueItemStatus.RUNNING,
+            extra_updates={"started_at": utc_now_iso()},
+        )
 
     def mark_completed(self, render_job_id: str) -> None:
-        self._transition(render_job_id=render_job_id, new_status=QueueItemStatus.COMPLETED)
+        self._transition(
+            render_job_id=render_job_id,
+            new_status=QueueItemStatus.COMPLETED,
+            extra_updates={"finished_at": utc_now_iso()},
+        )
 
-    def mark_failed(self, render_job_id: str) -> None:
-        self._transition(render_job_id=render_job_id, new_status=QueueItemStatus.FAILED)
+    def mark_failed(
+        self,
+        render_job_id: str,
+        *,
+        failed_stage: str | None = None,
+        error_code: str | None = None,
+        error_message: str | None = None,
+        ffmpeg_exit_code: int | None = None,
+    ) -> None:
+        updates = {"finished_at": utc_now_iso()}
+        if failed_stage is not None:
+            updates["failed_stage"] = failed_stage
+        if error_code is not None:
+            updates["error_code"] = error_code
+        if error_message is not None:
+            updates["error_message"] = error_message
+        if ffmpeg_exit_code is not None:
+            updates["ffmpeg_exit_code"] = ffmpeg_exit_code
+        self._transition(render_job_id=render_job_id, new_status=QueueItemStatus.FAILED, extra_updates=updates)
 
     def request_cancel(self, render_job_id: str) -> None:
         self._transition(render_job_id=render_job_id, new_status=QueueItemStatus.CANCEL_REQUESTED)
 
     def mark_cancelled(self, render_job_id: str) -> None:
-        self._transition(render_job_id=render_job_id, new_status=QueueItemStatus.CANCELLED)
+        self._transition(
+            render_job_id=render_job_id,
+            new_status=QueueItemStatus.CANCELLED,
+            extra_updates={"finished_at": utc_now_iso()},
+        )
 
     def retry_job(self, render_job_id: str) -> sqlite3.Row:
         source = self.get_by_id(render_job_id)
@@ -312,7 +345,13 @@ class SqliteRenderQueueRepository:
             raise UnsafePackageError(f"No render output registered for {render_job_id}")
         return row
 
-    def _transition(self, *, render_job_id: str, new_status: str) -> None:
+    def _transition(
+        self,
+        *,
+        render_job_id: str,
+        new_status: str,
+        extra_updates: dict[str, object] | None = None,
+    ) -> None:
         current = self.get_by_id(render_job_id)
         current_status = current["status"]
         if current_status == new_status:
@@ -320,7 +359,12 @@ class SqliteRenderQueueRepository:
         allowed = self.VALID_TRANSITIONS.get(current_status, set())
         if new_status not in allowed:
             raise InvalidQueueTransitionError(f"Invalid queue transition: {current_status} -> {new_status}")
+        update_fields = {"status": new_status, "updated_at": utc_now_iso()}
+        if extra_updates:
+            update_fields.update(extra_updates)
+        assignments = ", ".join(f"{key} = ?" for key in update_fields)
+        params = list(update_fields.values()) + [render_job_id]
         self.connection.execute(
-            "UPDATE render_jobs SET status = ?, updated_at = ? WHERE render_job_id = ?",
-            (new_status, utc_now_iso(), render_job_id),
+            f"UPDATE render_jobs SET {assignments} WHERE render_job_id = ?",
+            params,
         )

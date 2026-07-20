@@ -23,8 +23,8 @@ Current success for this stage means:
 ## Current Status
 
 - Mode: active execution
-- Phase: first v2 vertical slice implemented on feature branch; full renderer still deferred
-- Health: v1 remains stable and v2 now has a working import -> SQLite -> queue -> render-report backbone
+- Phase: first real local preview renderer implemented on feature branch; broader effects/final render still deferred
+- Health: v1 remains stable and v2 now has a real preview worker over the persisted queue backbone
 
 ## Done So Far
 
@@ -34,14 +34,15 @@ Current success for this stage means:
 - Published the initial baseline to `main` with remote commit `dbaa4199d45137370166c716b40f33b2eafa7c7c`.
 - Completed the milestone 2 existing-solution scan and v2 architecture skeleton on feature branch `feat/v2-architecture-skeleton`.
 - Completed the milestone 3 first vertical slice on feature branch `feat/v2-import-persist-queue`: safe package import, SQLite persistence, queue operations, render report stub, and CLI commands.
+- Completed Milestone 4 on feature branch `feat/v2-preview-render-worker`: semantic plan validation, deterministic FFmpeg compilation, real 720x1280 preview rendering, basic QC, queue terminal states, and render report finalization.
 
 ## Current Focus
 
-Keep the milestone 3 branch review-ready and use it as the base for the first non-stub render execution slice after owner approval.
+Keep the milestone 4 branch review-ready and use it as the base for wider renderer capability only after owner review.
 
 ## Next Practical Step
 
-Review and accept the milestone 3 backbone, then implement the next slice: queued job execution and stub-to-real render progression without breaking current persistence contracts.
+Review and accept the milestone 4 preview worker, then expand supported operations incrementally without weakening the allowlisted compiler boundary.
 
 ## Key Decisions And Constraints
 

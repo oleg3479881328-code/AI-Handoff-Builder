@@ -3,8 +3,8 @@
 - Date: 2026-07-20
 - Repository: `oleg3479881328-code/AI-Handoff-Builder`
 - Active contract: `Yt-Dlp-Download-Manager` issue `#67`
-- Current branch: `feat/v2-import-persist-queue`
-- Current phase: milestone 3 vertical slice implemented locally; pending review push/report
+- Current branch: `feat/v2-preview-render-worker`
+- Current phase: milestone 4 preview worker implemented locally; pending review push/report
 
 ## What Exists Now
 
@@ -18,13 +18,13 @@
 
 ## Current Focus
 
-Land the first working v2 execution backbone without changing accepted v1 behavior.
+Land the first real local FFmpeg preview worker without changing accepted v1 behavior.
 
 ## Immediate Next Actions
 
-1. Push and report the milestone 3 branch.
-2. Review the persistence and queue contracts before adding real renderer execution.
-3. Keep full FFmpeg render compilation, GUI wiring, and effect families deferred until this backbone is accepted.
+1. Push and report the milestone 4 branch.
+2. Review the preview renderer and QC boundaries before widening supported operations.
+3. Keep GUI wiring, effect families, patches, and final/full-quality rendering deferred until this worker slice is accepted.
 
 ## Published Baseline
 
@@ -82,6 +82,36 @@ Land the first working v2 execution backbone without changing accepted v1 behavi
   - `python -m handoff_builder.cli v2 import-package --help` -> success
   - `python -m handoff_builder.cli v2 queue-list --help` -> success
   - `python -c "import handoff_builder.v2"` -> success
+
+## Milestone 4 Results
+
+- Added focused renderer decision note at `docs/milestone-4-renderer-decision.md`.
+- Added strict semantic preview-plan validation with controlled asset-path resolution.
+- Added deterministic FFmpeg compiler for allowlisted preview operations.
+- Added real local preview worker lifecycle:
+  - claim/mark running
+  - compile
+  - execute
+  - QC
+  - mark completed/failed
+- Added render artifacts:
+  - `reel.mp4`
+  - `render_plan.json`
+  - `render_report.json`
+  - `ffmpeg_command.json`
+  - `first_frame.jpg`
+- Added basic QC for resolution, fps, duration tolerance, first frame extraction, audio presence, and output SHA-256.
+- Added CLI commands:
+  - `v2 render-next`
+  - `v2 render-job`
+- Added additive render-job lifecycle DB fields and tests.
+- Validation on branch:
+  - `python -m pytest -q` -> `41 passed`
+  - legacy and v2 CLI help commands -> success
+  - real local FFmpeg preview smoke -> completed on July 20, 2026 (`5d98c33ca4eac8dfb0a4`)
+    - workspace path included Cyrillic, spaces, `&`, and apostrophe characters
+    - `render_report.json` confirmed `720x1280`, `30.0 fps`, `1.4s`, `audio_present=1`
+    - `first_frame.jpg` extracted and `ffprobe` matched expected output shape
 
 ## Constraints In Force
 

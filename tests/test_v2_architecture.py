@@ -36,11 +36,15 @@ def _build_package_zip(
     plan_bytes: bytes = (
         b'{"schema_version":"1.0","project_id":"project-1","handoff_id":"handoff-1",'
         b'"handoff_sha256":"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",'
-        b'"plan_id":"plan-1","created_at":"2026-07-20T12:00:00Z","operations":[{"op":"trim"}]}'
+        b'"plan_id":"plan-1","created_at":"2026-07-20T12:00:00Z","mode":"preview",'
+        b'"assets":[{"asset_id":"asset-1","path":"assets/source.mp4","media_type":"video"}],'
+        b'"operations":[{"op":"video_segment","asset_id":"asset-1","source_in_ms":0,"source_out_ms":1000}]}'
     ),
     declared_plan_sha: str | None = None,
 ) -> None:
     declared_plan_sha = declared_plan_sha or _sha256(plan_bytes)
+    asset_bytes = b"fake-video-placeholder"
+    asset_sha = _sha256(asset_bytes)
     manifest = {
         "schema_version": "1.0",
         "project_id": project_id,
@@ -52,7 +56,12 @@ def _build_package_zip(
                 "path": "plans/plan-1.json",
                 "sha256": declared_plan_sha,
                 "size_bytes": len(plan_bytes),
-            }
+            },
+            {
+                "path": "assets/source.mp4",
+                "sha256": asset_sha,
+                "size_bytes": len(asset_bytes),
+            },
         ],
         "plans": [
             {
@@ -60,11 +69,12 @@ def _build_package_zip(
                 "path": "plans/plan-1.json",
                 "sha256": declared_plan_sha,
             }
-        ],
+        ]
     }
     with zipfile.ZipFile(zip_path, "w", compression=zipfile.ZIP_DEFLATED) as archive:
         archive.writestr("ai_edit_package.json", json.dumps(manifest))
         archive.writestr("plans/plan-1.json", plan_bytes)
+        archive.writestr("assets/source.mp4", asset_bytes)
 
 
 def test_schema_loads():

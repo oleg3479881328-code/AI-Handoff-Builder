@@ -24,11 +24,29 @@ def _write_package(zip_path: Path, *, project_id: str = "proj-1", handoff_id: st
         "handoff_sha256": "a" * 64,
         "plan_id": "plan-1",
         "created_at": "2026-07-20T12:00:00Z",
-        "operations": [{"op": "trim", "target_asset_id": "asset-1", "params": {"start": 0, "end": 5}}],
+        "mode": "preview",
+        "assets": [
+            {
+                "asset_id": "asset-1",
+                "path": "assets/source.mp4",
+                "media_type": "video",
+            }
+        ],
+        "operations": [
+            {
+                "op": "video_segment",
+                "asset_id": "asset-1",
+                "source_in_ms": 0,
+                "source_out_ms": 500,
+            }
+        ],
     }
     plan_bytes = json.dumps(plan, ensure_ascii=False).encode("utf-8")
     plan_sha = compute_sha256(_write_temp_file(zip_path.parent / "plan.tmp", plan_bytes))
     (zip_path.parent / "plan.tmp").unlink()
+    asset_bytes = b"fake-video-placeholder"
+    asset_sha = compute_sha256(_write_temp_file(zip_path.parent / "asset.tmp", asset_bytes))
+    (zip_path.parent / "asset.tmp").unlink()
     manifest = {
         "schema_version": "1.0",
         "project_id": project_id,
@@ -36,7 +54,8 @@ def _write_package(zip_path: Path, *, project_id: str = "proj-1", handoff_id: st
         "handoff_sha256": "a" * 64,
         "created_at": "2026-07-20T12:00:00Z",
         "package_files": [
-            {"path": "plans/plan-1.json", "sha256": plan_sha, "size_bytes": len(plan_bytes)}
+            {"path": "plans/plan-1.json", "sha256": plan_sha, "size_bytes": len(plan_bytes)},
+            {"path": "assets/source.mp4", "sha256": asset_sha, "size_bytes": len(asset_bytes)},
         ],
         "plans": [
             {"plan_id": "plan-1", "path": "plans/plan-1.json", "sha256": plan_sha}
@@ -45,6 +64,7 @@ def _write_package(zip_path: Path, *, project_id: str = "proj-1", handoff_id: st
     with zipfile.ZipFile(zip_path, "w", compression=zipfile.ZIP_DEFLATED) as archive:
         archive.writestr("ai_edit_package.json", json.dumps(manifest))
         archive.writestr("plans/plan-1.json", plan_bytes)
+        archive.writestr("assets/source.mp4", asset_bytes)
     return manifest, plan
 
 

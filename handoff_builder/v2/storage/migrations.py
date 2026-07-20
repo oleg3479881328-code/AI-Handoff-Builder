@@ -82,6 +82,17 @@ MIGRATIONS: tuple[tuple[str, str], ...] = (
         CREATE INDEX IF NOT EXISTS idx_events_project ON events(project_id, created_at);
         """,
     ),
+    (
+        "0002_render_job_lifecycle_fields",
+        """
+        ALTER TABLE render_jobs ADD COLUMN started_at TEXT;
+        ALTER TABLE render_jobs ADD COLUMN finished_at TEXT;
+        ALTER TABLE render_jobs ADD COLUMN failed_stage TEXT;
+        ALTER TABLE render_jobs ADD COLUMN error_code TEXT;
+        ALTER TABLE render_jobs ADD COLUMN error_message TEXT;
+        ALTER TABLE render_jobs ADD COLUMN ffmpeg_exit_code INTEGER;
+        """,
+    ),
 )
 
 

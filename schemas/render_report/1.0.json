@@ -68,7 +68,12 @@
         "required": ["path", "sha256"],
         "properties": {
           "path": { "type": "string", "minLength": 1 },
-          "sha256": { "type": "string", "pattern": "^[a-f0-9]{64}$" }
+          "sha256": { "type": "string", "pattern": "^[a-f0-9]{64}$" },
+          "duration_seconds": { "type": "number" },
+          "width": { "type": "integer", "minimum": 1 },
+          "height": { "type": "integer", "minimum": 1 },
+          "fps": { "type": "number" },
+          "audio_present": { "type": "integer", "enum": [0, 1] }
         }
       }
     },
@@ -76,6 +81,16 @@
       "type": "array",
       "items": { "type": "string" }
     },
-    "renderer_status": { "type": "string", "minLength": 1 }
+    "renderer_status": { "type": "string", "minLength": 1 },
+    "updated_at": { "type": "string", "format": "date-time" },
+    "failed_stage": { "type": "string", "minLength": 1 },
+    "error_code": { "type": "string", "minLength": 1 },
+    "error_message": { "type": "string", "minLength": 1 },
+    "ffmpeg_exit_code": { "type": "integer" },
+    "ffmpeg_stderr_tail": { "type": "string" },
+    "qc_checks": {
+      "type": "array",
+      "items": { "type": "string" }
+    }
   }
 }

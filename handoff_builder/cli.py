@@ -7,7 +7,7 @@ from pathlib import Path
 
 from .models import BuilderConfig
 from .pipeline import HandoffBuilder
-from .v2.services import import_package_into_workspace
+from .v2.services import import_package_into_workspace, render_job, render_next_pending_job
 from .v2.storage.db import connect_workspace_db
 from .v2.storage.repositories import SqliteRenderQueueRepository
 from .v2.workspace import init_project_workspace
@@ -74,6 +74,17 @@ def _build_v2_parser() -> argparse.ArgumentParser:
     queue_show_parser.add_argument("job_id", help="Render job ID.")
     queue_show_parser.add_argument("--workspace", required=True, help="Path to the initialized project workspace.")
 
+    render_next_parser = subparsers.add_parser("render-next", help="Render the next pending job.")
+    render_next_parser.add_argument("--workspace", required=True, help="Path to the initialized project workspace.")
+    render_next_parser.add_argument("--ffmpeg-path", help="Optional path to ffmpeg executable.")
+    render_next_parser.add_argument("--ffprobe-path", help="Optional path to ffprobe executable.")
+
+    render_job_parser = subparsers.add_parser("render-job", help="Render one job by ID.")
+    render_job_parser.add_argument("job_id", help="Render job ID.")
+    render_job_parser.add_argument("--workspace", required=True, help="Path to the initialized project workspace.")
+    render_job_parser.add_argument("--ffmpeg-path", help="Optional path to ffmpeg executable.")
+    render_job_parser.add_argument("--ffprobe-path", help="Optional path to ffprobe executable.")
+
     return parser
 
 
@@ -113,6 +124,33 @@ def _main_v2(argv: list[str]) -> int:
             }
         )
         return 0
+    if args.command == "render-next":
+        result = render_next_pending_job(
+            Path(args.workspace),
+            ffmpeg_path=args.ffmpeg_path,
+            ffprobe_path=args.ffprobe_path,
+        )
+        _print_json(result)
+        return 0 if result.get("status") != "failed" else 1
+    if args.command == "render-job":
+        try:
+            result = render_job(
+                Path(args.workspace),
+                args.job_id,
+                ffmpeg_path=args.ffmpeg_path,
+                ffprobe_path=args.ffprobe_path,
+            )
+            _print_json(result)
+            return 0
+        except Exception as exc:
+            _print_json(
+                {
+                    "job_id": args.job_id,
+                    "status": "failed",
+                    "error": str(exc),
+                }
+            )
+            return 1
 
     connection = connect_workspace_db(Path(args.workspace) / "project.sqlite")
     try:
