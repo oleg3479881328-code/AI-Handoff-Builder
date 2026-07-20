@@ -3,8 +3,8 @@
 - Date: 2026-07-20
 - Repository: `oleg3479881328-code/AI-Handoff-Builder`
 - Active contract: `Yt-Dlp-Download-Manager` issue `#67`
-- Current branch: local bootstrap branch pending first publish
-- Current phase: baseline publication and project bootstrap
+- Current branch: `main`
+- Current phase: baseline published; ready for v2 discovery and implementation
 
 ## What Exists Now
 
@@ -18,14 +18,20 @@
 
 ## Current Focus
 
-Publish the verified v1 baseline into the dedicated GitHub repository and preserve enough durable context to start the v2 local edit runner safely.
+Use the published v1 baseline as the starting point for the v2 local edit runner defined in issue `#67`.
 
 ## Immediate Next Actions
 
-1. Connect local repo to `origin`.
-2. Commit and push the baseline plus PEOS bootstrap files.
-3. Verify the remote SHA.
-4. Start the existing-solution scan for schemas, safe plan compilation, SQLite workspace design, and render queue patterns from issue `#67`.
+1. Inspect reusable patterns from the current app, VIDEO MIX renderer/edit-plan code, FFmpeg behavior, and schema-validation tooling.
+2. Design the first persistent local project-workspace layer with SQLite migrations.
+3. Define versioned schemas for `ai_edit_package`, `edit_plan`, `edit_patch`, and `render_report`.
+4. Implement the first safe import-and-validate path before full rendering.
+
+## Published Baseline
+
+- Remote URL: `https://github.com/oleg3479881328-code/AI-Handoff-Builder`
+- Remote branch: `main`
+- Verified remote SHA: `dbaa4199d45137370166c716b40f33b2eafa7c7c`
 
 ## Constraints In Force
 

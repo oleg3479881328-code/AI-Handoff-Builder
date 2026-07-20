@@ -23,7 +23,7 @@ Current success for this stage means:
 ## Current Status
 
 - Mode: active execution
-- Phase: repository bootstrap completed; v2 architecture and implementation not yet started
+- Phase: dedicated repository published; v2 architecture and implementation not yet started
 - Health: good baseline for v1 packaging flow; v2 local edit runner still unimplemented
 
 ## Done So Far
@@ -31,14 +31,15 @@ Current success for this stage means:
 - Built and verified the standalone v1 Windows app locally from the owner's source folder.
 - Added Windows hardening for v1: coverage-aware summary, cancel/retry-failed, bounded workers, Unicode-safe CLI, portable PyInstaller build with bundled `ffmpeg` and `ffprobe`.
 - Created the dedicated GitHub repository `AI-Handoff-Builder` on July 20, 2026.
+- Published the initial baseline to `main` with remote commit `dbaa4199d45137370166c716b40f33b2eafa7c7c`.
 
 ## Current Focus
 
-Publish the current v1 baseline into the dedicated repository and initialize transfer-ready project files before starting the v2 local edit runner from issue `#67`.
+Start the existing-solution scan and architecture scaffolding required by issue `#67` from the newly published baseline repository.
 
 ## Next Practical Step
 
-Push the current v1 baseline plus PEOS project-state files to `AI-Handoff-Builder`, then begin the existing-solution scan and architecture scaffolding required by issue `#67`.
+Inspect and record reusable patterns for SQLite project registry, safe FFmpeg plan compilation, schema validation, and local render queue behavior before implementing the first v2 vertical slice.
 
 ## Key Decisions And Constraints
 
