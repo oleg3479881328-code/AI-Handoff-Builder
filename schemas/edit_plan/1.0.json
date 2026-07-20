@@ -1,0 +1,37 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://github.com/oleg3479881328-code/AI-Handoff-Builder/schemas/edit_plan/1.0.json",
+  "title": "Edit Plan",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schema_version",
+    "project_id",
+    "handoff_id",
+    "handoff_sha256",
+    "plan_id",
+    "created_at",
+    "operations"
+  ],
+  "properties": {
+    "schema_version": { "const": "1.0" },
+    "project_id": { "type": "string", "minLength": 1 },
+    "handoff_id": { "type": "string", "minLength": 1 },
+    "handoff_sha256": { "type": "string", "pattern": "^[a-f0-9]{64}$" },
+    "plan_id": { "type": "string", "minLength": 1 },
+    "created_at": { "type": "string", "format": "date-time" },
+    "operations": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["op"],
+        "properties": {
+          "op": { "type": "string", "minLength": 1 },
+          "target_asset_id": { "type": "string" },
+          "params": { "type": "object" }
+        }
+      }
+    }
+  }
+}

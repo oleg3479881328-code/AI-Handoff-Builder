@@ -23,8 +23,8 @@ Current success for this stage means:
 ## Current Status
 
 - Mode: active execution
-- Phase: dedicated repository published; v2 architecture and implementation not yet started
-- Health: good baseline for v1 packaging flow; v2 local edit runner still unimplemented
+- Phase: milestone 2 architecture skeleton completed on feature branch; full v2 renderer still deferred
+- Health: good baseline for v1 packaging flow; v2 boundaries are now scaffolded without changing v1 behavior
 
 ## Done So Far
 
@@ -32,14 +32,15 @@ Current success for this stage means:
 - Added Windows hardening for v1: coverage-aware summary, cancel/retry-failed, bounded workers, Unicode-safe CLI, portable PyInstaller build with bundled `ffmpeg` and `ffprobe`.
 - Created the dedicated GitHub repository `AI-Handoff-Builder` on July 20, 2026.
 - Published the initial baseline to `main` with remote commit `dbaa4199d45137370166c716b40f33b2eafa7c7c`.
+- Completed the milestone 2 existing-solution scan and v2 architecture skeleton on feature branch `feat/v2-architecture-skeleton`.
 
 ## Current Focus
 
-Start the existing-solution scan and architecture scaffolding required by issue `#67` from the newly published baseline repository.
+Keep the additive v2 architecture branch review-ready and use it as the base for the first import -> persist -> queue vertical slice after owner approval.
 
 ## Next Practical Step
 
-Inspect and record reusable patterns for SQLite project registry, safe FFmpeg plan compilation, schema validation, and local render queue behavior before implementing the first v2 vertical slice.
+Review and accept the architecture skeleton, then implement the first v2 vertical slice: safe package import -> persisted handoff -> queued render job contract.
 
 ## Key Decisions And Constraints
 

@@ -1,24 +1,35 @@
 # Latest Log
 
 Date: 2026-07-20
-Step: Dedicated repository bootstrap and first publication for `AI-Handoff-Builder`
+Step: Milestone 2 existing-solution scan and v2 architecture skeleton
 
 ## Completed
 
-- Read `Project Execution OS` entry routing through `START_HERE.md` and `docs/ROUTER.md`.
-- Read the active implementation contract from `Yt-Dlp-Download-Manager` issue `#67`.
-- Confirmed the dedicated repository `oleg3479881328-code/AI-Handoff-Builder` did not exist, then created it on July 20, 2026.
-- Confirmed the local Windows-ready source baseline exists at `C:\Users\oleg3\Documents\AI Handoff Builder v1\AI_Handoff_Builder_v1`.
-- Added PEOS bootstrap files and transfer-ready state files to this codebase.
-- Published the baseline to `main` and verified remote SHA `dbaa4199d45137370166c716b40f33b2eafa7c7c`.
+- Read the Milestone 2 handoff page in Notion and used it as the active execution contract.
+- Re-verified baseline branch and tests from `main` at SHA `196886bd7eb26671b6999539220261fe753920a6`.
+- Created feature branch `feat/v2-architecture-skeleton`.
+- Performed internal and external existing-solution scan.
+- Added `docs/existing-solution-scan.md`.
+- Added `docs/v2-local-edit-runner-architecture.md`.
+- Added versioned schema skeletons under `schemas/**`.
+- Added importable `handoff_builder/v2/**` package boundaries for domain, packages, plans, storage, render, qc, and errors.
+- Added bounded architecture/security tests in `tests/test_v2_architecture.py`.
 
 ## Verification
 
-- `gh auth status` succeeded for account `oleg3479881328-code`.
-- `gh repo view oleg3479881328-code/AI-Handoff-Builder` failed before creation and returned the repository URL after creation.
-- `git ls-remote origin refs/heads/main` matched local `HEAD` at `dbaa4199d45137370166c716b40f33b2eafa7c7c`.
+- `python -m pytest -q` -> `17 passed`
+- `python -c "import handoff_builder.v2; print('handoff_builder.v2 import ok')"` -> success
+- `python -m handoff_builder.cli --help` -> success
+- `git diff --check` -> clean
+- `git status --short` shows only intended milestone 2 files before commit
+
+## Reuse / Adapt / Reject
+
+- Reuse: v1 ZIP safety, stable IDs, JSON manifests, FFmpeg discovery.
+- Adapt: SQLite migrations/transactions, versioned schema dispatch, deterministic plan hashing.
+- Reject for MVP foundation: Remotion, Shotcut/MLT, Auto-Editor, raw AI command templates.
 
 ## Next
 
-- Begin v2 architecture and existing-solution scan from issue `#67`.
-- Preserve new findings in `PROJECT_STATE.md` and `logs/latest.md` after the next meaningful work step.
+- Commit and push `feat/v2-architecture-skeleton`.
+- Wait for owner review before moving to the first renderable v2 vertical slice.
