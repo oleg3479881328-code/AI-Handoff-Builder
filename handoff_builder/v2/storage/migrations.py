@@ -129,6 +129,127 @@ MIGRATIONS: tuple[tuple[str, str], ...] = (
         CREATE INDEX IF NOT EXISTS idx_edit_patches_base_plan ON edit_patches(base_plan_id, applied_at);
         """,
     ),
+    (
+        "0004_voice_studio",
+        """
+        CREATE TABLE IF NOT EXISTS voice_runtime_snapshots (
+            snapshot_id TEXT PRIMARY KEY,
+            base_url TEXT NOT NULL,
+            payload_json TEXT NOT NULL,
+            created_at TEXT NOT NULL
+        );
+
+        CREATE TABLE IF NOT EXISTS voice_profile_mappings (
+            profile_key TEXT PRIMARY KEY,
+            profile_id TEXT NOT NULL,
+            profile_name TEXT NOT NULL,
+            language TEXT NOT NULL,
+            default_engine TEXT,
+            created_at TEXT NOT NULL,
+            updated_at TEXT NOT NULL
+        );
+
+        CREATE TABLE IF NOT EXISTS voice_jobs (
+            voice_job_id TEXT PRIMARY KEY,
+            project_id TEXT NOT NULL REFERENCES projects(project_id) ON DELETE RESTRICT,
+            profile_key TEXT NOT NULL,
+            spec_path TEXT NOT NULL,
+            spec_hash TEXT NOT NULL,
+            target_duration_ms INTEGER,
+            status TEXT NOT NULL,
+            created_at TEXT NOT NULL,
+            updated_at TEXT NOT NULL
+        );
+
+        CREATE TABLE IF NOT EXISTS voice_job_versions (
+            voice_job_version_id TEXT PRIMARY KEY,
+            voice_job_id TEXT NOT NULL REFERENCES voice_jobs(voice_job_id) ON DELETE CASCADE,
+            version_number INTEGER NOT NULL,
+            payload_path TEXT NOT NULL,
+            payload_hash TEXT NOT NULL,
+            created_at TEXT NOT NULL,
+            UNIQUE (voice_job_id, version_number)
+        );
+
+        CREATE TABLE IF NOT EXISTS voice_takes (
+            voice_take_id TEXT PRIMARY KEY,
+            voice_job_id TEXT NOT NULL REFERENCES voice_jobs(voice_job_id) ON DELETE CASCADE,
+            generation_id TEXT NOT NULL,
+            take_index INTEGER NOT NULL,
+            seed INTEGER,
+            status TEXT NOT NULL,
+            response_json TEXT NOT NULL,
+            raw_audio_path TEXT,
+            normalized_audio_path TEXT,
+            audio_sha256 TEXT,
+            duration_ms INTEGER,
+            created_at TEXT NOT NULL,
+            updated_at TEXT NOT NULL,
+            UNIQUE (generation_id),
+            UNIQUE (voice_job_id, take_index)
+        );
+
+        CREATE TABLE IF NOT EXISTS voice_take_qc (
+            voice_take_qc_id TEXT PRIMARY KEY,
+            voice_take_id TEXT NOT NULL UNIQUE REFERENCES voice_takes(voice_take_id) ON DELETE CASCADE,
+            payload_json TEXT NOT NULL,
+            created_at TEXT NOT NULL
+        );
+
+        CREATE TABLE IF NOT EXISTS voice_human_reviews (
+            voice_review_id TEXT PRIMARY KEY,
+            voice_take_id TEXT NOT NULL REFERENCES voice_takes(voice_take_id) ON DELETE CASCADE,
+            payload_json TEXT NOT NULL,
+            created_at TEXT NOT NULL
+        );
+
+        CREATE TABLE IF NOT EXISTS voice_approvals (
+            voice_approval_id TEXT PRIMARY KEY,
+            voice_job_id TEXT NOT NULL REFERENCES voice_jobs(voice_job_id) ON DELETE CASCADE,
+            voice_take_id TEXT NOT NULL UNIQUE REFERENCES voice_takes(voice_take_id) ON DELETE CASCADE,
+            is_primary INTEGER NOT NULL DEFAULT 0,
+            payload_json TEXT NOT NULL,
+            created_at TEXT NOT NULL
+        );
+
+        CREATE TABLE IF NOT EXISTS voice_alignments (
+            voice_alignment_id TEXT PRIMARY KEY,
+            voice_take_id TEXT NOT NULL UNIQUE REFERENCES voice_takes(voice_take_id) ON DELETE CASCADE,
+            status TEXT NOT NULL,
+            artifact_path TEXT,
+            payload_json TEXT NOT NULL,
+            created_at TEXT NOT NULL
+        );
+
+        CREATE TABLE IF NOT EXISTS audio_mix_profiles (
+            audio_mix_profile_id TEXT PRIMARY KEY,
+            voice_job_id TEXT NOT NULL UNIQUE REFERENCES voice_jobs(voice_job_id) ON DELETE CASCADE,
+            profile_key TEXT NOT NULL,
+            payload_json TEXT NOT NULL,
+            created_at TEXT NOT NULL
+        );
+
+        CREATE TABLE IF NOT EXISTS audio_mix_patches (
+            audio_mix_patch_id TEXT PRIMARY KEY,
+            voice_job_id TEXT NOT NULL REFERENCES voice_jobs(voice_job_id) ON DELETE CASCADE,
+            payload_json TEXT NOT NULL,
+            created_at TEXT NOT NULL
+        );
+
+        CREATE TABLE IF NOT EXISTS voice_events (
+            voice_event_id TEXT PRIMARY KEY,
+            voice_job_id TEXT NOT NULL REFERENCES voice_jobs(voice_job_id) ON DELETE CASCADE,
+            event_type TEXT NOT NULL,
+            payload_json TEXT NOT NULL,
+            created_at TEXT NOT NULL
+        );
+
+        CREATE INDEX IF NOT EXISTS idx_voice_jobs_project ON voice_jobs(project_id, created_at);
+        CREATE INDEX IF NOT EXISTS idx_voice_takes_job ON voice_takes(voice_job_id, take_index);
+        CREATE INDEX IF NOT EXISTS idx_voice_reviews_take ON voice_human_reviews(voice_take_id, created_at);
+        CREATE INDEX IF NOT EXISTS idx_voice_events_job ON voice_events(voice_job_id, created_at);
+        """,
+    ),
 )
 
 

@@ -30,6 +30,10 @@ def init_project_workspace(workspace_dir: Path, project_id: str) -> Path:
         "cache",
         "analysis",
         "proxies",
+        "voice",
+        "voice/runtime",
+        "voice/profiles",
+        "voice/reports",
     ):
         (project_root / relative).mkdir(parents=True, exist_ok=True)
 

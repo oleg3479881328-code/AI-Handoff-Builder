@@ -162,7 +162,7 @@ def _probe_media(ffprobe_path: str, media_path: Path) -> dict[str, Any]:
             "-show_format",
             "-of",
             "json",
-            str(video_path),
+            str(media_path),
         ]
     )
     data = json.loads(completed.stdout or "{}")
