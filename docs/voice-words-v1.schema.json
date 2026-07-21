@@ -1,0 +1,30 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://github.com/oleg3479881328-code/AI-Handoff-Builder/docs/voice-words-v1.schema.json",
+  "title": "Voice Words v1",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["schema_version", "voice_take_id", "audio_sha256", "language", "duration_ms", "words"],
+  "properties": {
+    "schema_version": { "const": "1.0" },
+    "voice_take_id": { "type": "string", "minLength": 1 },
+    "audio_sha256": { "type": "string", "pattern": "^[a-f0-9]{64}$" },
+    "language": { "type": "string", "minLength": 2 },
+    "duration_ms": { "type": "integer", "minimum": 0 },
+    "words": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["index", "word", "start_ms", "end_ms", "confidence"],
+        "properties": {
+          "index": { "type": "integer", "minimum": 0 },
+          "word": { "type": "string", "minLength": 1 },
+          "start_ms": { "type": "integer", "minimum": 0 },
+          "end_ms": { "type": "integer", "minimum": 0 },
+          "confidence": { "type": "number", "minimum": 0, "maximum": 1 }
+        }
+      }
+    }
+  }
+}

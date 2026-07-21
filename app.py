@@ -14,7 +14,22 @@ from PIL import Image, ImageTk
 from handoff_builder.models import BuildResult, BuilderConfig
 from handoff_builder.pipeline import HandoffBuilder
 from handoff_builder.v2.gui_controller import V2RunnerController
-from handoff_builder.v2.services import show_plan, show_render_job
+from handoff_builder.v2.services import (
+    list_voice_jobs,
+    show_plan,
+    show_render_job,
+    voice_align,
+    voice_approve,
+    voice_generate,
+    voice_health,
+    voice_job_status,
+    voice_profiles,
+)
+
+if os.name == "nt":
+    import winsound
+else:
+    winsound = None
 
 
 class App(tk.Tk):
@@ -48,6 +63,27 @@ class App(tk.Tk):
         self.v2_current_snapshot: dict | None = None
         self.v2_first_frame_image: ImageTk.PhotoImage | None = None
         self.v2_busy = False
+        self.voice_window: tk.Toplevel | None = None
+        self.voice_base_url = tk.StringVar(value="http://127.0.0.1:17493")
+        self.voice_profile_key = tk.StringVar(value="olga-polo-en-v1")
+        self.voice_language = tk.StringVar(value="en-US")
+        self.voice_engine = tk.StringVar(value="qwen")
+        self.voice_model_size = tk.StringVar(value="0.6B")
+        self.voice_target_duration_ms = tk.StringVar(value="")
+        self.voice_status_text = tk.StringVar(value="Откройте Voice Studio и загрузите workspace.")
+        self.voice_runtime_text = tk.StringVar(value="Runtime: not checked")
+        self.voice_profile_text = tk.StringVar(value="Profile: not checked")
+        self.voice_job_choice = tk.StringVar(value="")
+        self.voice_jobs_map: dict[str, dict] = {}
+        self.voice_current_job: dict | None = None
+        self.voice_selected_take_id: str | None = None
+        self.voice_playing_path: Path | None = None
+        self.voice_similarity = tk.IntVar(value=5)
+        self.voice_naturalness = tk.IntVar(value=5)
+        self.voice_pronunciation = tk.IntVar(value=5)
+        self.voice_pacing = tk.IntVar(value=5)
+        self.voice_emotion = tk.IntVar(value=5)
+        self.voice_artifacts = tk.StringVar(value="minor")
 
         self._build_ui()
         self.after(120, self._poll_events)
@@ -166,6 +202,7 @@ class App(tk.Tk):
         self.v2_cancel_button.pack(side="left", padx=(8, 0))
         self.v2_retry_button = ttk.Button(action_frame, text="Retry Job", command=self._v2_retry_selected)
         self.v2_retry_button.pack(side="left", padx=(8, 0))
+        ttk.Button(action_frame, text="Open Voice Studio", command=self._v2_open_voice_studio).pack(side="right")
 
         ttk.Label(outer, textvariable=self.v2_status_text).grid(row=2, column=0, sticky="w", pady=(8, 8))
 
@@ -678,6 +715,455 @@ class App(tk.Tk):
             self.v2_first_frame_label.configure(image="", text="first_frame.jpg unavailable")
             self.v2_first_frame_image = None
 
+    def _v2_open_voice_studio(self) -> None:
+        if self.voice_window is not None and self.voice_window.winfo_exists():
+            self.voice_window.deiconify()
+            self.voice_window.lift()
+            self.voice_window.focus_force()
+            return
+
+        window = tk.Toplevel(self)
+        window.title("Voice Studio / Озвучка")
+        window.geometry("1260x880")
+        window.minsize(1080, 760)
+        window.protocol("WM_DELETE_WINDOW", self._voice_close_window)
+        self.voice_window = window
+
+        outer = ttk.Frame(window, padding=12)
+        outer.pack(fill="both", expand=True)
+        outer.columnconfigure(0, weight=1)
+        outer.rowconfigure(4, weight=1)
+
+        ttk.Label(outer, text="Voice Studio / Озвучка", font=("Arial", 18, "bold")).grid(row=0, column=0, sticky="w")
+
+        top = ttk.Frame(outer)
+        top.grid(row=1, column=0, sticky="ew", pady=(10, 0))
+        top.columnconfigure(0, weight=1)
+        top.columnconfigure(1, weight=1)
+
+        runtime_frame = ttk.LabelFrame(top, text="Runtime / Profile", padding=10)
+        runtime_frame.grid(row=0, column=0, sticky="nsew", padx=(0, 8))
+        runtime_frame.columnconfigure(1, weight=1)
+        ttk.Label(runtime_frame, text="Base URL:").grid(row=0, column=0, sticky="w")
+        ttk.Entry(runtime_frame, textvariable=self.voice_base_url).grid(row=0, column=1, sticky="ew", padx=(8, 8))
+        ttk.Button(runtime_frame, text="Refresh Runtime", command=self._voice_start_refresh).grid(row=0, column=2)
+        ttk.Label(runtime_frame, textvariable=self.voice_runtime_text, wraplength=500, justify="left").grid(row=1, column=0, columnspan=3, sticky="w", pady=(8, 4))
+        ttk.Label(runtime_frame, textvariable=self.voice_profile_text, wraplength=500, justify="left").grid(row=2, column=0, columnspan=3, sticky="w")
+
+        job_frame = ttk.LabelFrame(top, text="Generate 3 Olga Takes", padding=10)
+        job_frame.grid(row=0, column=1, sticky="nsew")
+        job_frame.columnconfigure(1, weight=1)
+        ttk.Label(job_frame, text="Profile Key:").grid(row=0, column=0, sticky="w")
+        ttk.Entry(job_frame, textvariable=self.voice_profile_key).grid(row=0, column=1, sticky="ew", padx=(8, 0))
+        ttk.Label(job_frame, text="Language:").grid(row=1, column=0, sticky="w", pady=(8, 0))
+        ttk.Entry(job_frame, textvariable=self.voice_language).grid(row=1, column=1, sticky="ew", padx=(8, 0), pady=(8, 0))
+        ttk.Label(job_frame, text="Engine:").grid(row=2, column=0, sticky="w", pady=(8, 0))
+        ttk.Entry(job_frame, textvariable=self.voice_engine).grid(row=2, column=1, sticky="ew", padx=(8, 0), pady=(8, 0))
+        ttk.Label(job_frame, text="Model Size:").grid(row=3, column=0, sticky="w", pady=(8, 0))
+        ttk.Entry(job_frame, textvariable=self.voice_model_size).grid(row=3, column=1, sticky="ew", padx=(8, 0), pady=(8, 0))
+        ttk.Label(job_frame, text="Target Duration ms:").grid(row=4, column=0, sticky="w", pady=(8, 0))
+        ttk.Entry(job_frame, textvariable=self.voice_target_duration_ms).grid(row=4, column=1, sticky="ew", padx=(8, 0), pady=(8, 0))
+        ttk.Button(job_frame, text="Generate 3 Takes", command=self._voice_start_generate).grid(row=5, column=1, sticky="e", pady=(10, 0))
+
+        script_frame = ttk.LabelFrame(outer, text="Script / Текст озвучки", padding=10)
+        script_frame.grid(row=2, column=0, sticky="ew", pady=(10, 0))
+        script_frame.columnconfigure(0, weight=1)
+        self.voice_script_text = tk.Text(script_frame, height=5, wrap="word")
+        self.voice_script_text.grid(row=0, column=0, sticky="ew")
+        self.voice_script_text.insert(
+            "1.0",
+            "Your wedding should feel warm, confident, and alive, like every promise, every laugh, and every dance is still glowing in the room.",
+        )
+        ttk.Label(outer, textvariable=self.voice_status_text).grid(row=3, column=0, sticky="nw", pady=(8, 6))
+
+        body = ttk.Panedwindow(outer, orient="horizontal")
+        body.grid(row=4, column=0, sticky="nsew")
+
+        left = ttk.Frame(body, padding=4)
+        center = ttk.Frame(body, padding=4)
+        right = ttk.Frame(body, padding=4)
+        for frame in (left, center, right):
+            frame.columnconfigure(0, weight=1)
+            frame.rowconfigure(1, weight=1)
+        body.add(left, weight=2)
+        body.add(center, weight=3)
+        body.add(right, weight=3)
+
+        ttk.Label(left, text="Voice Jobs", font=("Arial", 11, "bold")).grid(row=0, column=0, sticky="w")
+        self.voice_job_combo = ttk.Combobox(left, textvariable=self.voice_job_choice, state="readonly")
+        self.voice_job_combo.grid(row=1, column=0, sticky="ew", pady=(6, 0))
+        self.voice_job_combo.bind("<<ComboboxSelected>>", self._voice_on_job_selected)
+        ttk.Button(left, text="Refresh Jobs", command=self._voice_start_refresh).grid(row=2, column=0, sticky="w", pady=(8, 0))
+
+        ttk.Label(center, text="Takes / Прослушивание", font=("Arial", 11, "bold")).grid(row=0, column=0, sticky="w")
+        self.voice_takes = ttk.Treeview(
+            center,
+            columns=("idx", "status", "duration", "sha"),
+            show="headings",
+            height=12,
+        )
+        self.voice_takes.heading("idx", text="#")
+        self.voice_takes.heading("status", text="Status")
+        self.voice_takes.heading("duration", text="Duration ms")
+        self.voice_takes.heading("sha", text="SHA-256")
+        self.voice_takes.column("idx", width=45, anchor="center")
+        self.voice_takes.column("status", width=180, anchor="w")
+        self.voice_takes.column("duration", width=100, anchor="center")
+        self.voice_takes.column("sha", width=210, anchor="w")
+        self.voice_takes.grid(row=1, column=0, sticky="nsew", pady=(6, 0))
+        self.voice_takes.bind("<<TreeviewSelect>>", self._voice_on_take_selected)
+
+        play_actions = ttk.Frame(center)
+        play_actions.grid(row=2, column=0, sticky="ew", pady=(8, 0))
+        ttk.Button(play_actions, text="Play Selected", command=self._voice_play_selected_take).pack(side="left")
+        ttk.Button(play_actions, text="Stop", command=self._voice_stop_playback).pack(side="left", padx=(8, 0))
+        ttk.Button(play_actions, text="Open WAV", command=self._voice_open_selected_take).pack(side="left", padx=(8, 0))
+        ttk.Button(play_actions, text="Align", command=self._voice_start_align_selected).pack(side="left", padx=(16, 0))
+
+        ttk.Label(right, text="QC / Review / Approve", font=("Arial", 11, "bold")).grid(row=0, column=0, sticky="w")
+        review_top = ttk.Frame(right)
+        review_top.grid(row=1, column=0, sticky="ew", pady=(6, 6))
+        for col in range(4):
+            review_top.columnconfigure(col, weight=1)
+        ttk.Label(review_top, text="Similarity").grid(row=0, column=0, sticky="w")
+        ttk.Spinbox(review_top, from_=1, to=5, textvariable=self.voice_similarity, width=5).grid(row=0, column=1, sticky="w")
+        ttk.Label(review_top, text="Naturalness").grid(row=0, column=2, sticky="w")
+        ttk.Spinbox(review_top, from_=1, to=5, textvariable=self.voice_naturalness, width=5).grid(row=0, column=3, sticky="w")
+        ttk.Label(review_top, text="Pronunciation").grid(row=1, column=0, sticky="w", pady=(6, 0))
+        ttk.Spinbox(review_top, from_=1, to=5, textvariable=self.voice_pronunciation, width=5).grid(row=1, column=1, sticky="w", pady=(6, 0))
+        ttk.Label(review_top, text="Pacing").grid(row=1, column=2, sticky="w", pady=(6, 0))
+        ttk.Spinbox(review_top, from_=1, to=5, textvariable=self.voice_pacing, width=5).grid(row=1, column=3, sticky="w", pady=(6, 0))
+        ttk.Label(review_top, text="Emotion").grid(row=2, column=0, sticky="w", pady=(6, 0))
+        ttk.Spinbox(review_top, from_=1, to=5, textvariable=self.voice_emotion, width=5).grid(row=2, column=1, sticky="w", pady=(6, 0))
+        ttk.Label(review_top, text="Artifacts").grid(row=2, column=2, sticky="w", pady=(6, 0))
+        ttk.Combobox(review_top, textvariable=self.voice_artifacts, values=("none", "minor", "major"), state="readonly", width=10).grid(row=2, column=3, sticky="w", pady=(6, 0))
+
+        notes_frame = ttk.LabelFrame(right, text="Review Notes", padding=8)
+        notes_frame.grid(row=2, column=0, sticky="ew")
+        notes_frame.columnconfigure(0, weight=1)
+        self.voice_notes = tk.Text(notes_frame, height=4, wrap="word")
+        self.voice_notes.grid(row=0, column=0, sticky="ew")
+
+        action_row = ttk.Frame(right)
+        action_row.grid(row=3, column=0, sticky="ew", pady=(8, 8))
+        ttk.Button(action_row, text="Approve Selected Take", command=self._voice_start_approve_selected).pack(side="left")
+
+        qc_frame = ttk.LabelFrame(right, text="Take Details", padding=8)
+        qc_frame.grid(row=4, column=0, sticky="nsew")
+        qc_frame.columnconfigure(0, weight=1)
+        qc_frame.rowconfigure(0, weight=1)
+        right.rowconfigure(4, weight=1)
+        self.voice_qc = tk.Text(qc_frame, height=18, wrap="word", state="disabled")
+        self.voice_qc.grid(row=0, column=0, sticky="nsew")
+
+        self._voice_start_refresh()
+
+    def _voice_close_window(self) -> None:
+        self._voice_stop_playback()
+        if self.voice_window is not None:
+            self.voice_window.destroy()
+        self.voice_window = None
+
+    def _voice_workspace(self) -> Path:
+        if self.v2_controller.workspace:
+            return self.v2_controller.workspace
+        return Path(self.v2_workspace_path.get()).expanduser().resolve()
+
+    def _voice_current_job_id(self) -> str | None:
+        choice = self.voice_job_choice.get()
+        return self.voice_jobs_map.get(choice, {}).get("voice_job_id")
+
+    def _voice_selected_take(self) -> dict | None:
+        if not self.voice_current_job:
+            return None
+        for take in self.voice_current_job.get("takes", []):
+            if take["voice_take_id"] == self.voice_selected_take_id:
+                return take
+        return None
+
+    def _voice_audio_path(self, take: dict | None) -> Path | None:
+        if not take:
+            return None
+        candidate = take.get("normalized_audio_path") or take.get("raw_audio_path")
+        return Path(candidate) if candidate else None
+
+    def _voice_start_refresh(self) -> None:
+        self.voice_status_text.set("Обновление Voice Studio...")
+        workspace = self._voice_workspace()
+        base_url = self.voice_base_url.get().strip() or "http://127.0.0.1:17493"
+        current_job_id = self._voice_current_job_id()
+        threading.Thread(target=self._voice_refresh_worker, args=(workspace, base_url, current_job_id), daemon=True).start()
+
+    def _voice_refresh_worker(self, workspace: Path, base_url: str, current_job_id: str | None) -> None:
+        try:
+            jobs_payload = list_voice_jobs(workspace)
+            runtime = voice_health(base_url=base_url)
+            profiles = voice_profiles(base_url=base_url)
+            job_id = current_job_id
+            if not job_id and jobs_payload["jobs"]:
+                job_id = str(jobs_payload["jobs"][-1]["voice_job_id"])
+            job_details = voice_job_status(workspace, job_id) if job_id else None
+            self.events.put(
+                (
+                    "voice_refreshed",
+                    {
+                        "workspace": str(workspace),
+                        "runtime": runtime,
+                        "profiles": profiles,
+                        "jobs_payload": jobs_payload,
+                        "job_details": job_details,
+                        "selected_job_id": job_id,
+                    },
+                )
+            )
+        except Exception as exc:
+            self.events.put(("voice_error", str(exc)))
+
+    def _voice_start_generate(self) -> None:
+        script = self.voice_script_text.get("1.0", "end").strip()
+        if not script:
+            messagebox.showwarning("Нет текста", "Введите текст для озвучки.")
+            return
+        self.voice_status_text.set("Генерация 3 реальных Olga takes...")
+        workspace = self._voice_workspace()
+        target_text = self.voice_target_duration_ms.get().strip()
+        threading.Thread(
+            target=self._voice_generate_worker,
+            args=(
+                workspace,
+                script,
+                self.voice_profile_key.get().strip(),
+                self.voice_language.get().strip() or "en-US",
+                self.voice_engine.get().strip() or "qwen",
+                self.voice_model_size.get().strip() or "0.6B",
+                int(target_text) if target_text else None,
+                self.voice_base_url.get().strip() or "http://127.0.0.1:17493",
+            ),
+            daemon=True,
+        ).start()
+
+    def _voice_generate_worker(
+        self,
+        workspace: Path,
+        script: str,
+        profile_key: str,
+        language: str,
+        engine: str,
+        model_size: str,
+        target_duration_ms: int | None,
+        base_url: str,
+    ) -> None:
+        try:
+            result = voice_generate(
+                workspace,
+                profile_key=profile_key,
+                text=script,
+                language=language,
+                takes=3,
+                engine=engine,
+                model_size=model_size,
+                target_duration_ms=target_duration_ms,
+                base_url=base_url,
+            )
+            self.events.put(("voice_generated", result))
+        except Exception as exc:
+            self.events.put(("voice_error", str(exc)))
+
+    def _voice_on_job_selected(self, _event=None) -> None:
+        self._voice_start_refresh()
+
+    def _voice_on_take_selected(self, _event=None) -> None:
+        selected = self.voice_takes.selection()
+        self.voice_selected_take_id = selected[0] if selected else None
+        self._voice_render_take_details()
+
+    def _voice_render_take_details(self) -> None:
+        take = self._voice_selected_take()
+        if not take:
+            self._write_text(self.voice_qc, "Выберите take.")
+            return
+        qc = take.get("qc") or {}
+        alignment = take.get("alignment") or {}
+        lines = [
+            f"Take ID: {take.get('voice_take_id')}",
+            f"Generation ID: {take.get('generation_id')}",
+            f"Status: {take.get('status')}",
+            f"Duration ms: {take.get('duration_ms')}",
+            f"Audio Path: {take.get('normalized_audio_path') or take.get('raw_audio_path') or '-'}",
+            f"SHA-256: {take.get('audio_sha256') or '-'}",
+            "",
+            f"QC Transcript: {qc.get('transcript') or '-'}",
+            f"QC Warnings: {', '.join(qc.get('warnings', [])) or '-'}",
+            f"QC Errors: {', '.join(qc.get('errors', [])) or '-'}",
+            f"Integrated LUFS: {qc.get('integrated_lufs', '-')}",
+            f"Peak dBFS: {qc.get('sample_peak_dbfs', '-')}",
+            f"Leading Silence ms: {qc.get('leading_silence_ms', '-')}",
+            f"Trailing Silence ms: {qc.get('trailing_silence_ms', '-')}",
+            "",
+            f"Alignment Status: {alignment.get('status', '-')}",
+            f"voice_words.json: {alignment.get('artifact_path', '-')}",
+            f"subtitle_path: {alignment.get('subtitle_path', '-')}",
+            f"karaoke_ass_path: {alignment.get('karaoke_ass_path', '-')}",
+        ]
+        self._write_text(self.voice_qc, "\n".join(lines))
+
+    def _voice_play_selected_take(self) -> None:
+        take = self._voice_selected_take()
+        audio_path = self._voice_audio_path(take)
+        if audio_path is None or not audio_path.exists():
+            messagebox.showwarning("Нет audio", "Для выбранного take не найден WAV.")
+            return
+        self.voice_playing_path = audio_path
+        if winsound is not None:
+            winsound.PlaySound(str(audio_path), winsound.SND_FILENAME | winsound.SND_ASYNC)
+            self.voice_status_text.set(f"Воспроизведение: {audio_path.name}")
+        else:
+            self._open_path(audio_path)
+            self.voice_status_text.set(f"WAV открыт внешним приложением: {audio_path.name}")
+
+    def _voice_stop_playback(self) -> None:
+        if winsound is not None:
+            winsound.PlaySound(None, 0)
+        self.voice_playing_path = None
+
+    def _voice_open_selected_take(self) -> None:
+        take = self._voice_selected_take()
+        audio_path = self._voice_audio_path(take)
+        if audio_path is None:
+            messagebox.showwarning("Нет audio", "Для выбранного take не найден WAV.")
+            return
+        self._open_path(audio_path)
+
+    def _voice_start_align_selected(self) -> None:
+        take = self._voice_selected_take()
+        if not take:
+            messagebox.showwarning("Нет take", "Выберите take.")
+            return
+        self.voice_status_text.set(f"Alignment для {take['voice_take_id']}...")
+        workspace = self._voice_workspace()
+        threading.Thread(target=self._voice_align_worker, args=(workspace, str(take["voice_take_id"])), daemon=True).start()
+
+    def _voice_align_worker(self, workspace: Path, take_id: str) -> None:
+        try:
+            result = voice_align(workspace, take_id=take_id)
+            self.events.put(("voice_aligned", {"take_id": take_id, "result": result}))
+        except Exception as exc:
+            self.events.put(("voice_error", str(exc)))
+
+    def _voice_start_approve_selected(self) -> None:
+        take = self._voice_selected_take()
+        if not take:
+            messagebox.showwarning("Нет take", "Выберите take.")
+            return
+        self.voice_status_text.set(f"Approve для {take['voice_take_id']}...")
+        notes = self.voice_notes.get("1.0", "end").strip()
+        workspace = self._voice_workspace()
+        threading.Thread(
+            target=self._voice_approve_worker,
+            args=(
+                workspace,
+                str(take["voice_take_id"]),
+                int(self.voice_similarity.get()),
+                int(self.voice_naturalness.get()),
+                int(self.voice_pronunciation.get()),
+                int(self.voice_pacing.get()),
+                int(self.voice_emotion.get()),
+                self.voice_artifacts.get(),
+                notes,
+            ),
+            daemon=True,
+        ).start()
+
+    def _voice_approve_worker(
+        self,
+        workspace: Path,
+        take_id: str,
+        similarity: int,
+        naturalness: int,
+        pronunciation: int,
+        pacing: int,
+        emotion_style_fit: int,
+        artifacts: str,
+        notes: str,
+    ) -> None:
+        try:
+            result = voice_approve(
+                workspace,
+                take_id=take_id,
+                similarity=similarity,
+                naturalness=naturalness,
+                pronunciation=pronunciation,
+                pacing=pacing,
+                emotion_style_fit=emotion_style_fit,
+                artifacts=artifacts,
+                approve=True,
+                notes=notes,
+            )
+            self.events.put(("voice_approved", {"take_id": take_id, "result": result}))
+        except Exception as exc:
+            self.events.put(("voice_error", str(exc)))
+
+    def _voice_update_ui(self, payload: dict) -> None:
+        runtime = payload["runtime"]
+        profiles = payload["profiles"]
+        jobs_payload = payload["jobs_payload"]
+        self.voice_runtime_text.set(
+            "Runtime: "
+            f"{runtime.get('status')} | API {runtime.get('api_version')} | model_loaded={runtime.get('model_loaded')} | "
+            f"model_size={runtime.get('model_size')} | backend={runtime.get('backend_type')}/{runtime.get('backend_variant')}"
+        )
+        olga = next((item for item in profiles if str(item.get("name", "")).lower() == "olga"), None)
+        if olga:
+            self.voice_profile_text.set(
+                f"Profile: Olga | id={olga.get('profile_id')} | language={olga.get('language')} | engine={olga.get('default_engine')}"
+            )
+        else:
+            self.voice_profile_text.set("Profile: Olga not found in runtime")
+
+        self.voice_jobs_map = {}
+        values: list[str] = []
+        for job in jobs_payload["jobs"]:
+            label = (
+                f"{job['voice_job_id']} | {job['status']} | takes={job.get('take_count', 0)}"
+                f" | approved={'yes' if job.get('has_primary_approval') else 'no'}"
+            )
+            self.voice_jobs_map[label] = job
+            values.append(label)
+        self.voice_job_combo["values"] = values
+
+        selected_job_id = payload.get("selected_job_id")
+        chosen_label = next((label for label, job in self.voice_jobs_map.items() if job["voice_job_id"] == selected_job_id), "")
+        if chosen_label:
+            self.voice_job_choice.set(chosen_label)
+        elif values:
+            self.voice_job_choice.set(values[-1])
+        else:
+            self.voice_job_choice.set("")
+
+        self.voice_current_job = payload.get("job_details")
+        self.voice_takes.delete(*self.voice_takes.get_children())
+        self.voice_selected_take_id = None
+        if self.voice_current_job:
+            for take in self.voice_current_job.get("takes", []):
+                self.voice_takes.insert(
+                    "",
+                    "end",
+                    iid=str(take["voice_take_id"]),
+                    values=(
+                        take.get("take_index"),
+                        take.get("status"),
+                        take.get("duration_ms"),
+                        str(take.get("audio_sha256") or "")[:16],
+                    ),
+                )
+            takes = self.voice_current_job.get("takes", [])
+            if takes:
+                last_take = str(takes[-1]["voice_take_id"])
+                self.voice_takes.selection_set(last_take)
+                self.voice_selected_take_id = last_take
+        self._voice_render_take_details()
+        self.voice_status_text.set("Voice Studio готов. Можно прослушать takes и нажать Approve.")
+
     def _poll_events(self) -> None:
         try:
             while True:
@@ -764,6 +1250,22 @@ class App(tk.Tk):
                     self._v2_set_busy(False, "Ошибка v2 workflow.")
                     self.v2_status_text.set(f"Ошибка: {payload}")
                     messagebox.showerror("V2 workflow error", str(payload))
+                elif kind == "voice_refreshed":
+                    self._voice_update_ui(payload)
+                elif kind == "voice_generated":
+                    self.voice_status_text.set(f"Генерация завершена: job {payload['job']['voice_job_id']}")
+                    self.voice_job_choice.set("")
+                    self._voice_start_refresh()
+                elif kind == "voice_aligned":
+                    self.voice_status_text.set(f"Alignment готов для {payload['take_id']}")
+                    self._voice_start_refresh()
+                elif kind == "voice_approved":
+                    result = payload["result"]
+                    self.voice_status_text.set(f"Approve result: {result['status']} for {payload['take_id']}")
+                    self._voice_start_refresh()
+                elif kind == "voice_error":
+                    self.voice_status_text.set(f"Voice Studio error: {payload}")
+                    messagebox.showerror("Voice Studio error", str(payload))
         except queue.Empty:
             pass
         self.after(120, self._poll_events)

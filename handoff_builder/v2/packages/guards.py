@@ -41,6 +41,7 @@ def ensure_allowed_package_path(path: str) -> None:
         "assets/",
         "manifests/",
         "reports/",
+        "voice/",
     )
     if normalized in {"ai_edit_package.json", "edit_plan.json", "edit_patch.json", "render_report.json"}:
         return

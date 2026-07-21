@@ -69,6 +69,14 @@ def import_package_into_workspace(package_zip: Path, workspace: Path) -> ImportR
             raise UnsafePackageError("Edit plan handoff_id does not match package handoff.")
         if str(plan_payload["handoff_sha256"]) != imported.handoff_sha256:
             raise UnsafePackageError("Edit plan handoff_sha256 does not match package handoff.")
+        if plan_payload.get("voiceover"):
+            voiceover_path = (package_root / str(plan_payload["voiceover"]["spec_path"])).resolve()
+            if package_root not in voiceover_path.parents:
+                raise UnsafePackageError("voiceover_spec path escapes the imported package root.")
+            if not voiceover_path.exists():
+                raise UnsafePackageError(f"voiceover_spec is missing: {voiceover_path}")
+            voiceover_payload = json.loads(voiceover_path.read_text(encoding="utf-8"))
+            validate_payload("voiceover_spec", str(voiceover_payload["schema_version"]), voiceover_payload)
 
         edit_plan_id = str(plan_payload.get("plan_id") or active_plan["plan_id"])
         plan_hash = deterministic_plan_hash(plan_payload)

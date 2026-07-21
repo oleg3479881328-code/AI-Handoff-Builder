@@ -9,6 +9,23 @@ from .query_service import (
     show_render_job,
 )
 from .render_service import render_job, render_next_pending_job
+from .voice_service import (
+    voice_delegated_technical_approval,
+    list_voice_jobs,
+    voice_align,
+    voice_approve,
+    voice_generate,
+    voice_generate_from_plan,
+    voice_health,
+    voice_job_status,
+    voice_music_patch,
+    voice_mix_preview,
+    voice_profile_map,
+    voice_profile_samples,
+    voice_profiles,
+    voice_report,
+    voice_take_qc,
+)
 
 __all__ = [
     "apply_patch_in_workspace",
@@ -21,4 +38,19 @@ __all__ = [
     "retry_render_job",
     "show_plan",
     "show_render_job",
+    "voice_delegated_technical_approval",
+    "list_voice_jobs",
+    "voice_align",
+    "voice_approve",
+    "voice_generate",
+    "voice_generate_from_plan",
+    "voice_health",
+    "voice_job_status",
+    "voice_music_patch",
+    "voice_mix_preview",
+    "voice_profile_map",
+    "voice_profile_samples",
+    "voice_profiles",
+    "voice_report",
+    "voice_take_qc",
 ]

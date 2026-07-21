@@ -9,7 +9,7 @@ from ..errors import UnsupportedSchemaVersionError
 
 
 SCHEMA_ROOT = Path(__file__).resolve().parents[3] / "schemas"
-SCHEMA_TYPES = ("ai_edit_package", "edit_plan", "edit_patch", "render_report")
+SCHEMA_TYPES = ("ai_edit_package", "edit_plan", "edit_patch", "render_report", "voiceover_spec")
 SUPPORTED_SCHEMA_VERSIONS = {
     schema_type: {"1.0": SCHEMA_ROOT / schema_type / "1.0.json"}
     for schema_type in SCHEMA_TYPES
@@ -47,6 +47,15 @@ def validate_payload(schema_type: str, version: str, payload: object) -> None:
 
 def _validate_node(value: object, schema: dict, *, path: str) -> None:
     schema_type = schema.get("type")
+    if isinstance(schema_type, list):
+        last_error: ValueError | None = None
+        for item_type in schema_type:
+            try:
+                _validate_node(value, {**schema, "type": item_type}, path=path)
+                return
+            except ValueError as exc:
+                last_error = exc
+        raise last_error or ValueError(f"{path} does not match any supported type.")
     if schema_type == "object":
         if not isinstance(value, dict):
             raise ValueError(f"{path} must be an object.")
@@ -66,6 +75,12 @@ def _validate_node(value: object, schema: dict, *, path: str) -> None:
     if schema_type == "array":
         if not isinstance(value, list):
             raise ValueError(f"{path} must be an array.")
+        min_items = schema.get("minItems")
+        max_items = schema.get("maxItems")
+        if min_items is not None and len(value) < min_items:
+            raise ValueError(f"{path} must contain at least {min_items} items.")
+        if max_items is not None and len(value) > max_items:
+            raise ValueError(f"{path} must contain no more than {max_items} items.")
         item_schema = schema.get("items", {})
         for index, item in enumerate(value):
             _validate_node(item, item_schema, path=f"{path}[{index}]")
@@ -94,10 +109,27 @@ def _validate_node(value: object, schema: dict, *, path: str) -> None:
         minimum = schema.get("minimum")
         if minimum is not None and value < minimum:
             raise ValueError(f"{path} must be >= {minimum}.")
+        maximum = schema.get("maximum")
+        if maximum is not None and value > maximum:
+            raise ValueError(f"{path} must be <= {maximum}.")
         return
     if schema_type == "number":
         if not isinstance(value, (int, float)) or isinstance(value, bool):
             raise ValueError(f"{path} must be a number.")
+        minimum = schema.get("minimum")
+        if minimum is not None and value < minimum:
+            raise ValueError(f"{path} must be >= {minimum}.")
+        maximum = schema.get("maximum")
+        if maximum is not None and value > maximum:
+            raise ValueError(f"{path} must be <= {maximum}.")
+        return
+    if schema_type == "boolean":
+        if not isinstance(value, bool):
+            raise ValueError(f"{path} must be a boolean.")
+        return
+    if schema_type == "null":
+        if value is not None:
+            raise ValueError(f"{path} must be null.")
         return
     if schema_type is None:
         if "const" in schema and value != schema["const"]:

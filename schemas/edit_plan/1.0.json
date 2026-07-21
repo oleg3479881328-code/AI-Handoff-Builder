@@ -63,6 +63,14 @@
           "source_out_ms": { "type": "integer", "minimum": 0 }
         }
       }
+    },
+    "voiceover": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["spec_path"],
+      "properties": {
+        "spec_path": { "type": "string", "minLength": 1 }
+      }
     }
   }
 }
