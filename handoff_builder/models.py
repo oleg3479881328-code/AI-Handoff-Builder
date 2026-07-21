@@ -10,6 +10,7 @@ class BuilderConfig:
     project_name: str
     output_dir: Path
     include_video_proxies: bool = True
+    gps_export_mode: str = "rounded"
     worker_count: int = 2
     photo_long_side: int = 1280
     photo_quality: int = 85
@@ -21,6 +22,13 @@ class BuilderConfig:
     max_segments_per_video: int = 30
     storyboard_frames: int = 11
     overwrite: bool = False
+
+    def __post_init__(self) -> None:
+        allowed = {"exact", "rounded", "venue_label_only", "excluded"}
+        if self.gps_export_mode not in allowed:
+            raise ValueError(
+                "gps_export_mode must be one of: exact, rounded, venue_label_only, excluded"
+            )
 
 
 @dataclass(slots=True)
@@ -39,6 +47,14 @@ class AssetRecord:
     height: int | None = None
     rotation: int | None = None
     folder_category: str | None = None
+    metadata_status: str = "pending"
+    capture_time_iso: str | None = None
+    capture_time_confidence: str | None = None
+    timezone_source: str | None = None
+    gps_present: bool = False
+    device_id: str | None = None
+    chronology_rank: int | None = None
+    location_cluster_id: str | None = None
     analysis_copy: str | None = None
     proxy: str | None = None
     storyboard: str | None = None
@@ -60,6 +76,9 @@ class SceneRecord:
     keyframe_time_ms: int
     keyframe_path: str
     preview_path: str
+    chronology_rank: int | None = None
+    location_cluster_id: str | None = None
+    capture_time_iso: str | None = None
 
     def to_dict(self) -> dict[str, Any]:
         return asdict(self)
@@ -73,4 +92,5 @@ class BuildResult:
     validation_path: Path
     validation: dict[str, Any]
     failed_sources: list[str]
+    metadata_warnings_path: Path | None = None
     canceled: bool = False

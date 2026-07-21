@@ -54,12 +54,19 @@ def _main_v1(argv: list[str]) -> int:
     parser.add_argument("--output", required=True, help="Output directory")
     parser.add_argument("--project", required=True, help="Project name")
     parser.add_argument("--no-proxies", action="store_true", help="Do not include full video proxies")
+    parser.add_argument(
+        "--gps-export-mode",
+        choices=["exact", "rounded", "venue_label_only", "excluded"],
+        default="rounded",
+        help="How GPS metadata should be exported into the handoff package.",
+    )
     args = parser.parse_args(argv)
 
     config = BuilderConfig(
         project_name=args.project,
         output_dir=Path(args.output),
         include_video_proxies=not args.no_proxies,
+        gps_export_mode=args.gps_export_mode,
     )
     builder = HandoffBuilder(
         config,

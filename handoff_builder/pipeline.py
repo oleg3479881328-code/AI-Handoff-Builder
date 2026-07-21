@@ -11,6 +11,7 @@ from PIL import Image, ImageOps
 
 from .contact_sheets import build_contact_sheet, paginate_contact_sheets
 from .ffmpeg_tools import FFmpegTools
+from .metadata import AssetMetadataBuilder, METADATA_SCHEMA_VERSION
 from .models import AssetRecord, BuildResult, BuilderConfig, SceneRecord
 from .utils import (
     human_bytes,
@@ -51,6 +52,7 @@ class HandoffBuilder:
         self.project_root = project_root
         self.cancel_event = threading.Event()
         self.ffmpeg = FFmpegTools(project_root, cancel_event=self.cancel_event)
+        self.metadata = AssetMetadataBuilder(config, project_root=project_root)
 
     def cancel(self) -> None:
         self.cancel_event.set()
@@ -216,6 +218,7 @@ class HandoffBuilder:
 
         assets: list[AssetRecord] = []
         scenes: list[SceneRecord] = []
+        asset_index: dict[str, AssetRecord] = {}
         work_items: list[tuple[Path, AssetRecord]] = []
         registry_failures: list[tuple[Path, str]] = []
 
@@ -247,6 +250,7 @@ class HandoffBuilder:
                     folder_category=category,
                 )
                 assets.append(asset)
+                asset_index[asset.asset_id] = asset
                 work_items.append((source, asset))
             except Exception as exc:
                 registry_failures.append((source, str(exc)))
@@ -284,6 +288,8 @@ class HandoffBuilder:
                         self.log(f"FAILED: {source.name}: {exc}")
                     completed += 1
                     self.progress(completed / total, f"{completed}/{total}: {source.name}")
+
+        metadata_result = self.metadata.build(assets)
 
         photo_items = [
             (package_root / asset.analysis_copy, asset.relative_source_path)
@@ -340,9 +346,49 @@ class HandoffBuilder:
                 if rel and not (package_root / rel).exists():
                     missing_paths.append(rel)
         for scene in scenes:
+            source_asset = asset_index.get(scene.asset_id)
+            if source_asset:
+                scene.chronology_rank = source_asset.chronology_rank
+                scene.location_cluster_id = source_asset.location_cluster_id
+                scene.capture_time_iso = source_asset.capture_time_iso
             for rel in (scene.keyframe_path, scene.preview_path):
                 if not (package_root / rel).exists():
                     missing_paths.append(rel)
+
+        metadata_dir = package_root / "metadata"
+        json_dump(
+            metadata_dir / "asset_metadata_raw.json",
+            {
+                "schema_version": METADATA_SCHEMA_VERSION,
+                "tool_status": metadata_result.tool_status,
+                "assets": metadata_result.raw_records,
+            },
+        )
+        json_dump(
+            metadata_dir / "asset_metadata_normalized.json",
+            {
+                "schema_version": METADATA_SCHEMA_VERSION,
+                "gps_export_mode": self.config.gps_export_mode,
+                "assets": metadata_result.normalized_records,
+            },
+        )
+        json_dump(metadata_dir / "device_clock_profiles.json", metadata_result.device_clock_profiles)
+        json_dump(metadata_dir / "chronology_report.json", metadata_result.chronology_report)
+        json_dump(metadata_dir / "location_clusters.json", metadata_result.location_clusters)
+        json_dump(package_root / "metadata_warnings.json", metadata_result.warnings_payload)
+
+        metadata_ids = [record["asset_id"] for record in metadata_result.normalized_records]
+        duplicate_metadata_ids = sorted({value for value in metadata_ids if metadata_ids.count(value) > 1})
+        metadata_hard_failures: list[str] = []
+        if len(metadata_result.normalized_records) != len(assets):
+            metadata_hard_failures.append("metadata record count does not match asset count")
+        if len(metadata_ids) != len(set(metadata_ids)):
+            metadata_hard_failures.append("duplicate asset_id in metadata records")
+        if any(not value for value in metadata_ids):
+            metadata_hard_failures.append("missing asset_id in metadata records")
+        missing_manifest_metadata = sorted(asset.asset_id for asset in assets if asset.asset_id not in set(metadata_ids))
+        if missing_manifest_metadata:
+            metadata_hard_failures.append("manifest references assets without metadata records")
 
         validation = {
             "schema_version": "1.0",
@@ -355,6 +401,35 @@ class HandoffBuilder:
             "video_assets_represented": len(source_videos) - len(videos_without_scenes),
             "photo_assets_represented": len(source_photos) - len(photos_without_copies),
             "scene_count": len(scenes),
+            "metadata_records_total": metadata_result.coverage_summary["metadata_records_total"],
+            "assets_with_capture_time": metadata_result.coverage_summary["assets_with_capture_time"],
+            "assets_with_gps": metadata_result.coverage_summary["assets_with_gps"],
+            "assets_with_device_identity": metadata_result.coverage_summary["assets_with_device_identity"],
+            "assets_using_filename_fallback": metadata_result.coverage_summary["assets_using_filename_fallback"],
+            "assets_using_filesystem_fallback": metadata_result.coverage_summary["assets_using_filesystem_fallback"],
+            "missing_metadata_count": metadata_result.coverage_summary["missing_metadata_count"],
+            "extraction_error_count": metadata_result.coverage_summary["extraction_error_count"],
+            "gps_export_mode": metadata_result.coverage_summary["gps_export_mode"],
+            "metadata_coverage_status": metadata_result.coverage_summary["metadata_coverage_status"],
+            "metadata_status_counts": {
+                "ok": metadata_result.coverage_summary["ok_count"],
+                "partial": metadata_result.coverage_summary["partial_count"],
+                "missing": metadata_result.coverage_summary["missing_count"],
+                "error": metadata_result.coverage_summary["error_count"],
+            },
+            "metadata_tool_status": metadata_result.tool_status,
+            "metadata_warning_count": len(metadata_result.warnings_payload["warnings"]),
+            "metadata_warning_path": "metadata_warnings.json",
+            "metadata_report_paths": {
+                "raw": "metadata/asset_metadata_raw.json",
+                "normalized": "metadata/asset_metadata_normalized.json",
+                "device_clock_profiles": "metadata/device_clock_profiles.json",
+                "chronology_report": "metadata/chronology_report.json",
+                "location_clusters": "metadata/location_clusters.json",
+            },
+            "metadata_hard_failures": metadata_hard_failures,
+            "missing_manifest_metadata": missing_manifest_metadata,
+            "duplicate_metadata_ids": duplicate_metadata_ids,
             "videos_without_scenes": [a.asset_id for a in videos_without_scenes],
             "photos_without_analysis_copies": [a.asset_id for a in photos_without_copies],
             "failed_assets": [
@@ -371,6 +446,7 @@ class HandoffBuilder:
                 and not videos_without_scenes
                 and not photos_without_copies
                 and not missing_paths
+                and not metadata_hard_failures
             ),
         }
 
@@ -387,6 +463,7 @@ class HandoffBuilder:
                 "short_video_seconds": self.config.short_video_seconds,
                 "fallback_segment_seconds": self.config.fallback_segment_seconds,
                 "max_segments_per_video": self.config.max_segments_per_video,
+                "gps_export_mode": self.config.gps_export_mode,
             },
             "summary": validation,
             "assets": [asset.to_dict() for asset in assets],
@@ -399,6 +476,7 @@ class HandoffBuilder:
             "schema_version": "1.0",
             "project_name": self.config.project_name,
             "scene_count": len(scenes),
+            "gps_export_mode": self.config.gps_export_mode,
             "scenes": [scene.to_dict() for scene in scenes],
         }
 
@@ -418,6 +496,10 @@ SUMMARY
 - Scenes/coverage segments: {len(scenes)}
 - Failed assets: {len(failed)}
 - Coverage OK: {validation['coverage_ok']}
+- Metadata records: {validation['metadata_records_total']}
+- Assets with capture time: {validation['assets_with_capture_time']}
+- Assets with GPS: {validation['assets_with_gps']}
+- Metadata warnings: {validation['metadata_warning_count']}
 
 IMPORTANT
 Every source video must have at least one keyframe and one preview.
@@ -429,6 +511,12 @@ FILES
 - handoff_manifest.json
 - scene_manifest.json
 - validation_report.json
+- metadata/asset_metadata_raw.json
+- metadata/asset_metadata_normalized.json
+- metadata/device_clock_profiles.json
+- metadata/chronology_report.json
+- metadata/location_clusters.json
+- metadata_warnings.json
 - photo_analysis_copies/
 - video_proxies/
 - scene_keyframes/
@@ -465,5 +553,6 @@ FILES
             validation_path=package_root / "validation_report.json",
             validation=validation,
             failed_sources=[asset.source_path for asset in failed if asset.source_path],
+            metadata_warnings_path=package_root / "metadata_warnings.json",
             canceled=False,
         )

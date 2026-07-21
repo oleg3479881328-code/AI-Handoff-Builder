@@ -43,8 +43,10 @@ class App(tk.Tk):
         self.output_dir = tk.StringVar(value=str(Path.home() / "Desktop"))
         self.project_name = tk.StringVar(value="WEDDING_PROJECT")
         self.include_proxies = tk.BooleanVar(value=True)
+        self.gps_export_mode = tk.StringVar(value="rounded")
         self.progress_value = tk.DoubleVar(value=0.0)
         self.status_text = tk.StringVar(value="Добавьте ZIP, папку или медиафайлы.")
+        self.metadata_status_text = tk.StringVar(value="ExifTool: unknown")
         self.events: queue.Queue[tuple[str, object]] = queue.Queue()
         self.last_output: Path | None = None
         self.last_result: BuildResult | None = None
@@ -143,14 +145,22 @@ class App(tk.Tk):
             text="Включить лёгкие 720p video proxies в ZIP",
             variable=self.include_proxies,
         ).grid(row=2, column=1, sticky="w", pady=(8, 0))
-        ttk.Label(settings, text="Параллельных workers:").grid(row=3, column=0, sticky="w", pady=(8, 0))
+        ttk.Label(settings, text="GPS export mode:").grid(row=3, column=0, sticky="w", pady=(8, 0))
+        ttk.Combobox(
+            settings,
+            textvariable=self.gps_export_mode,
+            values=("exact", "rounded", "venue_label_only", "excluded"),
+            state="readonly",
+        ).grid(row=3, column=1, sticky="w", padx=(8, 0), pady=(8, 0))
+        ttk.Label(settings, text="Параллельных workers:").grid(row=4, column=0, sticky="w", pady=(8, 0))
         ttk.Spinbox(settings, from_=1, to=2, textvariable=self.worker_count, width=8).grid(
-            row=3, column=1, sticky="w", padx=(8, 0), pady=(8, 0)
+            row=4, column=1, sticky="w", padx=(8, 0), pady=(8, 0)
         )
         settings.columnconfigure(1, weight=1)
 
         ttk.Progressbar(outer, variable=self.progress_value, maximum=100).pack(fill="x")
         ttk.Label(outer, textvariable=self.status_text).pack(anchor="w", pady=(6, 6))
+        ttk.Label(outer, textvariable=self.metadata_status_text).pack(anchor="w", pady=(0, 6))
 
         actions = ttk.Frame(outer)
         actions.pack(fill="x")
@@ -372,6 +382,7 @@ class App(tk.Tk):
                 project_name=self.project_name.get().strip(),
                 output_dir=Path(self.output_dir.get()).expanduser(),
                 include_video_proxies=self.include_proxies.get(),
+                gps_export_mode=self.gps_export_mode.get(),
                 worker_count=max(1, min(2, int(self.worker_count.get()))),
             )
             builder = HandoffBuilder(
@@ -422,6 +433,10 @@ class App(tk.Tk):
             f"{summary.get('video_assets_represented', 0)} videos represented",
             f"{summary.get('source_photo_count', 0)} photos found",
             f"{summary.get('photo_assets_represented', 0)} photos represented",
+            f"{summary.get('metadata_records_total', 0)} metadata records",
+            f"{summary.get('assets_with_capture_time', 0)} assets with capture time",
+            f"{summary.get('assets_with_gps', 0)} assets with GPS",
+            f"{summary.get('metadata_status_counts', {}).get('partial', 0)} partial metadata records",
             f"{summary.get('failed_asset_count', 0)} lost files",
             f"Coverage OK: {coverage_ok}",
         ]
@@ -435,6 +450,22 @@ class App(tk.Tk):
                 text=f"Export is not a green success because coverage_ok=false. Failed assets: {len(failed)}",
                 wraplength=460,
             ).pack(anchor="w", pady=(14, 0))
+
+        metadata_tool = summary.get("metadata_tool_status", {}).get("exiftool", {})
+        ttk.Label(
+            body,
+            text=(
+                f"ExifTool status: {metadata_tool.get('status', 'unknown')} | "
+                f"GPS mode: {summary.get('gps_export_mode', '-')}"
+            ),
+            wraplength=460,
+        ).pack(anchor="w", pady=(14, 0))
+
+        ttk.Label(
+            body,
+            text=f"Metadata warnings: {summary.get('metadata_warning_count', 0)} at metadata_warnings.json",
+            wraplength=460,
+        ).pack(anchor="w", pady=(8, 0))
 
         ttk.Button(body, text="Закрыть", command=window.destroy).pack(anchor="e", pady=(18, 0))
 
@@ -1185,6 +1216,12 @@ class App(tk.Tk):
                     self.retry_button.configure(state="normal" if self.last_failed_sources else "disabled")
                     self.open_button.configure(state="normal")
                     coverage_ok = bool(result.validation.get("coverage_ok"))
+                    exiftool_status = (
+                        result.validation.get("metadata_tool_status", {})
+                        .get("exiftool", {})
+                        .get("status", "unknown")
+                    )
+                    self.metadata_status_text.set(f"ExifTool: {exiftool_status}")
                     if coverage_ok:
                         self.status_text.set(f"Готово: {self.last_output.name}")
                         messagebox.showinfo("Готово", f"Создан файл:\n{self.last_output}")
@@ -1200,6 +1237,7 @@ class App(tk.Tk):
                     self.cancel_button.configure(state="disabled")
                     self.retry_button.configure(state="normal" if self.last_failed_sources else "disabled")
                     self.status_text.set("Ошибка")
+                    self.metadata_status_text.set("ExifTool: unknown")
                     self._append_log(f"ERROR: {payload}")
                     messagebox.showerror("Ошибка", str(payload))
                 elif kind == "v2_state":
