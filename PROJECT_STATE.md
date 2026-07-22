@@ -1,10 +1,10 @@
 # Current State
 
-- Date: 2026-07-20
+- Date: 2026-07-22
 - Repository: `oleg3479881328-code/AI-Handoff-Builder`
 - Active contract: `Yt-Dlp-Download-Manager` issue `#67`
-- Current branch: `feat/v2-gui-patch-loop`
-- Current phase: milestone 5 desktop GUI workflow and immutable patch rerender loop implemented locally; pending review push/report
+- Current branch: `feat/local-voice-studio-v1`
+- Current phase: Local Voice Studio coordinator review rerun completed locally; pending review push/report
 
 ## What Exists Now
 
@@ -18,13 +18,13 @@
 
 ## Current Focus
 
-Land the first owner-facing v2 desktop workflow without changing accepted v1 behavior.
+Land the Local Voice Studio approval workflow inside the existing desktop app, with real Olga takes, duration-gated delegated approval, alignment artifacts, preview rerender loop, and coordinator-ready proof.
 
 ## Immediate Next Actions
 
-1. Push and report the milestone 5 branch.
-2. Review the desktop patch loop and exact-workspace contract before widening supported operations.
-3. Keep broader effects, music/text/TTS families, and final/full-quality rendering deferred until this slice is accepted.
+1. Push and report the Local Voice Studio coordinator-ready branch.
+2. Wait for coordinator review before widening voice/model/runtime scope beyond the accepted local slice.
+3. Keep broader effects, extra voice families, and non-local runtime paths deferred until this slice is accepted.
 
 ## Published Baseline
 
@@ -120,6 +120,50 @@ Land the first owner-facing v2 desktop workflow without changing accepted v1 beh
 - No new second application.
 - No cloud rendering.
 - Keep scope inside the issue `#67` contract unless the owner changes it.
+
+## Local Voice Studio Results
+
+- Extended the existing standalone app with Local Voice Studio inside the same Tkinter desktop surface:
+  - runtime/profile refresh
+  - generate 3 real Olga takes
+  - listen/open selected WAV
+  - inspect QC details
+  - manual approve
+  - delegated technical approval
+- Added local voice services and CLI coverage for:
+  - runtime health and profile inspection
+  - profile mapping
+  - multi-take generation
+  - QC inspection
+  - alignment artifacts (`voice_words.json`, `transcript.srt`, `voice_karaoke.ass`)
+  - preview mix
+  - music-only patch rerender loop
+  - voice report export
+- Hardened delegated approval and duration policy:
+  - effective duration tolerance is clamped to `3.0%`
+  - maximum auto-tempo correction is clamped to `8.0%`
+  - no take can be auto-approved unless transcript is exact and duration is within the allowed policy
+  - if no take qualifies, status becomes `voiceover_needs_rewrite`
+  - corrected approvals persist original/corrected SHA-256 and corrected QC
+- Fixed preview mix provenance so `approved_voice_sha256` is computed from the actual approved audio path, including normalized audio when tempo correction is applied.
+- Added regression and boundary tests covering:
+  - exactly `8%` duration delta is allowed with correction
+  - duration above `8%` without correction is rejected
+  - no exact-text eligible take results in rewrite instead of best-bad approval
+- Real coordinator rerun completed on July 22, 2026:
+  - workspace: `C:\Users\oleg3\Documents\AI Handoff Builder voice\tmp_voice_e2e_6\Свадебный final proof & Oleg's\voice-workspace`
+  - job: `8c8c41b1e0886bf351ff`
+  - take 1: exact text, `10800 ms`, `8.474576%` delta, correctly not eligible
+  - take 2: `11360 ms` but transcript mismatch, correctly not eligible
+  - take 3: exact text, `12000 ms`, `1.694915%` delta, correctly approved
+  - preview + patch chain created `mix_v001` through `mix_v004`
+  - stems, subtitles, karaoke ASS, and final rerender artifacts were produced
+  - GUI smoke proved Voice Studio opens on the final workspace with 3 real takes visible and `Approve Selected Take` available
+  - bounded runtime recovery proved one failed refresh on an unavailable port followed by successful recovery on `17493`
+- Validation on branch:
+  - `python -m pytest -q` -> `66 passed`
+  - `python -m compileall handoff_builder app.py` -> success
+  - `git diff --check` -> clean aside from line-ending warnings
 
 ## Milestone 5 Results
 

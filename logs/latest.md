@@ -1,64 +1,77 @@
 # Latest Log
 
-Date: 2026-07-20
-Step: Milestone 5 desktop GUI workflow + immutable patch rerender loop
+Date: 2026-07-22
+Step: Coordinator review rerun for Local Voice Studio duration approval defect
 
 ## Completed
 
-- Read the Milestone 5 handoff page in Notion and used it as the active execution contract.
-- Re-verified accepted Milestone 4 branch `feat/v2-preview-render-worker` at SHA `e8cc5113657c45ce7b10db261af549d0e978972a`.
-- Created feature branch `feat/v2-gui-patch-loop`.
-- Added `docs/milestone-5-gui-patch-decision.md` with explicit reuse / adapt / reject notes for Tkinter, v2 services, SQLite lineage, and patch safety.
-- Switched `v2 init-project` to an exact-workspace contract to remove accidental double nesting.
-- Added immutable patch application with additive SQLite lineage and idempotent patch reuse.
-- Added CLI commands `v2 apply-patch`, `v2 plan-list`, and `v2 plan-show`.
-- Added queue query / retry / cancel services and cancel-aware FFmpeg rendering.
-- Extended the existing Tkinter desktop app with v2 owner-facing sections for:
-  - workspace create/open
-  - package import
-  - render queue operations
-  - results / QC inspection
-  - patch import and rerender
-- Added a headless-testable `V2RunnerController` to keep service logic outside widget callbacks.
-- Added bounded tests for patch lineage, rollback, exact-workspace behavior, and GUI controller state transitions.
+- Read the updated Notion handoff page and executed only the `COORDINATOR REVIEW` priority.
+- Continued work on branch `feat/local-voice-studio-v1` in the dedicated voice worktree.
+- Hardened delegated technical approval so approval now requires:
+  - exact transcript match
+  - duration inside the effective policy
+  - no technical errors
+- Clamped effective duration policy to:
+  - `duration_tolerance_percent <= 3.0`
+  - `max_auto_tempo_percent <= 8.0`
+- Changed delegated approval fallback so no candidate meeting the policy now returns `voiceover_needs_rewrite` instead of approving the least-bad take.
+- Persisted richer approval evidence:
+  - `original_audio_sha256`
+  - `approved_audio_sha256`
+  - corrected SHA/QC metadata when tempo correction is used
+- Fixed voice mix preview to hash the actual approved audio path rather than trusting stale take metadata.
+- Added/updated regression coverage for:
+  - exact `8%` correction boundary
+  - rejection above `8%` without correction
+  - rewrite path when no exact-text duration-safe take exists
+- Re-ran the full real local workflow on a fresh imported package:
+  - workspace: `C:\Users\oleg3\Documents\AI Handoff Builder voice\tmp_voice_e2e_6\Свадебный final proof & Oleg's\voice-workspace`
+  - package: `AI_EDIT_PACKAGE_voice_e2e_6.zip`
+  - plan: `plan-voice-e2e-6`
+  - voice job: `8c8c41b1e0886bf351ff`
+- Produced 3 real Olga takes with the deterministic seed set `[12011, 12022, 12033]`:
+  - take 1 `a40b480b13d3822481d3`: `10800 ms`, exact text, `8.474576%` delta, correctly ineligible
+  - take 2 `de5c108ff029994ff5d0`: `11360 ms`, transcript mismatch, correctly ineligible
+  - take 3 `378d691e77a2ba1bdd50`: `12000 ms`, exact text, `1.694915%` delta, correctly approved
+- Generated downstream artifacts from the approved take:
+  - `voice_words.json`
+  - `transcript.srt`
+  - `voice_karaoke.ass`
+  - preview `mix_v001`
+  - music-only patch rerenders through `mix_v004`
+  - separated stems for original/music/voice
+- Captured GUI proof that Voice Studio opens on the final workspace with:
+  - healthy runtime
+  - 3 real Olga takes visible
+  - approved take selected
+  - `Approve Selected Take` present
+- Captured bounded runtime recovery proof:
+  - failed refresh against `http://127.0.0.1:17494`
+  - successful recovery against `http://127.0.0.1:17493`
+  - same approved job/takes restored after refresh
 
 ## Verification
 
-- `python -m pytest -q` -> `50 passed`
-- `python -m handoff_builder.cli --help` -> success
-- `python -m handoff_builder.cli v2 --help` -> success
-- `python -m handoff_builder.cli v2 apply-patch --help` -> success
-- `python -m handoff_builder.cli v2 plan-list --help` -> success
-- `python -m handoff_builder.cli v2 plan-show --help` -> success
-- `python -c "import handoff_builder.v2"` -> success
-- `git diff --check` -> pending final branch sweep
-- real Windows Tkinter GUI smoke -> completed on July 20, 2026
-  - workspace path: `C:\Users\oleg3\Documents\AI Handoff Builder v1\tmp_gui_smoke_m5\Рабочая папка & Oleg's\gui-workspace`
-  - imported package through the desktop app
-  - base plan: `plan-gui-1`
-  - base plan hash: `0ea3280b5450003aec615f0a1898e495651aa249d88a8f7876381e868fb73e3c`
-  - base render job: `ab80c272926cb2713356`
-  - derived plan: `a33c4e273f630ec12212`
-  - derived plan version: `2`
-  - derived plan hash: `fb4378b5d91881248b5846397b3c7c3f3dba5044b6e5a043d63b43f25a83ae71`
-  - derived render job: `185805b03f892b22b8d2`
-  - both outputs remained available
-  - `first_frame.jpg` displayed and existed for the rerendered output
-  - rerender QC stayed green: `720x1280`, ~`30 fps`, duration within tolerance, audio present, first-frame extracted
-
-## Reuse / Adapt
-
-- Reuse: existing Tkinter `threading + Queue + after()` pattern, v2 import/render/QC services, SQLite transaction boundaries, ZIP safety, hashing, and CLI compatibility.
-- Adapt: exact-workspace initialization, synthetic stable `operation_id` normalization for imported base plans, additive patch lineage, and owner-facing render cancellation.
+- `python -m pytest -q` -> `66 passed`
+- `python -m compileall handoff_builder app.py` -> success
+- `git diff --check` -> clean aside from line-ending warnings
+- real GUI proof artifacts:
+  - `tmp_voice_e2e_6\voice_studio_gui_proof.png`
+  - `tmp_voice_e2e_6\voice_studio_gui_proof.txt`
+- runtime recovery proof:
+  - `tmp_voice_e2e_6\voice_runtime_recovery.txt`
+- final chain/report artifacts:
+  - `tmp_voice_e2e_6\final_mix_chain.json`
+  - `voice\reports\8c8c41b1e0886bf351ff.json`
 
 ## Notes
 
-- Generic JSON Patch / JSON Merge Patch was reviewed only as reference and rejected as the primary contract because it would allow writes outside the narrow patch allowlist.
-- Patch idempotency is keyed by `project_id + patch_sha256 + base_plan_id`.
-- Previous plans, render jobs, reports, and outputs remain immutable and available after rerender.
+- Voicebox runtime was restarted locally on `17493` with the existing installed server and the loaded `0.6B` model before the final rerun.
+- Package import required keeping only the video asset inside `edit_plan.assets`; music remained an external input for preview mix commands.
+- The final approved take did not need tempo correction, so `approved_audio_sha256 == original_audio_sha256 == c2f052152cd1dc6301ba750e22d53794cee43b7f357b15ff7a98ed4731a4fc05`.
 
 ## Next
 
-- Run the final branch-wide validation sweep and verify local/remote SHA match after push.
-- Create the dedicated Milestone 5 execution report page in Notion.
-- Wait for owner review before widening supported renderer operations beyond the current patch allowlist.
+- Commit the coordinator review fix set.
+- Update the existing Notion execution report page only.
+- Wait for coordinator review. No merge.

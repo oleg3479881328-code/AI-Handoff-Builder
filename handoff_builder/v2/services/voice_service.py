@@ -22,6 +22,8 @@ from ..voice.qc import inspect_generated_audio
 
 
 DEFAULT_VOICEBOX_URL = "http://127.0.0.1:17493"
+DEFAULT_DURATION_TOLERANCE_PERCENT = 3.0
+MAX_AUTO_TEMPO_PERCENT = 8.0
 
 
 def voice_health(*, base_url: str = DEFAULT_VOICEBOX_URL) -> dict[str, Any]:
@@ -105,6 +107,10 @@ def voice_generate(
     base_url: str = DEFAULT_VOICEBOX_URL,
 ) -> dict[str, Any]:
     workspace_root = workspace.resolve()
+    duration_tolerance_percent, max_auto_tempo_percent = _effective_duration_policy(
+        duration_tolerance_percent,
+        max_auto_tempo_percent,
+    )
     runtime_client = VoiceboxClient(base_url)
     runtime_info = runtime_client.health_check()
     if runtime_info.status != "healthy":
@@ -340,6 +346,7 @@ def voice_delegated_technical_approval(
         ranked = sorted(
             evaluated,
             key=lambda item: (
+                1 if not item["eligible_for_approval"] else 0,
                 1 if item["technical_error"] else 0,
                 item["wer"],
                 item["duration_delta_percent"],
@@ -349,13 +356,15 @@ def voice_delegated_technical_approval(
                 item["take_index"],
             ),
         )
-        chosen = ranked[0]
+        eligible = [item for item in ranked if item["eligible_for_approval"]]
+        chosen = eligible[0] if eligible else ranked[0]
         review_payload = {
             "approval_mode": "delegated_technical_approval",
-            "approve": True,
+            "approve": bool(eligible),
             "notes": notes or "Delegated technical approval based on local transcription, duration, silence, clipping, and render safety metrics.",
             "comparative_metrics": ranked,
             "tie_breaker_order": [
+                "eligible_for_approval",
                 "technical_error",
                 "wer",
                 "duration_delta_percent",
@@ -365,6 +374,43 @@ def voice_delegated_technical_approval(
                 "take_index",
             ],
         }
+        if not eligible:
+            review_payload["rejection_reason"] = "no_take_met_exact_text_and_duration_policy"
+            connection.execute("BEGIN")
+            repo.add_review(take_id=str(chosen["take_id"]), review_payload=review_payload)
+            repo.set_approval(
+                voice_job_id=voice_job_id,
+                take_id=str(chosen["take_id"]),
+                approved=False,
+                approval_payload={
+                    "approval_mode": "delegated_technical_approval",
+                    "review": review_payload,
+                    "duration_result": {
+                        "target_duration_ms": spec["voiceover"].get("target_duration_ms"),
+                        "actual_duration_ms": chosen["duration_ms"],
+                        "tempo_applied": False,
+                        "delta_percent": round(chosen["duration_delta_percent"], 3),
+                    },
+                    "approved_at": utc_now_iso(),
+                },
+            )
+            repo.update_voice_job_status(voice_job_id, "voiceover_needs_rewrite")
+            repo.add_event(
+                voice_job_id=voice_job_id,
+                event_type="voiceover_needs_rewrite",
+                payload={
+                    "take_id": str(chosen["take_id"]),
+                    "approval_mode": "delegated_technical_approval",
+                    "reason": "no_take_met_exact_text_and_duration_policy",
+                },
+            )
+            connection.commit()
+            return {
+                "take_id": str(chosen["take_id"]),
+                "status": "voiceover_needs_rewrite",
+                "comparative_metrics": ranked,
+                "reason": "no_take_met_exact_text_and_duration_policy",
+            }
         connection.execute("BEGIN")
         repo.add_review(take_id=str(chosen["take_id"]), review_payload=review_payload)
         connection.commit()
@@ -453,6 +499,7 @@ def voice_mix_preview(
         if approval is None or str(approval["voice_take_id"]) != take_id:
             raise ValueError("Preview voice mix requires the approved primary take.")
         audio_path = Path(take["normalized_audio_path"] or take["raw_audio_path"])
+        approved_voice_sha256 = compute_sha256(audio_path) if audio_path.exists() else ""
         version = len(repo.list_mix_patches(str(take["voice_job_id"]))) + 1
         output_dir = Path(job["spec_path"]).parent / "renders"
         output_dir.mkdir(parents=True, exist_ok=True)
@@ -476,7 +523,7 @@ def voice_mix_preview(
             "video_path": str(video_path),
             "music_path": str(music_path) if music_path else None,
             "voice_take_id": take_id,
-            "approved_voice_sha256": str(take.get("audio_sha256") or ""),
+            "approved_voice_sha256": approved_voice_sha256,
             "voice_gain_percent": float(voice_gain_percent),
             "music_gain_percent": float(music_gain_percent),
             "original_audio_gain_percent": float(original_audio_gain_percent),
@@ -505,7 +552,7 @@ def voice_mix_preview(
             "render_plan_path": str(result.render_plan_path),
             "stem_paths": {name: str(path) for name, path in result.stem_paths.items()},
             "metrics": result.metrics,
-            "approved_voice_sha256": str(take.get("audio_sha256") or ""),
+            "approved_voice_sha256": approved_voice_sha256,
         }
     finally:
         connection.close()
@@ -880,14 +927,20 @@ def _apply_take_approval(
 ) -> dict[str, Any]:
     normalized_path = None
     target_duration_ms = spec["voiceover"].get("target_duration_ms")
-    max_auto = float(spec["voiceover"].get("max_auto_tempo_percent") or 8.0)
-    tolerance = float(spec["voiceover"].get("duration_tolerance_percent") or 3.0)
+    tolerance, max_auto = _effective_duration_policy(
+        spec["voiceover"].get("duration_tolerance_percent"),
+        spec["voiceover"].get("max_auto_tempo_percent"),
+    )
     duration_ms = int(take.get("duration_ms") or 0)
+    source_audio_path = Path(take["raw_audio_path"])
     status = "approved"
     duration_result: dict[str, Any] = {
         "target_duration_ms": target_duration_ms,
         "actual_duration_ms": duration_ms,
         "tempo_applied": False,
+        "duration_tolerance_percent": tolerance,
+        "max_auto_tempo_percent": max_auto,
+        "original_audio_sha256": compute_sha256(source_audio_path) if source_audio_path.exists() else None,
     }
     if target_duration_ms and duration_ms > 0:
         delta_percent = abs((duration_ms - target_duration_ms) / target_duration_ms * 100)
@@ -897,11 +950,25 @@ def _apply_take_approval(
             normalized_dir.mkdir(parents=True, exist_ok=True)
             normalized_path = normalized_dir / f"{take['voice_take_id']}_approved.wav"
             factor = duration_ms / target_duration_ms
-            _apply_atempo(ffmpeg_path, Path(take["raw_audio_path"]), normalized_path, factor)
+            _apply_atempo(ffmpeg_path, source_audio_path, normalized_path, factor)
             duration_result["tempo_applied"] = True
             duration_result["atempo_factor"] = round(factor, 6)
+            corrected_qc = _inspect_approved_audio(
+                repo=repo,
+                take=take,
+                spec=spec,
+                audio_path=normalized_path,
+            )
+            duration_result["corrected_audio_sha256"] = corrected_qc["audio_sha256"]
+            duration_result["corrected_duration_ms"] = corrected_qc["duration_ms"]
+            duration_result["corrected_qc"] = corrected_qc
         elif delta_percent > max_auto:
             status = "voiceover_needs_rewrite"
+    approved_audio_path = normalized_path or source_audio_path
+    duration_result["approved_audio_sha256"] = (
+        duration_result.get("corrected_audio_sha256")
+        or (compute_sha256(approved_audio_path) if approved_audio_path.exists() else None)
+    )
 
     approval_payload = {
         "approval_mode": approval_mode,
@@ -966,14 +1033,28 @@ def _evaluate_take_for_delegated_approval(
     expected_tokens = _normalize_words(str(spec["voiceover"]["text"]))
     actual_tokens = _normalize_words(transcript_text)
     wer = _word_error_rate(expected_tokens, actual_tokens)
+    transcript_exact_match = expected_tokens == actual_tokens
     target_duration_ms = spec["voiceover"].get("target_duration_ms")
     actual_duration_ms = int(take.get("duration_ms") or qc.get("duration_ms") or 0)
+    tolerance, max_auto = _effective_duration_policy(
+        spec["voiceover"].get("duration_tolerance_percent"),
+        spec["voiceover"].get("max_auto_tempo_percent"),
+    )
     if target_duration_ms and actual_duration_ms:
         duration_delta_percent = round(abs((actual_duration_ms - int(target_duration_ms)) / int(target_duration_ms) * 100), 6)
     else:
         duration_delta_percent = 0.0
     errors = list(qc.get("errors") or [])
     warnings = list(qc.get("warnings") or [])
+    duration_within_tolerance = bool(not target_duration_ms or duration_delta_percent <= tolerance)
+    duration_within_auto_tempo_limit = bool(not target_duration_ms or duration_delta_percent <= max_auto)
+    requires_tempo_correction = bool(target_duration_ms and duration_delta_percent > tolerance and duration_delta_percent <= max_auto)
+    eligible_for_approval = bool(
+        not errors
+        and (take.get("raw_audio_path") or take.get("normalized_audio_path"))
+        and transcript_exact_match
+        and duration_within_auto_tempo_limit
+    )
     return {
         "take_id": str(take["voice_take_id"]),
         "take_index": int(take.get("take_index") or 0),
@@ -981,9 +1062,15 @@ def _evaluate_take_for_delegated_approval(
         "audio_sha256": str(take.get("audio_sha256") or qc.get("audio_sha256") or ""),
         "transcript_source": transcript_source,
         "transcript": transcript_text,
+        "transcript_exact_match": transcript_exact_match,
         "wer": round(wer, 6),
         "duration_ms": actual_duration_ms,
         "duration_delta_percent": duration_delta_percent,
+        "duration_tolerance_percent": tolerance,
+        "max_auto_tempo_percent": max_auto,
+        "duration_within_tolerance": duration_within_tolerance,
+        "duration_within_auto_tempo_limit": duration_within_auto_tempo_limit,
+        "requires_tempo_correction": requires_tempo_correction,
         "leading_silence_ms": int(qc.get("leading_silence_ms") or 0),
         "trailing_silence_ms": int(qc.get("trailing_silence_ms") or 0),
         "integrated_lufs": qc.get("integrated_lufs"),
@@ -996,6 +1083,7 @@ def _evaluate_take_for_delegated_approval(
         "error_count": len(errors),
         "errors": errors,
         "technical_error": bool(errors) or not (take.get("raw_audio_path") or take.get("normalized_audio_path")),
+        "eligible_for_approval": eligible_for_approval,
     }
 
 
@@ -1009,6 +1097,42 @@ def _normalize_mix_payload(payload: dict[str, Any] | None) -> dict[str, Any]:
         "ducking": bool(source.get("ducking", False)),
         "music_fade_out_ms": int(source.get("music_fade_out_ms") or 350),
     }
+
+
+def _effective_duration_policy(
+    duration_tolerance_percent: float | int | None,
+    max_auto_tempo_percent: float | int | None,
+) -> tuple[float, float]:
+    tolerance = float(duration_tolerance_percent or DEFAULT_DURATION_TOLERANCE_PERCENT)
+    max_auto = float(max_auto_tempo_percent or MAX_AUTO_TEMPO_PERCENT)
+    tolerance = min(tolerance, DEFAULT_DURATION_TOLERANCE_PERCENT)
+    max_auto = min(max_auto, MAX_AUTO_TEMPO_PERCENT)
+    max_auto = max(max_auto, tolerance)
+    return round(tolerance, 3), round(max_auto, 3)
+
+
+def _inspect_approved_audio(
+    *,
+    repo: VoiceStudioRepository,
+    take: dict[str, Any],
+    spec: dict[str, Any],
+    audio_path: Path,
+) -> dict[str, Any]:
+    job_root = Path(repo.get_voice_job(str(take["voice_job_id"]))["spec_path"]).parent
+    workspace_root = job_root.parents[2]
+    ffmpeg_path = find_executable("ffmpeg", workspace_root.parents[0] if workspace_root.parents else None)
+    ffprobe_path = find_executable("ffprobe", workspace_root.parents[0] if workspace_root.parents else None)
+    client = VoiceboxClient(DEFAULT_VOICEBOX_URL)
+    return asdict(
+        inspect_generated_audio(
+            ffmpeg_path=ffmpeg_path,
+            ffprobe_path=ffprobe_path,
+            client=client,
+            audio_path=audio_path,
+            expected_text=str(spec["voiceover"]["text"]),
+            generation_latency_ms=None,
+        )
+    )
 
 
 def _normalize_words(text: str) -> list[str]:

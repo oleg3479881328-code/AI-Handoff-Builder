@@ -448,6 +448,16 @@ def test_voice_approve_applies_tempo_within_allowed_range(tmp_path: Path, monkey
         applied["factor"] = factor
 
     monkeypatch.setattr("handoff_builder.v2.services.voice_service._apply_atempo", fake_apply_atempo)
+    monkeypatch.setattr(
+        "handoff_builder.v2.services.voice_service._inspect_approved_audio",
+        lambda **kwargs: {
+            "audio_sha256": "c" * 64,
+            "duration_ms": 6000,
+            "transcript_exact_match": True,
+            "warnings": [],
+            "errors": [],
+        },
+    )
     result = voice_approve(
         workspace,
         take_id="take-1",
@@ -464,6 +474,7 @@ def test_voice_approve_applies_tempo_within_allowed_range(tmp_path: Path, monkey
     assert result["normalized_audio_path"] is not None
     assert result["duration_result"]["tempo_applied"] is True
     assert applied["factor"] == pytest.approx(1.05, rel=1e-6)
+    assert result["duration_result"]["approved_audio_sha256"] == "c" * 64
 
 
 def test_voice_approve_blocks_over_limit_duration(tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
@@ -484,6 +495,160 @@ def test_voice_approve_blocks_over_limit_duration(tmp_path: Path, monkeypatch: p
     )
     assert result["status"] == "voiceover_needs_rewrite"
     assert result["duration_result"]["tempo_applied"] is False
+
+
+def test_voice_approve_allows_exactly_eight_percent(tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
+    workspace = init_project_workspace(tmp_path / "work", "proj-voice")
+    _seed_voice_job(workspace, target_duration_ms=10000, take_duration_ms=10800)
+    monkeypatch.setattr(
+        "handoff_builder.v2.services.voice_service._apply_atempo",
+        lambda _ffmpeg, source_path, destination_path, factor: destination_path.write_bytes(source_path.read_bytes()),
+    )
+    monkeypatch.setattr(
+        "handoff_builder.v2.services.voice_service._inspect_approved_audio",
+        lambda **kwargs: {
+            "audio_sha256": "d" * 64,
+            "duration_ms": 10000,
+            "transcript_exact_match": True,
+            "warnings": [],
+            "errors": [],
+        },
+    )
+    result = voice_approve(
+        workspace,
+        take_id="take-1",
+        similarity=5,
+        naturalness=5,
+        pronunciation=5,
+        pacing=5,
+        emotion_style_fit=5,
+        artifacts="minor",
+        approve=True,
+        notes="exactly eight percent allowed",
+    )
+    assert result["status"] == "approved"
+    assert result["duration_result"]["tempo_applied"] is True
+
+
+def test_delegated_technical_approval_rejects_over_eight_percent_without_tempo(tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
+    workspace = init_project_workspace(tmp_path / "work", "proj-voice")
+    job_root = workspace / "voice" / "jobs" / "job-1"
+    (job_root / "takes" / "raw").mkdir(parents=True, exist_ok=True)
+    spec = {
+        "schema_version": "1.0",
+        "voiceover": {
+            "profile_key": "olga-polo-en-v1",
+            "profile_id": "local-profile",
+            "language": "en-US",
+            "text": "your wedding should feel warm and cinematic",
+            "engine": "qwen",
+            "model_size": "0.6B",
+            "takes": 3,
+            "seeds": [1, 2, 3],
+            "target_duration_ms": 11800,
+            "duration_tolerance_percent": 15,
+            "max_auto_tempo_percent": 25,
+            "normalize_voice": True,
+            "word_timestamps_required": True,
+            "mix": {
+                "profile": "voice-100_music-12",
+                "voice_gain_percent": 100,
+                "music_gain_percent": 12,
+                "original_audio_gain_percent": 0,
+                "ducking": False,
+                "music_fade_out_ms": 350,
+            },
+        },
+    }
+    spec_path = job_root / "spec.json"
+    spec_path.write_text(json.dumps(spec, ensure_ascii=False, indent=2), encoding="utf-8")
+    rows = [
+        ("take-1", 11680, ["your", "wedding", "should", "feel", "warm", "and", "cinematic"], {"warnings": ["transcript_extra_words"], "errors": [], "trailing_silence_ms": 1700, "leading_silence_ms": 0, "clipping_detected": False, "audio_sha256": "a" * 64}),
+        ("take-2", 10320, ["your", "wedding", "should", "feel", "warm", "and", "cinematic"], {"warnings": [], "errors": [], "trailing_silence_ms": 500, "leading_silence_ms": 0, "clipping_detected": False, "audio_sha256": "b" * 64}),
+        ("take-3", 10720, ["your", "wedding", "should", "feel", "warm", "and", "cinematic"], {"warnings": [], "errors": [], "trailing_silence_ms": 400, "leading_silence_ms": 0, "clipping_detected": False, "audio_sha256": "c" * 64}),
+    ]
+    connection = connect_workspace_db(workspace / "project.sqlite")
+    try:
+        apply_migrations(connection)
+        connection.execute(
+            "INSERT INTO voice_jobs (voice_job_id, project_id, profile_key, spec_path, spec_hash, target_duration_ms, status, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)",
+            ("job-1", "proj-voice", "olga-polo-en-v1", str(spec_path), "hash", 11800, "awaiting_human_approval", "2026-07-22T12:00:00Z", "2026-07-22T12:00:00Z"),
+        )
+        for index, (take_id, duration_ms, words, qc) in enumerate(rows, start=1):
+            raw_path = job_root / "takes" / "raw" / f"take{index}.wav"
+            raw_path.write_bytes(b"RIFFfakewav")
+            connection.execute(
+                "INSERT INTO voice_takes (voice_take_id, voice_job_id, generation_id, take_index, seed, status, response_json, raw_audio_path, audio_sha256, duration_ms, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+                (take_id, "job-1", f"gen-{index}", index, index, "awaiting_human_approval", "{}", str(raw_path), qc["audio_sha256"], duration_ms, "2026-07-22T12:00:00Z", "2026-07-22T12:00:00Z"),
+            )
+            connection.execute(
+                "INSERT INTO voice_take_qc (voice_take_qc_id, voice_take_id, payload_json, created_at) VALUES (?, ?, ?, ?)",
+                (f"qc-{index}", take_id, json.dumps(qc), "2026-07-22T12:00:00Z"),
+            )
+        connection.commit()
+    finally:
+        connection.close()
+
+    def fake_align_words_for_take(*, audio_path: Path, **_: object):
+        output_dir = tmp_path / "align" / audio_path.stem
+        output_dir.mkdir(parents=True, exist_ok=True)
+        artifact = output_dir / "voice_words.json"
+        mapping = {
+            "take1": ["your", "wedding", "should", "feel", "warm"],
+            "take2": ["your", "wedding", "should", "feel", "warm", "and", "cinematic"],
+            "take3": ["your", "wedding", "should", "feel", "warm", "and", "cinematic"],
+        }
+        words = [{"word": word} for word in mapping[audio_path.stem]]
+        artifact.write_text(json.dumps({"words": words}), encoding="utf-8")
+        return type(
+            "AlignmentResult",
+            (),
+            {
+                "status": "aligned",
+                "reason": None,
+                "artifact_path": artifact,
+                "subtitle_path": None,
+                "karaoke_ass_path": None,
+            },
+        )()
+
+    monkeypatch.setattr("handoff_builder.v2.services.voice_service.align_words_for_take", fake_align_words_for_take)
+    monkeypatch.setattr("handoff_builder.v2.services.voice_service._apply_atempo", lambda *args, **kwargs: None)
+    result = voice_delegated_technical_approval(workspace, voice_job_id="job-1")
+    assert result["status"] == "voiceover_needs_rewrite"
+    assert result["reason"] == "no_take_met_exact_text_and_duration_policy"
+
+
+def test_delegated_technical_approval_rewrites_when_no_exact_text_and_duration_candidate(tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
+    workspace = init_project_workspace(tmp_path / "work", "proj-voice")
+    _seed_voice_job(workspace, target_duration_ms=10000, take_duration_ms=11200)
+
+    def fake_align_words_for_take(*, audio_path: Path, **_: object):
+        output_dir = tmp_path / "align" / audio_path.stem
+        output_dir.mkdir(parents=True, exist_ok=True)
+        artifact = output_dir / "voice_words.json"
+        mapping = {
+            "take1": ["your", "wedding", "feels", "warm", "tonight"],
+            "take2": ["your", "wedding", "feels", "warm", "and", "alive", "tonight"],
+            "take3": ["your", "wedding", "feels", "warm", "tonight"],
+        }
+        words = [{"word": word} for word in mapping[audio_path.stem]]
+        artifact.write_text(json.dumps({"words": words}), encoding="utf-8")
+        return type(
+            "AlignmentResult",
+            (),
+            {
+                "status": "aligned",
+                "reason": None,
+                "artifact_path": artifact,
+                "subtitle_path": None,
+                "karaoke_ass_path": None,
+            },
+        )()
+
+    monkeypatch.setattr("handoff_builder.v2.services.voice_service.align_words_for_take", fake_align_words_for_take)
+    result = voice_delegated_technical_approval(workspace, voice_job_id="job-1")
+    assert result["status"] == "voiceover_needs_rewrite"
 
 
 def test_voice_music_patch_relative_matrix_and_security(tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
