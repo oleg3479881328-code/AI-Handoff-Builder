@@ -485,6 +485,7 @@ def voice_mix_preview(
             "output_path": str(result.output_path),
             "ffmpeg_command_path": str(result.ffmpeg_command_path),
             "render_plan_path": str(result.render_plan_path),
+            "stem_paths": {name: str(path) for name, path in result.stem_paths.items()},
             "metrics": result.metrics,
         }
         connection.execute("BEGIN")
@@ -502,6 +503,7 @@ def voice_mix_preview(
             "output_path": str(result.output_path),
             "ffmpeg_command_path": str(result.ffmpeg_command_path),
             "render_plan_path": str(result.render_plan_path),
+            "stem_paths": {name: str(path) for name, path in result.stem_paths.items()},
             "metrics": result.metrics,
             "approved_voice_sha256": str(take.get("audio_sha256") or ""),
         }
@@ -535,9 +537,12 @@ def voice_music_patch(
         if mix_profile_row is None:
             raise ValueError("No audio mix profile exists for this voice job.")
         base_mix = json.loads(mix_profile_row["payload_json"])
-        latest_patch_row = repo.list_mix_patches(voice_job_id)
-        if latest_patch_row:
-            base_render = json.loads(latest_patch_row[-1]["payload_json"])
+        latest_patch_rows = repo.list_mix_patches(voice_job_id)
+        if latest_patch_rows:
+            base_render = max(
+                (json.loads(row["payload_json"]) for row in latest_patch_rows),
+                key=lambda payload: int(payload.get("version_number") or 0),
+            )
             current_music_gain = float(base_render["music_gain_percent"])
             current_voice_gain = float(base_render["voice_gain_percent"])
             current_original_gain = float(base_render["original_audio_gain_percent"])

@@ -310,7 +310,8 @@ class VoiceStudioRepository:
         voice_job_id: str,
         patch_payload: dict[str, Any],
     ) -> str:
-        patch_id = stable_v2_id(voice_job_id, utc_now_iso(), "mix-patch", length=20)
+        version_number = patch_payload.get("version_number")
+        patch_id = stable_v2_id(voice_job_id, "mix-patch", str(version_number), length=20)
         self.connection.execute(
             """
             INSERT INTO audio_mix_patches (
@@ -342,7 +343,14 @@ class VoiceStudioRepository:
         event_type: str,
         payload: dict[str, Any],
     ) -> str:
-        event_id = stable_v2_id(voice_job_id, event_type, utc_now_iso(), length=20)
+        next_index = (
+            self.connection.execute(
+                "SELECT COUNT(*) AS count FROM voice_events WHERE voice_job_id = ?",
+                (voice_job_id,),
+            ).fetchone()["count"]
+            + 1
+        )
+        event_id = stable_v2_id(voice_job_id, event_type, str(next_index), length=20)
         self.connection.execute(
             """
             INSERT INTO voice_events (

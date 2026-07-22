@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import json
 import zipfile
+from dataclasses import dataclass
 from pathlib import Path
 
 import pytest
@@ -9,9 +10,16 @@ import pytest
 from handoff_builder import cli
 from handoff_builder.v2.packages.guards import compute_sha256
 from handoff_builder.v2.services.import_service import import_package_into_workspace
-from handoff_builder.v2.services.voice_service import voice_delegated_technical_approval
+from handoff_builder.v2.services.voice_service import (
+    voice_approve,
+    voice_delegated_technical_approval,
+    voice_health,
+    voice_mix_preview,
+    voice_music_patch,
+)
 from handoff_builder.v2.storage import apply_migrations, connect_workspace_db
 from handoff_builder.v2.voice import alignment
+from handoff_builder.v2.voice.client import VoiceboxError
 from handoff_builder.v2.voice.alignment import align_words_for_take
 from handoff_builder.v2.voice.qc import _compare_transcript
 from handoff_builder.v2.workspace import init_project_workspace
@@ -122,12 +130,17 @@ def test_cli_v2_voice_help_commands_available(capsys):
     with_json = [
         ["v2", "voice-health", "--help"],
         ["v2", "voice-profiles", "--help"],
+        ["v2", "voice-profile-map", "--help"],
+        ["v2", "voice-profile-samples", "--help"],
         ["v2", "voice-generate", "--help"],
+        ["v2", "voice-job-status", "--help"],
+        ["v2", "voice-takes", "--help"],
         ["v2", "voice-auto-approve", "--help"],
         ["v2", "voice-qc", "--help"],
         ["v2", "voice-approve", "--help"],
         ["v2", "voice-align", "--help"],
         ["v2", "voice-mix-preview", "--help"],
+        ["v2", "voice-music-patch", "--help"],
         ["v2", "voice-report", "--help"],
     ]
     for argv in with_json:
@@ -303,3 +316,255 @@ def test_delegated_technical_approval_prefers_lower_wer_then_duration(tmp_path: 
     assert result["take_id"] == "take-2"
     assert result["status"] == "approved"
     assert result["comparative_metrics"][0]["take_id"] == "take-2"
+
+
+def _seed_voice_job(
+    workspace: Path,
+    *,
+    voice_job_id: str = "job-1",
+    approved_take_id: str | None = None,
+    target_duration_ms: int = 6000,
+    take_duration_ms: int = 6000,
+) -> dict[str, str]:
+    job_root = workspace / "voice" / "jobs" / voice_job_id
+    (job_root / "takes" / "raw").mkdir(parents=True, exist_ok=True)
+    spec = {
+        "schema_version": "1.0",
+        "voiceover": {
+            "profile_key": "olga-polo-en-v1",
+            "profile_id": "local-profile",
+            "language": "en-US",
+            "text": "your wedding feels warm and alive tonight",
+            "engine": "qwen",
+            "model_size": "0.6B",
+            "takes": 3,
+            "seeds": [1, 2, 3],
+            "target_duration_ms": target_duration_ms,
+            "duration_tolerance_percent": 3,
+            "max_auto_tempo_percent": 8,
+            "normalize_voice": True,
+            "word_timestamps_required": True,
+            "mix": {
+                "profile": "voice-100_music-12",
+                "voice_gain_percent": 100,
+                "music_gain_percent": 12,
+                "original_audio_gain_percent": 0,
+                "ducking": False,
+                "music_fade_out_ms": 350,
+            },
+        },
+    }
+    spec_path = job_root / "spec.json"
+    spec_path.write_text(json.dumps(spec, ensure_ascii=False, indent=2), encoding="utf-8")
+    take_paths: dict[str, str] = {}
+    connection = connect_workspace_db(workspace / "project.sqlite")
+    try:
+        apply_migrations(connection)
+        connection.execute(
+            "INSERT INTO voice_jobs (voice_job_id, project_id, profile_key, spec_path, spec_hash, target_duration_ms, status, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)",
+            (voice_job_id, "proj-voice", "olga-polo-en-v1", str(spec_path), "hash", target_duration_ms, "awaiting_human_approval", "2026-07-22T12:00:00Z", "2026-07-22T12:00:00Z"),
+        )
+        connection.execute(
+            "INSERT INTO audio_mix_profiles (audio_mix_profile_id, voice_job_id, profile_key, payload_json, created_at) VALUES (?, ?, ?, ?, ?)",
+            ("mix-profile-1", voice_job_id, "voice-100_music-12", json.dumps(spec["voiceover"]["mix"]), "2026-07-22T12:00:00Z"),
+        )
+        for index in range(1, 4):
+            take_id = f"take-{index}"
+            raw_path = job_root / "takes" / "raw" / f"take{index}.wav"
+            raw_path.write_bytes(f"RIFFfakewav{index}".encode("ascii"))
+            take_paths[take_id] = str(raw_path)
+            connection.execute(
+                "INSERT INTO voice_takes (voice_take_id, voice_job_id, generation_id, take_index, seed, status, response_json, raw_audio_path, audio_sha256, duration_ms, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+                (take_id, voice_job_id, f"gen-{index}", index, index, "awaiting_human_approval", "{}", str(raw_path), compute_sha256(raw_path), take_duration_ms, "2026-07-22T12:00:00Z", "2026-07-22T12:00:00Z"),
+            )
+            connection.execute(
+                "INSERT INTO voice_take_qc (voice_take_qc_id, voice_take_id, payload_json, created_at) VALUES (?, ?, ?, ?)",
+                (
+                    f"qc-{index}",
+                    take_id,
+                    json.dumps(
+                        {
+                            "codec": "pcm_s16le",
+                            "container": "wav",
+                            "sample_rate": 24000,
+                            "channels": 1,
+                            "duration_ms": take_duration_ms,
+                            "integrated_lufs": -19.0,
+                            "sample_peak_dbfs": -2.0,
+                            "clipping_detected": False,
+                            "leading_silence_ms": 0,
+                            "trailing_silence_ms": 200,
+                            "transcript": "your wedding feels warm and alive tonight",
+                            "transcript_exact_match": True,
+                            "missing_words": [],
+                            "extra_words": [],
+                            "punctuation_different": False,
+                            "generation_latency_ms": 1000,
+                            "audio_sha256": compute_sha256(raw_path),
+                            "warnings": [],
+                            "errors": [],
+                        }
+                    ),
+                    "2026-07-22T12:00:00Z",
+                ),
+            )
+        if approved_take_id:
+            connection.execute(
+                "INSERT INTO voice_approvals (voice_approval_id, voice_job_id, voice_take_id, is_primary, payload_json, created_at) VALUES (?, ?, ?, ?, ?, ?)",
+                ("approval-1", voice_job_id, approved_take_id, 1, json.dumps({"approval_mode": "delegated_technical_approval"}), "2026-07-22T12:00:00Z"),
+            )
+        connection.commit()
+    finally:
+        connection.close()
+    return take_paths
+
+
+def test_voice_health_propagates_runtime_unavailable(monkeypatch: pytest.MonkeyPatch):
+    def fake_health_check(self):
+        raise VoiceboxError("GET /health failed: connection refused")
+
+    monkeypatch.setattr("handoff_builder.v2.voice.client.VoiceboxClient.health_check", fake_health_check)
+    with pytest.raises(VoiceboxError, match="connection refused"):
+        voice_health()
+
+
+def test_voice_mix_preview_requires_approved_primary_take(tmp_path: Path):
+    workspace = init_project_workspace(tmp_path / "work", "proj-voice")
+    _seed_voice_job(workspace, approved_take_id=None)
+    video_path = tmp_path / "sample.mp4"
+    video_path.write_bytes(b"fake-video")
+    with pytest.raises(ValueError, match="approved primary take"):
+        voice_mix_preview(workspace, take_id="take-1", video_path=video_path)
+
+
+def test_voice_approve_applies_tempo_within_allowed_range(tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
+    workspace = init_project_workspace(tmp_path / "work", "proj-voice")
+    _seed_voice_job(workspace, target_duration_ms=6000, take_duration_ms=6300)
+    applied: dict[str, float] = {}
+
+    def fake_apply_atempo(_ffmpeg: str, source_path: Path, destination_path: Path, factor: float) -> None:
+        destination_path.parent.mkdir(parents=True, exist_ok=True)
+        destination_path.write_bytes(source_path.read_bytes())
+        applied["factor"] = factor
+
+    monkeypatch.setattr("handoff_builder.v2.services.voice_service._apply_atempo", fake_apply_atempo)
+    result = voice_approve(
+        workspace,
+        take_id="take-1",
+        similarity=5,
+        naturalness=5,
+        pronunciation=5,
+        pacing=5,
+        emotion_style_fit=5,
+        artifacts="minor",
+        approve=True,
+        notes="tempo-safe approval",
+    )
+    assert result["status"] == "approved"
+    assert result["normalized_audio_path"] is not None
+    assert result["duration_result"]["tempo_applied"] is True
+    assert applied["factor"] == pytest.approx(1.05, rel=1e-6)
+
+
+def test_voice_approve_blocks_over_limit_duration(tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
+    workspace = init_project_workspace(tmp_path / "work", "proj-voice")
+    _seed_voice_job(workspace, target_duration_ms=6000, take_duration_ms=7000)
+    monkeypatch.setattr("handoff_builder.v2.services.voice_service._apply_atempo", lambda *args, **kwargs: None)
+    result = voice_approve(
+        workspace,
+        take_id="take-1",
+        similarity=5,
+        naturalness=5,
+        pronunciation=5,
+        pacing=5,
+        emotion_style_fit=5,
+        artifacts="minor",
+        approve=True,
+        notes="too long",
+    )
+    assert result["status"] == "voiceover_needs_rewrite"
+    assert result["duration_result"]["tempo_applied"] is False
+
+
+def test_voice_music_patch_relative_matrix_and_security(tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
+    workspace = init_project_workspace(tmp_path / "work", "proj-voice")
+    take_paths = _seed_voice_job(workspace, approved_take_id="take-1")
+    video_path = tmp_path / "sample video.mp4"
+    music_path = tmp_path / "sample music.wav"
+    video_path.write_bytes(b"video")
+    music_path.write_bytes(b"music")
+
+    @dataclass(frozen=True)
+    class FakeMixResult:
+        output_path: Path
+        ffmpeg_command_path: Path
+        render_plan_path: Path
+        stem_paths: dict[str, Path]
+        metrics: dict[str, object]
+
+    def fake_render_voice_mix_preview(**kwargs):
+        output_path = kwargs["output_path"]
+        output_path.parent.mkdir(parents=True, exist_ok=True)
+        output_path.write_bytes(b"mp4")
+        command_path = output_path.parent / f"{output_path.stem}_ffmpeg_command.json"
+        render_plan_path = output_path.parent / f"{output_path.stem}_render_plan.json"
+        stem_paths = {
+            "voice": output_path.parent / f"{output_path.stem}_voice.wav",
+            "music": output_path.parent / f"{output_path.stem}_music.wav",
+        }
+        command_path.write_text("{}", encoding="utf-8")
+        render_plan_path.write_text("{}", encoding="utf-8")
+        for stem_path in stem_paths.values():
+            stem_path.write_bytes(b"wav")
+        return FakeMixResult(
+            output_path=output_path,
+            ffmpeg_command_path=command_path,
+            render_plan_path=render_plan_path,
+            stem_paths=stem_paths,
+            metrics={
+                "duration_seconds": 15.1,
+                "output_duration_seconds": 15.1,
+                "output_audio_present": True,
+                "voice_duration_seconds": 11.2,
+                "voice_audio_present": True,
+                "music_duration_seconds": 15.1,
+                "music_audio_present": True,
+                "voice_gain_linear": round(kwargs["voice_gain_percent"] / 100, 4),
+                "music_gain_linear": round(kwargs["music_gain_percent"] / 100, 4),
+                "original_audio_gain_linear": round(kwargs["original_audio_gain_percent"] / 100, 4),
+                "ducking": kwargs["ducking"],
+                "no_shortest": True,
+            },
+        )
+
+    monkeypatch.setattr("handoff_builder.v2.services.voice_service.render_voice_mix_preview", fake_render_voice_mix_preview)
+    monkeypatch.setattr("handoff_builder.v2.services.voice_service.find_executable", lambda *args, **kwargs: "ffmpeg")
+
+    base = voice_mix_preview(workspace, take_id="take-1", video_path=video_path, music_path=music_path)
+    assert base["metrics"]["music_gain_linear"] == pytest.approx(0.12)
+    assert base["approved_voice_sha256"] == compute_sha256(Path(take_paths["take-1"]))
+    assert base["stem_paths"]["voice"].endswith("_voice.wav")
+    assert base["stem_paths"]["music"].endswith("_music.wav")
+
+    patch_2 = voice_music_patch(workspace, voice_job_id="job-1", video_path=video_path, music_path=music_path, reduce_music_percent=25)
+    assert patch_2["music_patch"]["base_music_gain_percent"] == pytest.approx(12.0)
+    assert patch_2["music_patch"]["new_music_gain_percent"] == pytest.approx(9.0)
+    assert patch_2["approved_voice_sha256"] == base["approved_voice_sha256"]
+
+    patch_3 = voice_music_patch(workspace, voice_job_id="job-1", video_path=video_path, music_path=music_path, reduce_music_percent=25)
+    assert patch_3["music_patch"]["base_music_gain_percent"] == pytest.approx(9.0)
+    assert patch_3["music_patch"]["new_music_gain_percent"] == pytest.approx(6.75)
+
+    patch_4 = voice_music_patch(workspace, voice_job_id="job-1", video_path=video_path, music_path=music_path, reduce_music_percent=70)
+    assert patch_4["music_patch"]["base_music_gain_percent"] == pytest.approx(6.75)
+    assert patch_4["music_patch"]["new_music_gain_percent"] == pytest.approx(2.025)
+
+    with pytest.raises(ValueError, match="may change only music gain"):
+        voice_music_patch(
+            workspace,
+            voice_job_id="job-1",
+            video_path=video_path,
+            music_path=music_path,
+            reduce_music_percent=25,
+            voice_gain_percent=90,
+        )

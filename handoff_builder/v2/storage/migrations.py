@@ -274,7 +274,7 @@ def apply_migrations(connection: sqlite3.Connection) -> None:
                 continue
             connection.executescript(sql)
             connection.execute(
-                "INSERT INTO schema_migrations (migration_id) VALUES (?)",
+                "INSERT OR IGNORE INTO schema_migrations (migration_id) VALUES (?)",
                 (migration_id,),
             )
         connection.commit()
