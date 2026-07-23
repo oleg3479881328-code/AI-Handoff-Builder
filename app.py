@@ -7,12 +7,13 @@ import subprocess
 import threading
 import tkinter as tk
 from pathlib import Path
-from tkinter import filedialog, messagebox, ttk
+from tkinter import filedialog, ttk
 
 from PIL import Image, ImageTk
 
 from handoff_builder.models import BuildResult, BuilderConfig
 from handoff_builder.pipeline import HandoffBuilder
+from handoff_builder.theme import ThemePalette, ThemeSettingsStore, get_theme_palette
 from handoff_builder.v2.gui_controller import V2RunnerController
 from handoff_builder.v2.services import (
     list_voice_jobs,
@@ -38,6 +39,14 @@ class App(tk.Tk):
         self.title("AI Handoff Builder")
         self.geometry("1200x860")
         self.minsize(980, 720)
+        self.style = ttk.Style(self)
+        self.style.theme_use("clam")
+        self.theme_store = ThemeSettingsStore()
+        self.theme_mode = tk.StringVar(value=self.theme_store.load_theme_name())
+        self.theme_palette: ThemePalette = get_theme_palette(self.theme_mode.get())
+        self.theme_text_widgets: list[tk.Text] = []
+        self.theme_listboxes: list[tk.Listbox] = []
+        self.theme_windows: list[tk.Misc] = [self]
 
         self.sources: list[Path] = []
         self.output_dir = tk.StringVar(value=str(Path.home() / "Desktop"))
@@ -88,23 +97,52 @@ class App(tk.Tk):
         self.voice_artifacts = tk.StringVar(value="minor")
 
         self._build_ui()
+        self._apply_theme()
         self.after(120, self._poll_events)
 
     def _build_ui(self) -> None:
-        outer = ttk.Frame(self, padding=12)
+        outer = ttk.Frame(self, padding=12, style="App.TFrame")
         outer.pack(fill="both", expand=True)
 
-        ttk.Label(outer, text="AI Handoff Builder", font=("Arial", 22, "bold")).pack(anchor="w")
-        ttk.Label(
-            outer,
-            text="v1 Prepare Handoff + v2 Local Edit Runner в одном Windows приложении",
-        ).pack(anchor="w", pady=(0, 10))
+        header = ttk.Frame(outer, style="App.TFrame")
+        header.pack(fill="x", pady=(0, 10))
+        header.columnconfigure(0, weight=1)
 
-        notebook = ttk.Notebook(outer)
+        title_col = ttk.Frame(header, style="App.TFrame")
+        title_col.grid(row=0, column=0, sticky="w")
+        ttk.Label(title_col, text="AI Handoff Builder", style="Title.TLabel").pack(anchor="w")
+        ttk.Label(
+            title_col,
+            text="v1 Prepare Handoff + v2 Local Edit Runner в одном Windows приложении",
+            style="Subtitle.TLabel",
+        ).pack(anchor="w", pady=(2, 0))
+
+        theme_col = ttk.Frame(header, style="App.TFrame")
+        theme_col.grid(row=0, column=1, sticky="e")
+        ttk.Label(theme_col, text="Theme", style="Muted.TLabel").pack(anchor="e")
+        ttk.Frame(theme_col, height=2, style="App.TFrame").pack()
+        ttk.Radiobutton(
+            theme_col,
+            text="Dark",
+            value="dark",
+            variable=self.theme_mode,
+            command=self._on_theme_changed,
+            style="App.TRadiobutton",
+        ).pack(side="left", padx=(0, 8))
+        ttk.Radiobutton(
+            theme_col,
+            text="Light",
+            value="light",
+            variable=self.theme_mode,
+            command=self._on_theme_changed,
+            style="App.TRadiobutton",
+        ).pack(side="left")
+
+        notebook = ttk.Notebook(outer, style="App.TNotebook")
         notebook.pack(fill="both", expand=True)
 
-        self.v1_tab = ttk.Frame(notebook, padding=14)
-        self.v2_tab = ttk.Frame(notebook, padding=14)
+        self.v1_tab = ttk.Frame(notebook, padding=14, style="App.TFrame")
+        self.v2_tab = ttk.Frame(notebook, padding=14, style="App.TFrame")
         notebook.add(self.v1_tab, text="Prepare Handoff (v1)")
         notebook.add(self.v2_tab, text="Local Edit Runner (v2)")
 
@@ -124,13 +162,14 @@ class App(tk.Tk):
 
         buttons = ttk.Frame(source_frame)
         buttons.pack(fill="x")
-        ttk.Button(buttons, text="Добавить ZIP/файлы", command=self._add_files).pack(side="left")
-        ttk.Button(buttons, text="Добавить папку", command=self._add_folder).pack(side="left", padx=6)
-        ttk.Button(buttons, text="Удалить выбранное", command=self._remove_selected).pack(side="left")
-        ttk.Button(buttons, text="Очистить", command=self._clear).pack(side="left", padx=6)
+        ttk.Button(buttons, text="Добавить ZIP/файлы", command=self._add_files, style="Secondary.TButton").pack(side="left")
+        ttk.Button(buttons, text="Добавить папку", command=self._add_folder, style="Secondary.TButton").pack(side="left", padx=6)
+        ttk.Button(buttons, text="Удалить выбранное", command=self._remove_selected, style="Secondary.TButton").pack(side="left")
+        ttk.Button(buttons, text="Очистить", command=self._clear, style="Secondary.TButton").pack(side="left", padx=6)
 
         self.source_list = tk.Listbox(source_frame, height=10)
         self.source_list.pack(fill="both", expand=True, pady=(10, 0))
+        self._register_listbox(self.source_list)
 
         settings = ttk.LabelFrame(outer, text="Настройки", padding=10)
         settings.pack(fill="x", pady=12)
@@ -164,17 +203,18 @@ class App(tk.Tk):
 
         actions = ttk.Frame(outer)
         actions.pack(fill="x")
-        self.start_button = ttk.Button(actions, text="ПОДГОТОВИТЬ ДЛЯ CHATGPT", command=self._start)
+        self.start_button = ttk.Button(actions, text="ПОДГОТОВИТЬ ДЛЯ CHATGPT", command=self._start, style="Accent.TButton")
         self.start_button.pack(side="left")
-        self.cancel_button = ttk.Button(actions, text="Отменить", command=self._cancel, state="disabled")
+        self.cancel_button = ttk.Button(actions, text="Отменить", command=self._cancel, state="disabled", style="Secondary.TButton")
         self.cancel_button.pack(side="left", padx=(8, 0))
-        self.retry_button = ttk.Button(actions, text="Повторить failed", command=self._retry_failed, state="disabled")
+        self.retry_button = ttk.Button(actions, text="Повторить failed", command=self._retry_failed, state="disabled", style="Secondary.TButton")
         self.retry_button.pack(side="left", padx=(8, 0))
-        self.open_button = ttk.Button(actions, text="Открыть результат", command=self._open_result, state="disabled")
+        self.open_button = ttk.Button(actions, text="Открыть результат", command=self._open_result, state="disabled", style="Secondary.TButton")
         self.open_button.pack(side="left", padx=8)
 
         self.log = tk.Text(outer, height=9, wrap="word", state="disabled")
         self.log.pack(fill="both", expand=False, pady=(10, 0))
+        self._register_text_widget(self.log)
 
     def _build_v2_tab(self) -> None:
         outer = self.v2_tab
@@ -222,6 +262,7 @@ class App(tk.Tk):
         summary_frame.rowconfigure(0, weight=1)
         self.v2_summary = tk.Text(summary_frame, height=10, wrap="word", state="disabled")
         self.v2_summary.grid(row=0, column=0, sticky="nsew")
+        self._register_text_widget(self.v2_summary)
 
         lower = ttk.Panedwindow(outer, orient="horizontal")
         lower.grid(row=4, column=0, sticky="nsew", pady=(10, 0))
@@ -241,7 +282,7 @@ class App(tk.Tk):
         results_frame.rowconfigure(2, weight=1)
         lower.add(results_frame, weight=4)
 
-        ttk.Label(queue_frame, text="Render Queue", font=("Arial", 11, "bold")).grid(row=0, column=0, sticky="w")
+        ttk.Label(queue_frame, text="Render Queue", style="SectionTitle.TLabel").grid(row=0, column=0, sticky="w")
         self.v2_queue = ttk.Treeview(
             queue_frame,
             columns=("status", "plan", "attempt", "updated"),
@@ -266,7 +307,7 @@ class App(tk.Tk):
         ttk.Button(queue_actions, text="Open Report", command=self._v2_open_report).pack(side="left", padx=(8, 0))
         ttk.Button(queue_actions, text="Open FFmpeg Command", command=self._v2_open_ffmpeg_command).pack(side="left", padx=(8, 0))
 
-        ttk.Label(plans_frame, text="Plan Versions", font=("Arial", 11, "bold")).grid(row=0, column=0, sticky="w")
+        ttk.Label(plans_frame, text="Plan Versions", style="SectionTitle.TLabel").grid(row=0, column=0, sticky="w")
         self.v2_plans = ttk.Treeview(
             plans_frame,
             columns=("version", "parent", "hash"),
@@ -282,7 +323,7 @@ class App(tk.Tk):
         self.v2_plans.grid(row=1, column=0, sticky="nsew", pady=(6, 0))
         self.v2_plans.bind("<<TreeviewSelect>>", self._v2_on_plan_selected)
 
-        ttk.Label(results_frame, text="Results / QC", font=("Arial", 11, "bold")).grid(row=0, column=0, sticky="w")
+        ttk.Label(results_frame, text="Results / QC", style="SectionTitle.TLabel").grid(row=0, column=0, sticky="w")
         self.v2_result_meta = ttk.Label(results_frame, text="Нет выбранного render job.", wraplength=360, justify="left")
         self.v2_result_meta.grid(row=1, column=0, sticky="ew", pady=(6, 8))
         qc_body = ttk.Frame(results_frame)
@@ -301,6 +342,278 @@ class App(tk.Tk):
         qc_frame.rowconfigure(0, weight=1)
         self.v2_qc = tk.Text(qc_frame, height=14, wrap="word", state="disabled")
         self.v2_qc.grid(row=0, column=0, sticky="nsew")
+        self._register_text_widget(self.v2_qc)
+
+    def _register_text_widget(self, widget: tk.Text) -> None:
+        self.theme_text_widgets.append(widget)
+
+    def _register_listbox(self, widget: tk.Listbox) -> None:
+        self.theme_listboxes.append(widget)
+
+    def _register_window(self, widget: tk.Misc) -> None:
+        if widget not in self.theme_windows:
+            self.theme_windows.append(widget)
+
+    def _on_theme_changed(self) -> None:
+        theme_name = self.theme_store.save_theme_name(self.theme_mode.get())
+        self.theme_mode.set(theme_name)
+        self._apply_theme()
+
+    def _apply_theme(self) -> None:
+        palette = get_theme_palette(self.theme_mode.get())
+        self.theme_palette = palette
+        self.configure(bg=palette.app_bg)
+        self.option_add("*Font", "{Segoe UI} 10")
+        self.style.configure(".", background=palette.surface, foreground=palette.text, font=("Segoe UI", 10))
+        self.style.map(".", foreground=[("disabled", palette.disabled_text)])
+
+        self.style.configure("App.TFrame", background=palette.app_bg)
+        self.style.configure("Surface.TFrame", background=palette.surface)
+        self.style.configure("Elevated.TFrame", background=palette.surface_elevated)
+        self.style.configure("App.TLabel", background=palette.app_bg, foreground=palette.text)
+        self.style.configure("Muted.TLabel", background=palette.app_bg, foreground=palette.text_muted)
+        self.style.configure("Title.TLabel", background=palette.app_bg, foreground=palette.text, font=("Segoe UI Semibold", 22))
+        self.style.configure("Subtitle.TLabel", background=palette.app_bg, foreground=palette.text_muted, font=("Segoe UI", 11))
+        self.style.configure("SectionTitle.TLabel", background=palette.surface, foreground=palette.text, font=("Segoe UI Semibold", 11))
+        self.style.configure(
+            "TLabel",
+            background=palette.app_bg,
+            foreground=palette.text,
+        )
+        self.style.configure(
+            "TLabelframe",
+            background=palette.surface,
+            bordercolor=palette.border,
+            relief="solid",
+            borderwidth=1,
+        )
+        self.style.configure(
+            "TLabelframe.Label",
+            background=palette.surface,
+            foreground=palette.text,
+            font=("Segoe UI Semibold", 10),
+        )
+        self.style.configure(
+            "TButton",
+            background=palette.surface_alt,
+            foreground=palette.text,
+            bordercolor=palette.border,
+            focusthickness=1,
+            focuscolor=palette.focus,
+            padding=(10, 6),
+        )
+        self.style.map(
+            "TButton",
+            background=[("active", palette.surface_elevated), ("disabled", palette.disabled_bg)],
+            foreground=[("disabled", palette.disabled_text)],
+            bordercolor=[("focus", palette.focus)],
+        )
+        self.style.configure(
+            "Secondary.TButton",
+            background=palette.surface_alt,
+            foreground=palette.text,
+            bordercolor=palette.border,
+        )
+        self.style.configure(
+            "Accent.TButton",
+            background=palette.accent,
+            foreground=palette.accent_text,
+            bordercolor=palette.accent,
+            font=("Segoe UI Semibold", 10),
+        )
+        self.style.map(
+            "Accent.TButton",
+            background=[("active", palette.accent_active), ("disabled", palette.disabled_bg)],
+            foreground=[("disabled", palette.disabled_text)],
+        )
+        self.style.configure(
+            "Success.TButton",
+            background=palette.success,
+            foreground=palette.accent_text,
+            bordercolor=palette.success,
+        )
+        self.style.configure(
+            "Warning.TButton",
+            background=palette.warning,
+            foreground=palette.accent_text,
+            bordercolor=palette.warning,
+        )
+        self.style.configure(
+            "Danger.TButton",
+            background=palette.error,
+            foreground=palette.accent_text,
+            bordercolor=palette.error,
+        )
+        self.style.configure(
+            "TEntry",
+            fieldbackground=palette.input_bg,
+            foreground=palette.input_text,
+            insertcolor=palette.input_text,
+            bordercolor=palette.border,
+            lightcolor=palette.border,
+            darkcolor=palette.border,
+        )
+        self.style.configure(
+            "TCombobox",
+            fieldbackground=palette.input_bg,
+            foreground=palette.input_text,
+            arrowcolor=palette.text,
+            bordercolor=palette.border,
+        )
+        self.style.map(
+            "TCombobox",
+            fieldbackground=[("readonly", palette.input_bg), ("disabled", palette.disabled_bg)],
+            foreground=[("readonly", palette.input_text), ("disabled", palette.disabled_text)],
+            selectbackground=[("readonly", palette.selection_bg)],
+            selectforeground=[("readonly", palette.selection_text)],
+        )
+        self.style.configure(
+            "TSpinbox",
+            fieldbackground=palette.input_bg,
+            foreground=palette.input_text,
+            bordercolor=palette.border,
+            arrowcolor=palette.text,
+        )
+        self.style.configure("TCheckbutton", background=palette.surface, foreground=palette.text)
+        self.style.configure("App.TRadiobutton", background=palette.app_bg, foreground=palette.text)
+        self.style.map("App.TRadiobutton", foreground=[("disabled", palette.disabled_text)])
+        self.style.configure(
+            "App.TNotebook",
+            background=palette.app_bg,
+            borderwidth=0,
+            tabmargins=(0, 0, 0, 0),
+        )
+        self.style.configure(
+            "App.TNotebook.Tab",
+            background=palette.surface_alt,
+            foreground=palette.text_muted,
+            padding=(16, 8),
+            bordercolor=palette.border,
+        )
+        self.style.map(
+            "App.TNotebook.Tab",
+            background=[("selected", palette.surface), ("active", palette.surface_elevated)],
+            foreground=[("selected", palette.text), ("active", palette.text)],
+        )
+        self.style.configure("TPanedwindow", background=palette.app_bg, sashwidth=8)
+        self.style.configure(
+            "Treeview",
+            background=palette.input_bg,
+            foreground=palette.input_text,
+            fieldbackground=palette.input_bg,
+            bordercolor=palette.border,
+            rowheight=24,
+        )
+        self.style.map(
+            "Treeview",
+            background=[("selected", palette.selection_bg)],
+            foreground=[("selected", palette.selection_text)],
+        )
+        self.style.configure(
+            "Treeview.Heading",
+            background=palette.surface_elevated,
+            foreground=palette.text,
+            bordercolor=palette.border,
+            font=("Segoe UI Semibold", 10),
+        )
+        self.style.map("Treeview.Heading", background=[("active", palette.surface_alt)])
+        self.style.configure(
+            "Horizontal.TProgressbar",
+            background=palette.accent,
+            troughcolor=palette.surface_alt,
+            bordercolor=palette.border,
+            lightcolor=palette.accent,
+            darkcolor=palette.accent,
+        )
+
+        for window in list(self.theme_windows):
+            try:
+                window.configure(bg=palette.app_bg)
+            except tk.TclError:
+                continue
+        for widget in list(self.theme_text_widgets):
+            try:
+                widget.configure(
+                    bg=palette.input_bg,
+                    fg=palette.input_text,
+                    insertbackground=palette.input_text,
+                    selectbackground=palette.selection_bg,
+                    selectforeground=palette.selection_text,
+                    disabledbackground=palette.input_bg,
+                    disabledforeground=palette.text_muted,
+                    highlightthickness=1,
+                    highlightbackground=palette.border,
+                    highlightcolor=palette.focus,
+                    relief="flat",
+                    borderwidth=0,
+                )
+            except tk.TclError:
+                continue
+        for widget in list(self.theme_listboxes):
+            try:
+                widget.configure(
+                    bg=palette.input_bg,
+                    fg=palette.input_text,
+                    selectbackground=palette.selection_bg,
+                    selectforeground=palette.selection_text,
+                    highlightthickness=1,
+                    highlightbackground=palette.border,
+                    highlightcolor=palette.focus,
+                    relief="flat",
+                    borderwidth=0,
+                )
+            except tk.TclError:
+                continue
+
+    def _show_dialog(self, level: str, title: str, message: str) -> None:
+        palette = self.theme_palette
+        accent_style = {
+            "info": "Accent.TButton",
+            "warning": "Warning.TButton",
+            "error": "Danger.TButton",
+        }.get(level, "Accent.TButton")
+        badge_fg = {
+            "info": palette.accent,
+            "warning": palette.warning,
+            "error": palette.error,
+        }.get(level, palette.accent)
+        dialog = tk.Toplevel(self)
+        dialog.title(title)
+        dialog.transient(self)
+        dialog.grab_set()
+        dialog.resizable(False, False)
+        dialog.configure(bg=palette.app_bg)
+        self._register_window(dialog)
+
+        outer = ttk.Frame(dialog, padding=16, style="App.TFrame")
+        outer.pack(fill="both", expand=True)
+        ttk.Label(outer, text=title, style="Title.TLabel").pack(anchor="w")
+        tk.Label(
+            outer,
+            text=level.upper(),
+            fg=badge_fg,
+            bg=palette.app_bg,
+            font=("Segoe UI Semibold", 10),
+        ).pack(anchor="w", pady=(4, 10))
+        text = tk.Text(outer, width=64, height=max(4, min(14, message.count("\n") + 2)), wrap="word")
+        text.pack(fill="both", expand=True)
+        self._register_text_widget(text)
+        self._apply_theme()
+        text.insert("1.0", message)
+        text.configure(state="disabled")
+        ttk.Button(outer, text="OK", command=dialog.destroy, style=accent_style).pack(anchor="e", pady=(14, 0))
+        dialog.update_idletasks()
+        dialog.geometry(f"+{self.winfo_rootx() + 80}+{self.winfo_rooty() + 80}")
+        dialog.wait_window()
+
+    def _show_info(self, title: str, message: str) -> None:
+        self._show_dialog("info", title, message)
+
+    def _show_warning(self, title: str, message: str) -> None:
+        self._show_dialog("warning", title, message)
+
+    def _show_error(self, title: str, message: str) -> None:
+        self._show_dialog("error", title, message)
 
     def _add_files(self) -> None:
         values = filedialog.askopenfilenames(
@@ -354,12 +667,12 @@ class App(tk.Tk):
     def _start_with_sources(self, selected_sources: list[Path]) -> None:
         if not selected_sources:
             if self.retry_only_failed:
-                messagebox.showwarning("Нет failed", "Нет файлов для повторной обработки.")
+                self._show_warning("Нет failed", "Нет файлов для повторной обработки.")
             else:
-                messagebox.showwarning("Нет материалов", "Добавьте ZIP, папку или файлы.")
+                self._show_warning("Нет материалов", "Добавьте ZIP, папку или файлы.")
             return
         if not self.project_name.get().strip():
-            messagebox.showwarning("Нет названия", "Введите название проекта.")
+            self._show_warning("Нет названия", "Введите название проекта.")
             return
         output = Path(self.output_dir.get()).expanduser()
         output.mkdir(parents=True, exist_ok=True)
@@ -416,16 +729,19 @@ class App(tk.Tk):
         window.geometry("520x320")
         window.transient(self)
         window.grab_set()
+        self._register_window(window)
+        self._apply_theme()
 
-        body = ttk.Frame(window, padding=16)
+        body = ttk.Frame(window, padding=16, style="App.TFrame")
         body.pack(fill="both", expand=True)
 
         coverage_ok = bool(summary.get("coverage_ok"))
-        ttk.Label(
+        tk.Label(
             body,
             text="Coverage OK" if coverage_ok else "Coverage needs attention",
-            font=("Arial", 18, "bold"),
-            foreground="#1b7f3a" if coverage_ok else "#b2441f",
+            font=("Segoe UI Semibold", 18),
+            fg=self.theme_palette.success if coverage_ok else self.theme_palette.error,
+            bg=self.theme_palette.app_bg,
         ).pack(anchor="w")
 
         lines = [
@@ -467,7 +783,7 @@ class App(tk.Tk):
             wraplength=460,
         ).pack(anchor="w", pady=(8, 0))
 
-        ttk.Button(body, text="Закрыть", command=window.destroy).pack(anchor="e", pady=(18, 0))
+        ttk.Button(body, text="Закрыть", command=window.destroy, style="Accent.TButton").pack(anchor="e", pady=(18, 0))
 
     def _v2_choose_workspace(self) -> None:
         value = filedialog.askdirectory(title="Выберите exact workspace folder")
@@ -478,7 +794,7 @@ class App(tk.Tk):
         workspace = Path(self.v2_workspace_path.get()).expanduser()
         project_id = self.v2_project_id.get().strip()
         if not project_id:
-            messagebox.showwarning("Нет project ID", "Введите project ID для нового workspace.")
+            self._show_warning("Нет project ID", "Введите project ID для нового workspace.")
             return
         self._v2_set_busy(True, "Создание v2 workspace...")
         self.v2_controller.start_open_workspace(workspace, project_id=project_id, create=True)
@@ -490,7 +806,7 @@ class App(tk.Tk):
 
     def _v2_import_package(self) -> None:
         if not self.v2_controller.workspace:
-            messagebox.showwarning("Нет workspace", "Сначала откройте или создайте v2 workspace.")
+            self._show_warning("Нет workspace", "Сначала откройте или создайте v2 workspace.")
             return
         value = filedialog.askopenfilename(
             title="Выберите AI_EDIT_PACKAGE.zip",
@@ -502,7 +818,7 @@ class App(tk.Tk):
 
     def _v2_import_patch(self) -> None:
         if not self.v2_controller.workspace:
-            messagebox.showwarning("Нет workspace", "Сначала откройте или создайте v2 workspace.")
+            self._show_warning("Нет workspace", "Сначала откройте или создайте v2 workspace.")
             return
         value = filedialog.askopenfilename(
             title="Выберите AI_EDIT_PATCH.json или AI_EDIT_PATCH.zip",
@@ -514,14 +830,14 @@ class App(tk.Tk):
 
     def _v2_refresh(self) -> None:
         if not self.v2_controller.workspace:
-            messagebox.showwarning("Нет workspace", "Сначала откройте или создайте v2 workspace.")
+            self._show_warning("Нет workspace", "Сначала откройте или создайте v2 workspace.")
             return
         self._v2_set_busy(True, "Обновление состояния workspace...")
         self.v2_controller.start_refresh()
 
     def _v2_run_next(self) -> None:
         if not self.v2_controller.workspace:
-            messagebox.showwarning("Нет workspace", "Сначала откройте или создайте v2 workspace.")
+            self._show_warning("Нет workspace", "Сначала откройте или создайте v2 workspace.")
             return
         self._v2_set_busy(True, "Запуск next pending render job...")
         self.v2_controller.start_render_next()
@@ -529,7 +845,7 @@ class App(tk.Tk):
     def _v2_run_selected(self) -> None:
         job_id = self._v2_selected_job_id()
         if not job_id:
-            messagebox.showwarning("Нет job", "Выберите render job в очереди.")
+            self._show_warning("Нет job", "Выберите render job в очереди.")
             return
         self._v2_set_busy(True, f"Запуск render job {job_id}...")
         self.v2_controller.start_render_job(job_id)
@@ -537,14 +853,14 @@ class App(tk.Tk):
     def _v2_cancel_selected(self) -> None:
         job_id = self._v2_selected_job_id()
         if not job_id:
-            messagebox.showwarning("Нет job", "Выберите render job в очереди.")
+            self._show_warning("Нет job", "Выберите render job в очереди.")
             return
         self.v2_controller.request_cancel(job_id)
 
     def _v2_retry_selected(self) -> None:
         job_id = self._v2_selected_job_id()
         if not job_id:
-            messagebox.showwarning("Нет job", "Выберите failed/cancelled job в очереди.")
+            self._show_warning("Нет job", "Выберите failed/cancelled job в очереди.")
             return
         self._v2_set_busy(True, f"Создание retry job для {job_id}...")
         self.v2_controller.start_retry_job(job_id)
@@ -759,13 +1075,15 @@ class App(tk.Tk):
         window.minsize(1080, 760)
         window.protocol("WM_DELETE_WINDOW", self._voice_close_window)
         self.voice_window = window
+        self._register_window(window)
+        self._apply_theme()
 
-        outer = ttk.Frame(window, padding=12)
+        outer = ttk.Frame(window, padding=12, style="App.TFrame")
         outer.pack(fill="both", expand=True)
         outer.columnconfigure(0, weight=1)
         outer.rowconfigure(4, weight=1)
 
-        ttk.Label(outer, text="Voice Studio / Озвучка", font=("Arial", 18, "bold")).grid(row=0, column=0, sticky="w")
+        ttk.Label(outer, text="Voice Studio / Озвучка", style="Title.TLabel").grid(row=0, column=0, sticky="w")
 
         top = ttk.Frame(outer)
         top.grid(row=1, column=0, sticky="ew", pady=(10, 0))
@@ -801,6 +1119,7 @@ class App(tk.Tk):
         script_frame.columnconfigure(0, weight=1)
         self.voice_script_text = tk.Text(script_frame, height=5, wrap="word")
         self.voice_script_text.grid(row=0, column=0, sticky="ew")
+        self._register_text_widget(self.voice_script_text)
         self.voice_script_text.insert(
             "1.0",
             "Your wedding should feel warm, confident, and alive, like every promise, every laugh, and every dance is still glowing in the room.",
@@ -820,13 +1139,13 @@ class App(tk.Tk):
         body.add(center, weight=3)
         body.add(right, weight=3)
 
-        ttk.Label(left, text="Voice Jobs", font=("Arial", 11, "bold")).grid(row=0, column=0, sticky="w")
+        ttk.Label(left, text="Voice Jobs", style="SectionTitle.TLabel").grid(row=0, column=0, sticky="w")
         self.voice_job_combo = ttk.Combobox(left, textvariable=self.voice_job_choice, state="readonly")
         self.voice_job_combo.grid(row=1, column=0, sticky="ew", pady=(6, 0))
         self.voice_job_combo.bind("<<ComboboxSelected>>", self._voice_on_job_selected)
         ttk.Button(left, text="Refresh Jobs", command=self._voice_start_refresh).grid(row=2, column=0, sticky="w", pady=(8, 0))
 
-        ttk.Label(center, text="Takes / Прослушивание", font=("Arial", 11, "bold")).grid(row=0, column=0, sticky="w")
+        ttk.Label(center, text="Takes / Прослушивание", style="SectionTitle.TLabel").grid(row=0, column=0, sticky="w")
         self.voice_takes = ttk.Treeview(
             center,
             columns=("idx", "status", "duration", "sha"),
@@ -851,7 +1170,7 @@ class App(tk.Tk):
         ttk.Button(play_actions, text="Open WAV", command=self._voice_open_selected_take).pack(side="left", padx=(8, 0))
         ttk.Button(play_actions, text="Align", command=self._voice_start_align_selected).pack(side="left", padx=(16, 0))
 
-        ttk.Label(right, text="QC / Review / Approve", font=("Arial", 11, "bold")).grid(row=0, column=0, sticky="w")
+        ttk.Label(right, text="QC / Review / Approve", style="SectionTitle.TLabel").grid(row=0, column=0, sticky="w")
         review_top = ttk.Frame(right)
         review_top.grid(row=1, column=0, sticky="ew", pady=(6, 6))
         for col in range(4):
@@ -874,10 +1193,11 @@ class App(tk.Tk):
         notes_frame.columnconfigure(0, weight=1)
         self.voice_notes = tk.Text(notes_frame, height=4, wrap="word")
         self.voice_notes.grid(row=0, column=0, sticky="ew")
+        self._register_text_widget(self.voice_notes)
 
         action_row = ttk.Frame(right)
         action_row.grid(row=3, column=0, sticky="ew", pady=(8, 8))
-        ttk.Button(action_row, text="Approve Selected Take", command=self._voice_start_approve_selected).pack(side="left")
+        ttk.Button(action_row, text="Approve Selected Take", command=self._voice_start_approve_selected, style="Accent.TButton").pack(side="left")
 
         qc_frame = ttk.LabelFrame(right, text="Take Details", padding=8)
         qc_frame.grid(row=4, column=0, sticky="nsew")
@@ -886,6 +1206,7 @@ class App(tk.Tk):
         right.rowconfigure(4, weight=1)
         self.voice_qc = tk.Text(qc_frame, height=18, wrap="word", state="disabled")
         self.voice_qc.grid(row=0, column=0, sticky="nsew")
+        self._register_text_widget(self.voice_qc)
 
         self._voice_start_refresh()
 
@@ -953,7 +1274,7 @@ class App(tk.Tk):
     def _voice_start_generate(self) -> None:
         script = self.voice_script_text.get("1.0", "end").strip()
         if not script:
-            messagebox.showwarning("Нет текста", "Введите текст для озвучки.")
+            self._show_warning("Нет текста", "Введите текст для озвучки.")
             return
         self.voice_status_text.set("Генерация 3 реальных Olga takes...")
         workspace = self._voice_workspace()
@@ -1042,7 +1363,7 @@ class App(tk.Tk):
         take = self._voice_selected_take()
         audio_path = self._voice_audio_path(take)
         if audio_path is None or not audio_path.exists():
-            messagebox.showwarning("Нет audio", "Для выбранного take не найден WAV.")
+            self._show_warning("Нет audio", "Для выбранного take не найден WAV.")
             return
         self.voice_playing_path = audio_path
         if winsound is not None:
@@ -1061,14 +1382,14 @@ class App(tk.Tk):
         take = self._voice_selected_take()
         audio_path = self._voice_audio_path(take)
         if audio_path is None:
-            messagebox.showwarning("Нет audio", "Для выбранного take не найден WAV.")
+            self._show_warning("Нет audio", "Для выбранного take не найден WAV.")
             return
         self._open_path(audio_path)
 
     def _voice_start_align_selected(self) -> None:
         take = self._voice_selected_take()
         if not take:
-            messagebox.showwarning("Нет take", "Выберите take.")
+            self._show_warning("Нет take", "Выберите take.")
             return
         self.voice_status_text.set(f"Alignment для {take['voice_take_id']}...")
         workspace = self._voice_workspace()
@@ -1084,7 +1405,7 @@ class App(tk.Tk):
     def _voice_start_approve_selected(self) -> None:
         take = self._voice_selected_take()
         if not take:
-            messagebox.showwarning("Нет take", "Выберите take.")
+            self._show_warning("Нет take", "Выберите take.")
             return
         self.voice_status_text.set(f"Approve для {take['voice_take_id']}...")
         notes = self.voice_notes.get("1.0", "end").strip()
@@ -1224,10 +1545,10 @@ class App(tk.Tk):
                     self.metadata_status_text.set(f"ExifTool: {exiftool_status}")
                     if coverage_ok:
                         self.status_text.set(f"Готово: {self.last_output.name}")
-                        messagebox.showinfo("Готово", f"Создан файл:\n{self.last_output}")
+                        self._show_info("Готово", f"Создан файл:\n{self.last_output}")
                     else:
                         self.status_text.set("Завершено с проблемами покрытия")
-                        messagebox.showwarning(
+                        self._show_warning(
                             "Проверка покрытия не пройдена",
                             f"Архив создан, но coverage_ok=false.\n\n{self.last_output}",
                         )
@@ -1239,7 +1560,7 @@ class App(tk.Tk):
                     self.status_text.set("Ошибка")
                     self.metadata_status_text.set("ExifTool: unknown")
                     self._append_log(f"ERROR: {payload}")
-                    messagebox.showerror("Ошибка", str(payload))
+                    self._show_error("Ошибка", str(payload))
                 elif kind == "v2_state":
                     self.v2_status_text.set(f"State: {payload}")
                 elif kind in {"workspace_ready", "workspace_refreshed"}:
@@ -1272,7 +1593,7 @@ class App(tk.Tk):
                 elif kind == "render_failed":
                     self._v2_set_busy(False, "Preview render failed.")
                     self._v2_update_results(payload)
-                    messagebox.showerror("Render failed", payload.get("report", {}).get("error_message", "Unknown render failure."))
+                    self._show_error("Render failed", payload.get("report", {}).get("error_message", "Unknown render failure."))
                     self.v2_controller.start_refresh()
                 elif kind == "render_cancelled":
                     self._v2_set_busy(False, "Render cancelled.")
@@ -1287,7 +1608,7 @@ class App(tk.Tk):
                 elif kind == "v2_error":
                     self._v2_set_busy(False, "Ошибка v2 workflow.")
                     self.v2_status_text.set(f"Ошибка: {payload}")
-                    messagebox.showerror("V2 workflow error", str(payload))
+                    self._show_error("V2 workflow error", str(payload))
                 elif kind == "voice_refreshed":
                     self._voice_update_ui(payload)
                 elif kind == "voice_generated":
@@ -1303,7 +1624,7 @@ class App(tk.Tk):
                     self._voice_start_refresh()
                 elif kind == "voice_error":
                     self.voice_status_text.set(f"Voice Studio error: {payload}")
-                    messagebox.showerror("Voice Studio error", str(payload))
+                    self._show_error("Voice Studio error", str(payload))
         except queue.Empty:
             pass
         self.after(120, self._poll_events)
@@ -1314,7 +1635,7 @@ class App(tk.Tk):
 
     def _open_path(self, path: Path) -> None:
         if not path.exists():
-            messagebox.showwarning("Нет файла", f"Путь не найден:\n{path}")
+            self._show_warning("Нет файла", f"Путь не найден:\n{path}")
             return
         if os.name == "nt":
             os.startfile(path)  # type: ignore[attr-defined]
