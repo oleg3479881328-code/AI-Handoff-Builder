@@ -11,15 +11,18 @@ from handoff_builder import cli
 from handoff_builder.v2.packages.guards import compute_sha256
 from handoff_builder.v2.services.import_service import import_package_into_workspace
 from handoff_builder.v2.services.voice_service import (
+    voice_generate,
     voice_approve,
     voice_delegated_technical_approval,
     voice_health,
     voice_mix_preview,
     voice_music_patch,
+    voice_profile_map,
 )
 from handoff_builder.v2.storage import apply_migrations, connect_workspace_db
 from handoff_builder.v2.voice import alignment
 from handoff_builder.v2.voice.client import VoiceboxError
+from handoff_builder.v2.voice.models import AudioQCResult, VoiceGenerationResult, VoiceRuntimeInfo
 from handoff_builder.v2.voice.alignment import align_words_for_take
 from handoff_builder.v2.voice.qc import _compare_transcript
 from handoff_builder.v2.workspace import init_project_workspace
@@ -428,6 +431,137 @@ def test_voice_health_propagates_runtime_unavailable(monkeypatch: pytest.MonkeyP
         voice_health()
 
 
+def test_voice_generate_allows_runtime_to_lazy_load_model(tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
+    workspace = init_project_workspace(tmp_path / "work", "proj-voice")
+
+    class FakeClient:
+        def __init__(self, *_args, **_kwargs):
+            self._polls = 0
+
+        def health_check(self):
+            return VoiceRuntimeInfo(
+                base_url="http://127.0.0.1:17493",
+                api_version="0.5.0",
+                status="healthy",
+                model_loaded=False,
+                model_downloaded=True,
+                model_size=None,
+                gpu_available=False,
+                gpu_type=None,
+                vram_used_mb=None,
+                backend_type="pytorch",
+                backend_variant="cpu",
+                engines=("qwen",),
+            )
+
+        def list_profiles(self):
+            return [
+                type(
+                    "Profile",
+                    (),
+                    {
+                        "profile_id": "local-profile-1",
+                        "name": "Olga",
+                        "language": "en",
+                        "voice_type": "cloned",
+                        "default_engine": "qwen",
+                        "sample_count": 1,
+                        "generation_count": 0,
+                        "raw": {},
+                    },
+                )()
+            ]
+
+        def generate_take(self, request, *, seed: int):
+            return VoiceGenerationResult(
+                generation_id=f"gen-{seed}",
+                status="loading_model",
+                audio_path="",
+                duration_seconds=0.0,
+                seed=seed,
+                engine=request.engine,
+                model_size=request.model_size,
+                created_at="2026-07-23T02:40:00Z",
+                raw={"id": f"gen-{seed}", "status": "loading_model"},
+            )
+
+        def wait_for_generation(self, generation_id: str, **_kwargs):
+            return VoiceGenerationResult(
+                generation_id=generation_id,
+                status="completed",
+                audio_path=f"/tmp/{generation_id}.wav",
+                duration_seconds=4.0,
+                seed=11,
+                engine="qwen",
+                model_size="0.6B",
+                created_at="2026-07-23T02:40:05Z",
+                raw={"id": generation_id, "status": "completed", "audio_path": f"/tmp/{generation_id}.wav"},
+            )
+
+        def download_audio(self, generation_id: str, destination: Path):
+            destination.parent.mkdir(parents=True, exist_ok=True)
+            destination.write_bytes(b"RIFFfakewav")
+            return destination
+
+        def transcribe_audio(self, audio_path: Path):
+            return {"text": "Warm and alive forever."}
+
+    monkeypatch.setattr("handoff_builder.v2.services.voice_service.VoiceboxClient", FakeClient)
+    monkeypatch.setattr(
+        "handoff_builder.v2.services.voice_service.inspect_generated_audio",
+        lambda **_kwargs: AudioQCResult(
+            codec="pcm_s16le",
+            container="wav",
+            sample_rate=24000,
+            channels=1,
+            duration_ms=4000,
+            integrated_lufs=-19.0,
+            sample_peak_dbfs=-2.0,
+            clipping_detected=False,
+            leading_silence_ms=0,
+            trailing_silence_ms=150,
+            transcript="Warm and alive forever.",
+            transcript_exact_match=True,
+            missing_words=(),
+            extra_words=(),
+            punctuation_different=False,
+            generation_latency_ms=1000,
+            audio_sha256="a" * 64,
+            warnings=(),
+            errors=(),
+        ),
+    )
+    monkeypatch.setattr(
+        "handoff_builder.v2.services.voice_service.align_words_for_take",
+        lambda **_kwargs: type(
+            "AlignmentResult",
+            (),
+            {
+                "status": "aligned",
+                "reason": None,
+                "artifact_path": None,
+                "subtitle_path": None,
+                "karaoke_ass_path": None,
+            },
+        )(),
+    )
+
+    mapped = voice_profile_map(workspace, profile_key="olga-polo-en-v1", profile_id="local-profile-1")
+    assert mapped["profile_id"] == "local-profile-1"
+
+    result = voice_generate(
+        workspace,
+        profile_key="olga-polo-en-v1",
+        text="Warm and alive forever.",
+        takes=1,
+        seeds=[11],
+        target_duration_ms=4000,
+    )
+
+    assert result["job"]["status"] == "awaiting_human_approval"
+    assert result["takes"][0]["status"] == "awaiting_human_approval"
+
+
 def test_voice_mix_preview_requires_approved_primary_take(tmp_path: Path):
     workspace = init_project_workspace(tmp_path / "work", "proj-voice")
     _seed_voice_job(workspace, approved_take_id=None)
@@ -528,6 +662,41 @@ def test_voice_approve_allows_exactly_eight_percent(tmp_path: Path, monkeypatch:
     )
     assert result["status"] == "approved"
     assert result["duration_result"]["tempo_applied"] is True
+
+
+def test_voice_approve_rejects_when_corrected_audio_breaks_transcript(tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
+    workspace = init_project_workspace(tmp_path / "work", "proj-voice")
+    _seed_voice_job(workspace, target_duration_ms=10000, take_duration_ms=10800)
+    monkeypatch.setattr(
+        "handoff_builder.v2.services.voice_service._apply_atempo",
+        lambda _ffmpeg, source_path, destination_path, factor: destination_path.write_bytes(source_path.read_bytes()),
+    )
+    monkeypatch.setattr(
+        "handoff_builder.v2.services.voice_service._inspect_approved_audio",
+        lambda **kwargs: {
+            "audio_sha256": "e" * 64,
+            "duration_ms": 10000,
+            "transcript_exact_match": False,
+            "warnings": ["transcript_missing_words"],
+            "errors": [],
+        },
+    )
+    result = voice_approve(
+        workspace,
+        take_id="take-1",
+        similarity=5,
+        naturalness=5,
+        pronunciation=5,
+        pacing=5,
+        emotion_style_fit=5,
+        artifacts="minor",
+        approve=True,
+        notes="tempo correction broke transcript",
+    )
+    assert result["status"] == "voiceover_needs_rewrite"
+    assert result["duration_result"]["tempo_applied"] is True
+    assert result["duration_result"]["approval_blocker"]["reason"] == "corrected_audio_failed_qc"
+    assert result["duration_result"]["approval_blocker"]["transcript_exact_match"] is False
 
 
 def test_delegated_technical_approval_rejects_over_eight_percent_without_tempo(tmp_path: Path, monkeypatch: pytest.MonkeyPatch):

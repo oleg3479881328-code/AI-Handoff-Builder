@@ -1,7 +1,7 @@
 # Latest Log
 
 Date: 2026-07-23
-Step: Metadata hardening completion, packaged runtime fix, and final local verification
+Step: Metadata hardening completion, Voice Studio acceptance proof, and final local verification
 
 ## Completed
 
@@ -41,11 +41,47 @@ Step: Metadata hardening completion, packaged runtime fix, and final local verif
   - `assets_with_gps=2`
   - `assets_with_device_identity=2`
   - `sample_source=EXIF:GPSLatitude/GPSLongitude`
+- Re-ran the real owner dataset handoff twice with the integrated app and confirmed deterministic joins/order on:
+  - `tmp_metadata_real_current_run_c\WEDDING_PROJECTv2_ANALYSIS_HANDOFF.zip`
+  - `tmp_metadata_real_current_run_d\WEDDING_PROJECTv2_ANALYSIS_HANDOFF.zip`
+- Verified the real reruns still produce:
+  - `50 assets`
+  - `34 videos`
+  - `16 photos`
+  - `50 metadata records`
+  - `0 lost assets`
+  - `0 dangling references`
+  - `gps_export_mode=exact`
+  - all six metadata JSON files present
+- Added stable-order hardening in the metadata pipeline so repeated chronology export preserves deterministic scene ordering across reruns.
+- Found and fixed a real Voice Studio approval defect:
+  - delegated/manual approval could approve a take based on pre-tempo QC
+  - after `atempo`, the corrected WAV could fail transcript QC and still remain approved
+  - approval now re-checks corrected audio and downgrades the take to `voiceover_needs_rewrite` when corrected QC fails
+- Added Voice Studio regression coverage for:
+  - lazy runtime model loading
+  - corrected-audio transcript failure after tempo correction
+- Repaired the local Voicebox runtime on this Windows machine and confirmed successful Olga generation through the real local API.
+- Generated three real Olga wedding takes in:
+  - `tmp_cross_workflow_real\workspace\voice\jobs\ae7ed3ffd0b21861e825`
+- Re-ran delegated technical approval after the fix and confirmed the job now correctly ends in:
+  - `status=voiceover_needs_rewrite`
+  - `primary_approval=null`
+- Verified GUI Voice Studio directly through the Tk application and captured proof at:
+  - `tmp_cross_workflow_real\gui_proof\voice_studio_gui_proof.json`
+  - `tmp_cross_workflow_real\gui_proof\voice_studio_gui.png`
+- GUI proof confirms:
+  - runtime is healthy
+  - Olga profile is loaded
+  - exactly 3 real takes are listed
+  - `Play Selected` is enabled
+  - `Approve Selected Take` is enabled
 
 ## Verification
 
-- `python -m pytest tests\\test_pipeline.py -q` -> `21 passed in 16.90s`
-- `python -m pytest -q` -> `82 passed in 117.11s`
+- `python -m pytest tests\\test_pipeline.py -q` -> `22 passed in 20.28s`
+- `python -m pytest tests\\test_v2_voice_studio.py -q` -> `18 passed in 3.25s`
+- `python -m pytest -q` -> `85 passed in 43.36s`
 - `python -m compileall handoff_builder app.py` -> success
 - `git diff --check` -> clean aside from LF/CRLF warnings
 - portable build on 2026-07-23:
@@ -59,11 +95,13 @@ Step: Metadata hardening completion, packaged runtime fix, and final local verif
 ## Notes
 
 - The fresh synthetic privacy matrix still showed `exiftool_status=error` when run against the older incomplete `dist` from before the delayed-expansion fix; that result is now superseded by the successful packaged smoke from 2026-07-23.
-- The real owner dataset remains unchanged and the previously successful deterministic real run remains available at `tmp_metadata_real_exif_deterministic`.
+- The real owner dataset remains unchanged at `C:\Users\oleg3\OneDrive\Desktop\Раскладывание вещей\Раскладывание вещей.zip`.
+- The Voice Studio GUI is ready for owner use with real Olga takes, but the current wedding script still needs a better approved take because all three candidates miss the strict approval policy after the corrected QC gate.
 - No merge was performed.
 
 ## Next
 
-- Commit the metadata hardening branch state.
+- Commit the integrated metadata + approval-hardening branch state.
+- Push `feat/metadata-after-voicebox-v1`.
 - Update the existing Notion execution report page only.
 - Wait for review. No merge.

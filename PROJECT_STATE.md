@@ -4,7 +4,7 @@
 - Repository: `oleg3479881328-code/AI-Handoff-Builder`
 - Active contract: `Yt-Dlp-Download-Manager` issue `#67`
 - Current branch: `feat/metadata-after-voicebox-v1`
-- Current phase: Metadata handoff hardening completed locally; pending final push/report only
+- Current phase: Metadata and Voice Studio acceptance hardening verified locally; pending final commit push and report refresh
 
 ## What Exists Now
 
@@ -68,9 +68,11 @@ Finish publication of the metadata hardening slice already completed on `feat/me
 ## Fresh Validation From 2026-07-23
 
 - Full test suite:
-  - `python -m pytest -q` -> `82 passed in 117.11s`
+  - `python -m pytest -q` -> `85 passed in 43.36s`
 - Targeted metadata regression:
-  - `python -m pytest tests\\test_pipeline.py -q` -> `21 passed in 16.90s`
+  - `python -m pytest tests\\test_pipeline.py -q` -> `22 passed in 20.28s`
+- Targeted Voice Studio regression:
+  - `python -m pytest tests\\test_v2_voice_studio.py -q` -> `18 passed in 3.25s`
 - Bytecode check:
   - `python -m compileall handoff_builder app.py` -> success
 - Diff hygiene:
@@ -91,7 +93,8 @@ Finish publication of the metadata hardening slice already completed on `feat/me
 - Real owner dataset ZIP remained unchanged on the owner machine:
   - `C:\Users\oleg3\OneDrive\Desktop\Раскладывание вещей\Раскладывание вещей.zip`
 - Successful real analysis handoff run already exists locally and remains valid:
-  - `tmp_metadata_real_exif_deterministic\WEDDING_PROJECTv2_ANALYSIS_HANDOFF.zip`
+  - `tmp_metadata_real_current_run_c\WEDDING_PROJECTv2_ANALYSIS_HANDOFF.zip`
+  - repeat proof: `tmp_metadata_real_current_run_d\WEDDING_PROJECTv2_ANALYSIS_HANDOFF.zip`
   - `coverage_ok=true`
   - `source_asset_count=50`
   - `processed_asset_count=50`
@@ -100,6 +103,41 @@ Finish publication of the metadata hardening slice already completed on `feat/me
   - `extraction_error_count=0`
 - Deterministic-ID follow-up:
   - stable asset ID sequence matched across two independently extracted source roots after the content-hash fix
+  - `validation_equal=true`
+  - `asset_join_equal=true`
+  - `scene_join_equal=true`
+  - `normalized_order_equal=true`
+  - `asset_ids_equal=true`
+  - `scene_ids_equal=true`
+
+## Voice Studio Acceptance Proof
+
+- Local Voicebox runtime on `http://127.0.0.1:17493` is healthy on Thursday, July 23, 2026:
+  - `API 0.5.0`
+  - `backend=pytorch/cpu`
+  - `model_loaded=True`
+  - `model_size=0.6B`
+- Real Olga profile mapped and used:
+  - `profile_id=e3684e16-2e15-421b-b305-dc2845280193`
+- Real three-take wedding job exists at:
+  - `tmp_cross_workflow_real\workspace\voice\jobs\ae7ed3ffd0b21861e825`
+- Job proof after the corrected approval gate:
+  - `voice_job_id=ae7ed3ffd0b21861e825`
+  - `status=voiceover_needs_rewrite`
+  - `primary_approval=null`
+  - take count = `3`
+- GUI proof exists at:
+  - `tmp_cross_workflow_real\gui_proof\voice_studio_gui_proof.json`
+  - `tmp_cross_workflow_real\gui_proof\voice_studio_gui.png`
+- GUI proof confirms:
+  - `Voice Studio готов. Можно прослушать takes и нажать Approve.`
+  - runtime/profile loaded for Olga
+  - exactly 3 real takes listed
+  - `Play Selected` button present and enabled
+  - `Approve Selected Take` button present and enabled
+- Approval hardening fix:
+  - corrected audio after `atempo` is now re-checked before approval
+  - if transcript or QC breaks after tempo correction, the take becomes `voiceover_needs_rewrite` instead of false approval
 
 ## Synthetic Privacy Validation
 

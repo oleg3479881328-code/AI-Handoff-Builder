@@ -10,7 +10,7 @@ from PIL.TiffImagePlugin import IFDRational
 
 from handoff_builder.ffmpeg_tools import FFmpegTools
 from handoff_builder.metadata import AssetMetadataBuilder
-from handoff_builder.models import AssetRecord, BuilderConfig
+from handoff_builder.models import AssetRecord, BuilderConfig, SceneRecord
 from handoff_builder.pipeline import HandoffBuilder
 from handoff_builder.utils import stable_asset_id
 
@@ -547,6 +547,65 @@ def test_extract_pillow_metadata_reads_gps_ifd_offsets(tmp_path: Path, monkeypat
     assert payload["GPSInfo"]["GPSAltitude"] == 5.0
     assert payload["Make"] == "Canon"
     assert payload["Model"] == "R6"
+
+
+def test_stable_scene_order_sorts_by_chronology_then_asset_then_index(tmp_path: Path):
+    builder = HandoffBuilder(
+        BuilderConfig(project_name="ORDER", output_dir=tmp_path / "out"),
+        project_root=tmp_path,
+    )
+    unordered = [
+        SceneRecord(
+            scene_id="asset-b_s0001",
+            asset_id="asset-b",
+            scene_index=1,
+            start_ms=0,
+            end_ms=1000,
+            duration_ms=1000,
+            detection_mode="short_full_video",
+            keyframe_time_ms=500,
+            keyframe_path="scene_keyframes/asset-b_s0001.jpg",
+            preview_path="scene_previews/asset-b_s0001.mp4",
+            chronology_rank=2,
+            capture_time_iso="2026-07-19T00:00:00",
+        ),
+        SceneRecord(
+            scene_id="asset-a_s0002",
+            asset_id="asset-a",
+            scene_index=2,
+            start_ms=1000,
+            end_ms=2000,
+            duration_ms=1000,
+            detection_mode="short_full_video",
+            keyframe_time_ms=1500,
+            keyframe_path="scene_keyframes/asset-a_s0002.jpg",
+            preview_path="scene_previews/asset-a_s0002.mp4",
+            chronology_rank=1,
+            capture_time_iso="2026-07-19T00:00:00",
+        ),
+        SceneRecord(
+            scene_id="asset-a_s0001",
+            asset_id="asset-a",
+            scene_index=1,
+            start_ms=0,
+            end_ms=1000,
+            duration_ms=1000,
+            detection_mode="short_full_video",
+            keyframe_time_ms=500,
+            keyframe_path="scene_keyframes/asset-a_s0001.jpg",
+            preview_path="scene_previews/asset-a_s0001.mp4",
+            chronology_rank=1,
+            capture_time_iso="2026-07-19T00:00:00",
+        ),
+    ]
+
+    ordered = builder._stable_scene_order(unordered)
+
+    assert [scene.scene_id for scene in ordered] == [
+        "asset-a_s0001",
+        "asset-a_s0002",
+        "asset-b_s0001",
+    ]
 
 
 def test_metadata_contract_failure_marks_coverage_not_ok(tmp_path: Path):

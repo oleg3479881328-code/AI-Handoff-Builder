@@ -356,6 +356,7 @@ class HandoffBuilder:
             for rel in (scene.keyframe_path, scene.preview_path):
                 if not (package_root / rel).exists():
                     missing_paths.append(rel)
+        scenes = self._stable_scene_order(scenes)
 
         metadata_dir = package_root / "metadata"
         local_asset_registry_path = job_root / "local_asset_registry.json"
@@ -563,6 +564,18 @@ FILES
             metadata_warnings_path=metadata_dir / "metadata_warnings.json",
             local_asset_registry_path=local_asset_registry_path,
             canceled=False,
+        )
+
+    def _stable_scene_order(self, scenes: list[SceneRecord]) -> list[SceneRecord]:
+        return sorted(
+            scenes,
+            key=lambda scene: (
+                scene.chronology_rank if scene.chronology_rank is not None else 10**9,
+                scene.capture_time_iso or "",
+                scene.asset_id,
+                scene.scene_index,
+                scene.scene_id,
+            ),
         )
 
     def _build_asset_manifest_entry(self, asset: AssetRecord, metadata_record: dict[str, object]) -> dict[str, object]:
