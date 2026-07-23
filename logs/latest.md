@@ -1,7 +1,7 @@
 # Latest Log
 
 Date: 2026-07-23
-Step: Metadata hardening completion, Voice Studio acceptance proof, and final local verification
+Step: Metadata acceptance refresh, exact real-run evidence bundle, and scoped final verification
 
 ## Completed
 
@@ -54,34 +54,52 @@ Step: Metadata hardening completion, Voice Studio acceptance proof, and final lo
   - `gps_export_mode=exact`
   - all six metadata JSON files present
 - Added stable-order hardening in the metadata pipeline so repeated chronology export preserves deterministic scene ordering across reruns.
-- Found and fixed a real Voice Studio approval defect:
-  - delegated/manual approval could approve a take based on pre-tempo QC
-  - after `atempo`, the corrected WAV could fail transcript QC and still remain approved
-  - approval now re-checks corrected audio and downgrades the take to `voiceover_needs_rewrite` when corrected QC fails
-- Added Voice Studio regression coverage for:
-  - lazy runtime model loading
-  - corrected-audio transcript failure after tempo correction
-- Repaired the local Voicebox runtime on this Windows machine and confirmed successful Olga generation through the real local API.
-- Generated three real Olga wedding takes in:
-  - `tmp_cross_workflow_real\workspace\voice\jobs\ae7ed3ffd0b21861e825`
-- Re-ran delegated technical approval after the fix and confirmed the job now correctly ends in:
-  - `status=voiceover_needs_rewrite`
-  - `primary_approval=null`
-- Verified GUI Voice Studio directly through the Tk application and captured proof at:
-  - `tmp_cross_workflow_real\gui_proof\voice_studio_gui_proof.json`
-  - `tmp_cross_workflow_real\gui_proof\voice_studio_gui.png`
-- GUI proof confirms:
-  - runtime is healthy
-  - Olga profile is loaded
-  - exactly 3 real takes are listed
-  - `Play Selected` is enabled
-  - `Approve Selected Take` is enabled
+- Added one missing metadata regression that the coordinator explicitly asked for:
+  - `test_manifest_reference_without_metadata_record_is_hard_failure`
+- Hardened the pipeline so a missing metadata record referenced by the manifest now fails explicitly with a controlled `ValueError` instead of a late `KeyError`.
+- Created an exact evidence bundle for the fresh real runs plus a fresh official CLI proof run at:
+  - `tmp_prepare_evidence_bundle\real_runs_evidence.json`
+- The evidence bundle records:
+  - exact CLI commands for run C, run D, and the fresh CLI proof run
+  - archive create/write timestamps
+  - full ZIP tree
+  - factual validation counts
+  - JSON parse plus `schema_version` checks for all manifest/metadata JSON files
+- Created a fresh official CLI proof run on the real owner ZIP:
+  - `tmp_prepare_cli_proof\WEDDING_PROJECTv2_ANALYSIS_HANDOFF.zip`
+  - `coverage_ok=true`
+  - `ok=0`
+  - `partial=50`
+  - `missing=0`
+  - `error=0`
+  - `assets_with_capture_time=50`
+  - `assets_with_gps=0`
+  - `assets_with_device_identity=0`
+  - `assets_using_filename_fallback=50`
+  - `assets_using_filesystem_fallback=0`
+  - `extraction_error_count=0`
+- Created GUI Prepare Handoff proof from the completed real package at:
+  - `tmp_prepare_gui_summary_from_cli_proof\prepare_handoff_gui_proof.json`
+  - `tmp_prepare_gui_summary_from_cli_proof\prepare_handoff_gui_main.png`
+  - `tmp_prepare_gui_summary_from_cli_proof\prepare_handoff_gui_summary.png`
+- GUI summary proof confirms:
+  - `ExifTool: available`
+  - `GPS mode: exact`
+  - `34 videos found`
+  - `34 videos represented`
+  - `16 photos found`
+  - `16 photos represented`
+  - `50 metadata records`
+  - `50 assets with capture time`
+  - `0 assets with GPS`
+  - `50 partial metadata records`
+  - `0 lost files`
+- Removed the temporary Voicebox-only approval-gate changes from the next metadata commit scope so the final metadata refresh does not repeat Voicebox development after the accepted baseline.
 
 ## Verification
 
-- `python -m pytest tests\\test_pipeline.py -q` -> `22 passed in 20.28s`
-- `python -m pytest tests\\test_v2_voice_studio.py -q` -> `18 passed in 3.25s`
-- `python -m pytest -q` -> `85 passed in 43.36s`
+- `python -m pytest tests\\test_pipeline.py -q` -> `23 passed in 8.99s`
+- `python -m pytest -q` -> `84 passed in 43.58s`
 - `python -m compileall handoff_builder app.py` -> success
 - `git diff --check` -> clean aside from LF/CRLF warnings
 - portable build on 2026-07-23:
@@ -96,12 +114,12 @@ Step: Metadata hardening completion, Voice Studio acceptance proof, and final lo
 
 - The fresh synthetic privacy matrix still showed `exiftool_status=error` when run against the older incomplete `dist` from before the delayed-expansion fix; that result is now superseded by the successful packaged smoke from 2026-07-23.
 - The real owner dataset remains unchanged at `C:\Users\oleg3\OneDrive\Desktop\Раскладывание вещей\Раскладывание вещей.zip`.
-- The Voice Studio GUI is ready for owner use with real Olga takes, but the current wedding script still needs a better approved take because all three candidates miss the strict approval policy after the corrected QC gate.
+- Commit `8adb2a4...` mixed metadata evidence with a Voicebox-only approval hardening change; the current refresh removes those voice-only file changes from the next metadata commit instead of rewriting published history.
 - No merge was performed.
 
 ## Next
 
-- Commit the integrated metadata + approval-hardening branch state.
+- Commit the metadata-only acceptance refresh branch state.
 - Push `feat/metadata-after-voicebox-v1`.
 - Update the existing Notion execution report page only.
 - Wait for review. No merge.

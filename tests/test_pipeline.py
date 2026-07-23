@@ -5,6 +5,7 @@ import subprocess
 import zipfile
 from pathlib import Path
 
+import pytest
 from PIL import Image
 from PIL.TiffImagePlugin import IFDRational
 
@@ -631,6 +632,28 @@ def test_metadata_contract_failure_marks_coverage_not_ok(tmp_path: Path):
 
     assert result.validation["coverage_ok"] is False
     assert any("computed capture time missing source/confidence" in item for item in result.validation["metadata_hard_failures"])
+
+
+def test_manifest_reference_without_metadata_record_is_hard_failure(tmp_path: Path):
+    source = tmp_path / "source"
+    _make_photo(source / "IMG-20240716-WA0001.jpg")
+
+    builder = HandoffBuilder(
+        BuilderConfig(project_name="BROKEN_REFERENCE", output_dir=tmp_path / "out", include_video_proxies=False),
+        project_root=tmp_path,
+    )
+    builder.ffmpeg = FakeFFmpegTools()
+
+    original_build = builder.metadata.build
+
+    def broken_build(assets):
+        result = original_build(assets)
+        result.normalized_records = []
+        return result
+
+    builder.metadata.build = broken_build  # type: ignore[method-assign]
+    with pytest.raises(ValueError, match="manifest references assets without metadata records"):
+        builder.build([source])
 
 
 def test_prepare_handoff_succeeds_without_voicebox_runtime(tmp_path: Path):

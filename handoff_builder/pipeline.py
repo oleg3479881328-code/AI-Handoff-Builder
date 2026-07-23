@@ -395,6 +395,10 @@ class HandoffBuilder:
         missing_manifest_metadata = sorted(asset.asset_id for asset in assets if asset.asset_id not in set(metadata_ids))
         if missing_manifest_metadata:
             metadata_hard_failures.append("manifest references assets without metadata records")
+            raise ValueError(
+                "manifest references assets without metadata records: "
+                + ", ".join(missing_manifest_metadata)
+            )
         metadata_hard_failures.extend(self._metadata_contract_failures(metadata_result.normalized_records))
 
         validation = {

@@ -4,7 +4,7 @@
 - Repository: `oleg3479881328-code/AI-Handoff-Builder`
 - Active contract: `Yt-Dlp-Download-Manager` issue `#67`
 - Current branch: `feat/metadata-after-voicebox-v1`
-- Current phase: Metadata and Voice Studio acceptance hardening verified locally; pending final commit push and report refresh
+- Current phase: Metadata evidence expansion and final acceptance refresh in progress on the same branch
 
 ## What Exists Now
 
@@ -26,7 +26,7 @@
 
 ## Current Focus
 
-Finish publication of the metadata hardening slice already completed on `feat/metadata-after-voicebox-v1` without merging unrelated work.
+Finish the metadata-only acceptance refresh on `feat/metadata-after-voicebox-v1` by publishing exact real-run evidence, GUI/CLI proof, and the missing dangling-reference hard-failure regression without re-expanding Voicebox scope.
 
 ## Published Baseline
 
@@ -68,11 +68,9 @@ Finish publication of the metadata hardening slice already completed on `feat/me
 ## Fresh Validation From 2026-07-23
 
 - Full test suite:
-  - `python -m pytest -q` -> `85 passed in 43.36s`
+  - `python -m pytest -q` -> `84 passed in 43.58s`
 - Targeted metadata regression:
-  - `python -m pytest tests\\test_pipeline.py -q` -> `22 passed in 20.28s`
-- Targeted Voice Studio regression:
-  - `python -m pytest tests\\test_v2_voice_studio.py -q` -> `18 passed in 3.25s`
+  - `python -m pytest tests\\test_pipeline.py -q` -> `23 passed in 8.99s`
 - Bytecode check:
   - `python -m compileall handoff_builder app.py` -> success
 - Diff hygiene:
@@ -109,35 +107,60 @@ Finish publication of the metadata hardening slice already completed on `feat/me
   - `normalized_order_equal=true`
   - `asset_ids_equal=true`
   - `scene_ids_equal=true`
+- Exact evidence bundle for runs C/D and fresh CLI proof exists at:
+  - `tmp_prepare_evidence_bundle\real_runs_evidence.json`
+- This bundle records:
+  - exact CLI command strings for run C, run D, and the fresh CLI proof run
+  - archive creation/write timestamps
+  - full ZIP tree for each run
+  - JSON parse plus `schema_version` checks for all manifest/metadata JSON files
+  - factual validation counts:
+    - `ok=0`
+    - `partial=50`
+    - `missing=0`
+    - `error=0`
+    - `assets_with_capture_time=50`
+    - `assets_with_gps=0`
+    - `assets_with_device_identity=0`
+    - `assets_using_filename_fallback=50`
+    - `assets_using_filesystem_fallback=0`
+    - `extraction_error_count=0`
 
-## Voice Studio Acceptance Proof
+## Prepare Handoff CLI / GUI Proof
 
-- Local Voicebox runtime on `http://127.0.0.1:17493` is healthy on Thursday, July 23, 2026:
-  - `API 0.5.0`
-  - `backend=pytorch/cpu`
-  - `model_loaded=True`
-  - `model_size=0.6B`
-- Real Olga profile mapped and used:
-  - `profile_id=e3684e16-2e15-421b-b305-dc2845280193`
-- Real three-take wedding job exists at:
-  - `tmp_cross_workflow_real\workspace\voice\jobs\ae7ed3ffd0b21861e825`
-- Job proof after the corrected approval gate:
-  - `voice_job_id=ae7ed3ffd0b21861e825`
-  - `status=voiceover_needs_rewrite`
-  - `primary_approval=null`
-  - take count = `3`
-- GUI proof exists at:
-  - `tmp_cross_workflow_real\gui_proof\voice_studio_gui_proof.json`
-  - `tmp_cross_workflow_real\gui_proof\voice_studio_gui.png`
+- Fresh official CLI proof run exists at:
+  - `tmp_prepare_cli_proof\WEDDING_PROJECTv2_ANALYSIS_HANDOFF.zip`
+  - command:
+    `python -m handoff_builder.cli --project "WEDDING_PROJECTv2" --output "C:\Users\oleg3\Documents\AI Handoff Builder v1\tmp_prepare_cli_proof" --input "C:\Users\oleg3\OneDrive\Desktop\Раскладывание вещей\Раскладывание вещей.zip" --gps-export-mode exact`
+- GUI summary proof based on that completed real package exists at:
+  - `tmp_prepare_gui_summary_from_cli_proof\prepare_handoff_gui_proof.json`
+  - `tmp_prepare_gui_summary_from_cli_proof\prepare_handoff_gui_main.png`
+  - `tmp_prepare_gui_summary_from_cli_proof\prepare_handoff_gui_summary.png`
 - GUI proof confirms:
-  - `Voice Studio готов. Можно прослушать takes и нажать Approve.`
-  - runtime/profile loaded for Olga
-  - exactly 3 real takes listed
-  - `Play Selected` button present and enabled
-  - `Approve Selected Take` button present and enabled
-- Approval hardening fix:
-  - corrected audio after `atempo` is now re-checked before approval
-  - if transcript or QC breaks after tempo correction, the take becomes `voiceover_needs_rewrite` instead of false approval
+  - `status_text=Готово: WEDDING_PROJECTv2_ANALYSIS_HANDOFF.zip`
+  - `metadata_status_text=ExifTool: available`
+  - summary window shows:
+    - `34 videos found`
+    - `34 videos represented`
+    - `16 photos found`
+    - `16 photos represented`
+    - `50 metadata records`
+    - `50 assets with capture time`
+    - `0 assets with GPS`
+    - `50 partial metadata records`
+    - `0 lost files`
+    - `ExifTool status: available | GPS mode: exact`
+    - `Metadata warnings: 100 at metadata/metadata_warnings.json`
+
+## Voicebox Scope Note
+
+- Commit `8adb2a4e9619cae010c8fd8c74d53bd85ddba5d4` temporarily mixed metadata evidence work with a Voice Studio approval-gate hardening change.
+- That Voicebox-specific change is not required for the metadata DoD on this page.
+- The current local acceptance refresh removes those Voicebox-only file changes from the next metadata commit, keeping the final scope on:
+  - metadata determinism
+  - explicit dangling-reference hard failure
+  - exact real-run / CLI / GUI evidence
+  - report/log refresh
 
 ## Synthetic Privacy Validation
 
@@ -166,6 +189,6 @@ Finish publication of the metadata hardening slice already completed on `feat/me
 
 ## Immediate Next Actions
 
-1. Commit the metadata hardening fix set on `feat/metadata-after-voicebox-v1`.
+1. Commit the metadata-only acceptance refresh on `feat/metadata-after-voicebox-v1`.
 2. Update the existing Notion execution report page only.
 3. Wait for coordinator/owner review. No merge.
