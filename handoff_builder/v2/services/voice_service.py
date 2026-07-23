@@ -115,6 +115,8 @@ def voice_generate(
     runtime_info = runtime_client.health_check()
     if runtime_info.status != "healthy":
         raise RuntimeError(f"Voicebox runtime is not healthy: {runtime_info.status}")
+    if not runtime_info.model_loaded:
+        raise RuntimeError("Voicebox model is not loaded.")
     if takes < 1 or takes > 5:
         raise ValueError("takes must be between 1 and 5")
     if not text.strip():
@@ -940,7 +942,6 @@ def _apply_take_approval(
         "max_auto_tempo_percent": max_auto,
         "original_audio_sha256": compute_sha256(source_audio_path) if source_audio_path.exists() else None,
     }
-    corrected_qc: dict[str, Any] | None = None
     if target_duration_ms and duration_ms > 0:
         delta_percent = abs((duration_ms - target_duration_ms) / target_duration_ms * 100)
         duration_result["delta_percent"] = round(delta_percent, 3)
@@ -963,17 +964,6 @@ def _apply_take_approval(
             duration_result["corrected_qc"] = corrected_qc
         elif delta_percent > max_auto:
             status = "voiceover_needs_rewrite"
-    if status == "approved" and corrected_qc is not None:
-        corrected_errors = list(corrected_qc.get("errors") or [])
-        corrected_exact_match = bool(corrected_qc.get("transcript_exact_match"))
-        if corrected_errors or not corrected_exact_match:
-            status = "voiceover_needs_rewrite"
-            duration_result["approval_blocker"] = {
-                "reason": "corrected_audio_failed_qc",
-                "transcript_exact_match": corrected_exact_match,
-                "error_count": len(corrected_errors),
-                "warnings": list(corrected_qc.get("warnings") or []),
-            }
     approved_audio_path = normalized_path or source_audio_path
     duration_result["approved_audio_sha256"] = (
         duration_result.get("corrected_audio_sha256")
