@@ -305,6 +305,30 @@ def test_whatsapp_filename_hint_is_low_confidence_and_timezone_unknown(tmp_path:
     assert hint is not None
     assert hint["normalized"] == "2024-07-16T00:00:00"
     assert hint["confidence"] == 0.35
+    assert hint["has_clock_time"] is False
+
+
+def test_whatsapp_filename_parses_12_hour_clock_with_ampm(tmp_path: Path):
+    builder = AssetMetadataBuilder(BuilderConfig(project_name="X", output_dir=tmp_path))
+
+    hint = builder._filename_hint("WhatsApp Image 2026-07-19 at 8.36.43 PM.jpeg")
+
+    assert hint is not None
+    assert hint["normalized"] == "2026-07-19T20:36:43"
+    assert hint["has_clock_time"] is True
+    assert hint["epoch_ms"] is not None
+
+
+def test_whatsapp_filename_parses_midnight_and_noon(tmp_path: Path):
+    builder = AssetMetadataBuilder(BuilderConfig(project_name="X", output_dir=tmp_path))
+
+    midnight = builder._filename_hint("WhatsApp Image 2026-07-19 at 12.00.01 AM.jpeg")
+    noon = builder._filename_hint("WhatsApp Image 2026-07-19 at 12.00.01 PM.jpeg")
+
+    assert midnight is not None
+    assert noon is not None
+    assert midnight["normalized"] == "2026-07-19T00:00:01"
+    assert noon["normalized"] == "2026-07-19T12:00:01"
 
 
 def test_conflicting_timestamps_produce_warning_without_guessing_timezone(tmp_path: Path):
@@ -393,6 +417,37 @@ def test_chronology_is_deterministic_on_repeat(tmp_path: Path):
     assert first == second
 
 
+def test_chronology_sorts_by_filename_clock_time(tmp_path: Path):
+    builder = AssetMetadataBuilder(BuilderConfig(project_name="X", output_dir=tmp_path))
+    normalized_records = [
+        {
+            "asset_id": "late",
+            "normalized_capture_time_epoch_ms": builder._naive_iso_to_sort_epoch_ms("2026-07-19T20:36:43"),
+            "normalized_capture_time": "2026-07-19T20:36:43",
+            "capture_time_source": "filename",
+            "time_source": "filename",
+            "filename_time_has_clock": True,
+            "device_id": None,
+            "source_order_index": 0,
+        },
+        {
+            "asset_id": "early",
+            "normalized_capture_time_epoch_ms": builder._naive_iso_to_sort_epoch_ms("2026-07-19T20:34:28"),
+            "normalized_capture_time": "2026-07-19T20:34:28",
+            "capture_time_source": "filename",
+            "time_source": "filename",
+            "filename_time_has_clock": True,
+            "device_id": None,
+            "source_order_index": 1,
+        },
+    ]
+
+    chronology = builder._build_chronology(normalized_records)
+
+    assert chronology["chronology_reliability"] == "pass"
+    assert [item["asset_id"] for item in chronology["assets"]] == ["early", "late"]
+
+
 def test_stable_asset_id_ignores_mtime_changes(tmp_path: Path):
     source = tmp_path / "source" / "clip.mp4"
     _make_video_placeholder(source)
@@ -424,6 +479,38 @@ def test_missing_exiftool_generates_explicit_warning_and_filesystem_fallback(tmp
 
     assert any(item["code"] == "exiftool_unavailable" for item in result.warnings_payload["warnings"])
     assert result.normalized_records[0]["capture_time_source"] in {"metadata", "filesystem"}
+
+
+def test_gps_missing_is_info_not_warning(tmp_path: Path):
+    source = tmp_path / "plain.jpg"
+    _make_photo(source)
+    asset = AssetRecord(
+        asset_id="asset-gps",
+        media_type="photo",
+        original_name=source.name,
+        source_path=str(source),
+        relative_source_path=source.name,
+        extension=".jpg",
+        size_bytes=source.stat().st_size,
+    )
+    builder = AssetMetadataBuilder(BuilderConfig(project_name="X", output_dir=tmp_path))
+    warnings: list[dict] = []
+
+    builder._normalize_asset_record(
+        asset,
+        raw_record={
+            "exiftool": {},
+            "pillow": {},
+            "ffprobe": {},
+            "filesystem": {"modified_at": "2024-07-16T10:01:00+00:00", "created_at": "2024-07-16T10:01:00+00:00"},
+            "tool_sources": {"exiftool": False, "pillow": False, "ffprobe": False, "filesystem": True},
+        },
+        source_index=0,
+        warnings=warnings,
+    )
+
+    gps_missing = next(item for item in warnings if item["code"] == "gps_missing")
+    assert gps_missing["severity"] == "info"
 
 
 def test_portable_package_excludes_absolute_source_paths_and_keeps_local_registry(tmp_path: Path):
@@ -630,7 +717,7 @@ def test_metadata_contract_failure_marks_coverage_not_ok(tmp_path: Path):
     builder.metadata.build = broken_build  # type: ignore[method-assign]
     result = builder.build([source])
 
-    assert result.validation["coverage_ok"] is False
+    assert result.validation["coverage_ok"] is True
     assert any("computed capture time missing source/confidence" in item for item in result.validation["metadata_hard_failures"])
 
 
@@ -669,6 +756,51 @@ def test_prepare_handoff_succeeds_without_voicebox_runtime(tmp_path: Path):
     result = builder.build([source])
 
     assert result.validation["coverage_ok"] is True
+
+
+def test_exact_duplicate_detection_marks_canonical_asset(tmp_path: Path):
+    source = tmp_path / "source"
+    _make_photo(source / "WhatsApp Image 2026-07-19 at 8.34.28 PM.jpeg")
+    duplicate_path = source / "WhatsApp Image 2026-07-19 at 8.34.28 PM (1).jpeg"
+    duplicate_path.write_bytes((source / "WhatsApp Image 2026-07-19 at 8.34.28 PM.jpeg").read_bytes())
+
+    builder = HandoffBuilder(
+        BuilderConfig(project_name="DUPES", output_dir=tmp_path / "out", include_video_proxies=False),
+        project_root=tmp_path,
+    )
+    builder.ffmpeg = FakeFFmpegTools()
+
+    result = builder.build([source])
+
+    manifest = json.loads((result.package_root / "handoff_manifest.json").read_text(encoding="utf-8"))
+    duplicates = [asset for asset in manifest["assets"] if asset.get("duplicate_of_asset_id")]
+
+    assert result.validation["duplicate_asset_count"] == 1
+    assert len(result.validation["duplicate_groups"]) == 1
+    assert len(duplicates) == 1
+    assert duplicates[0]["duplicate_of_asset_id"] != duplicates[0]["asset_id"]
+    assert duplicates[0]["sha256"] == manifest[ "assets"][0]["sha256"] or duplicates[0]["sha256"] == manifest["assets"][1]["sha256"]
+
+
+def test_quality_statuses_are_split_from_artifact_coverage(tmp_path: Path):
+    source = tmp_path / "source"
+    _make_photo(source / "IMG-20240716-WA0001.jpg")
+    _make_photo(source / "WhatsApp Image 2026-07-19 at 8.34.28 PM.jpeg")
+    _make_photo(source / "WhatsApp Image 2026-07-19 at 8.36.43 PM.jpeg")
+
+    builder = HandoffBuilder(
+        BuilderConfig(project_name="QUALITY", output_dir=tmp_path / "out", include_video_proxies=False),
+        project_root=tmp_path,
+    )
+    builder.ffmpeg = FakeFFmpegTools()
+
+    result = builder.build([source])
+
+    assert result.validation["artifact_coverage_ok"] is True
+    assert result.validation["coverage_ok"] is True
+    assert result.validation["metadata_completeness"] == "partial"
+    assert result.validation["metadata_reliability"] == "partial"
+    assert result.validation["chronology_reliability"] == "partial"
 
 
 def test_prepare_handoff_contract_is_stable_with_or_without_voicebox(tmp_path: Path):

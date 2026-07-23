@@ -22,7 +22,9 @@ METADATA_SCHEMA_VERSION = "1.0"
 _GPS_TAG_ID = next(key for key, value in ExifTags.TAGS.items() if value == "GPSInfo")
 _GPS_NAME_BY_ID = ExifTags.GPSTAGS
 _WHATSAPP_RE = re.compile(
-    r"(?i)(?:img|vid)-(?P<date>\d{8})-wa\d+|(?:whatsapp|wa)[ _-]+image[ _-]+(?P<date2>\d{4}-\d{2}-\d{2})[ _-]+at[ _-]+(?P<time2>\d{2}\.\d{2}\.\d{2})"
+    r"(?i)(?:img|vid)-(?P<date>\d{8})-wa\d+|"
+    r"(?:whatsapp|wa)[ _-]+(?:image|video)[ _-]+(?P<date2>\d{4}-\d{2}-\d{2})"
+    r"[ _-]+at[ _-]+(?P<time2>\d{1,2}\.\d{2}\.\d{2})(?:[ _-]*(?P<ampm>AM|PM))?"
 )
 _GENERIC_FILENAME_DT_RE = re.compile(
     r"(?P<year>20\d{2})[-_]?((?P<month>\d{2})[-_]?((?P<day>\d{2})))(?:[T _-]?(?P<hour>\d{2})[._-]?(?P<minute>\d{2})(?:[._-]?(?P<second>\d{2}))?)?"
@@ -350,7 +352,7 @@ class AssetMetadataBuilder:
                 self._warning(
                     asset_id=asset.asset_id,
                     code="gps_missing",
-                    severity="warning",
+                    severity="info",
                     message=f"No GPS metadata for {asset.original_name}.",
                 )
             )
@@ -400,6 +402,7 @@ class AssetMetadataBuilder:
             "location_cluster_id": None,
             "chronology_rank": None,
             "filename_time_hint": capture["filename_hint"],
+            "filename_time_has_clock": bool(capture["filename_hint"] and capture["filename_hint"].get("has_clock_time")),
             "warnings": capture["warning_codes"],
             "sources": capture["sources"],
         }
@@ -468,6 +471,7 @@ class AssetMetadataBuilder:
                 raw_value = filename_hint["raw"]
                 normalized = filename_hint["normalized"]
                 capture_time_project = filename_hint["normalized"]
+                capture_time_utc = filename_hint.get("utc")
                 source = "filename"
                 confidence = filename_hint["confidence"]
                 epoch_ms = filename_hint["epoch_ms"]
@@ -809,6 +813,7 @@ class AssetMetadataBuilder:
         return {"latitude": None, "longitude": None}
 
     def _build_chronology(self, normalized_records: list[dict[str, Any]]) -> dict[str, Any]:
+        reliability = self._chronology_reliability(normalized_records)
         ordered = sorted(
             normalized_records,
             key=lambda record: (
@@ -833,6 +838,8 @@ class AssetMetadataBuilder:
         return {
             "schema_version": METADATA_SCHEMA_VERSION,
             "total_assets": len(normalized_records),
+            "chronology_reliability": reliability["status"],
+            "chronology_reliability_reasons": reliability["reasons"],
             "assets": assets,
         }
 
@@ -873,6 +880,7 @@ class AssetMetadataBuilder:
         filesystem_fallback_count = len([item for item in normalized_records if item.get("capture_time_source") == "filesystem"])
         missing_metadata_count = len([item for item in normalized_records if item.get("metadata_status") == "missing"])
         extraction_error_count = len([item for item in warnings if item.get("code") in {"exiftool_failed", "ffprobe_metadata_failed"}])
+        warning_codes = [str(item.get("code") or "") for item in warnings]
         return {
             "schema_version": METADATA_SCHEMA_VERSION,
             "metadata_records_total": metadata_records_total,
@@ -885,12 +893,56 @@ class AssetMetadataBuilder:
             "extraction_error_count": extraction_error_count,
             "gps_export_mode": self.config.gps_export_mode,
             "metadata_coverage_status": "ok" if missing_metadata_count == 0 else "partial",
+            "metadata_completeness": self._metadata_completeness_status(normalized_records),
+            "metadata_reliability": self._metadata_reliability_status(normalized_records, warning_codes),
             "tool_status": tool_status,
             "ok_count": len([item for item in normalized_records if item.get("metadata_status") == "ok"]),
             "partial_count": len([item for item in normalized_records if item.get("metadata_status") == "partial"]),
             "missing_count": missing_metadata_count,
             "error_count": len([item for item in normalized_records if item.get("metadata_status") == "error"]),
         }
+
+    def _metadata_completeness_status(self, normalized_records: list[dict[str, Any]]) -> str:
+        statuses = {str(item.get("metadata_status") or "missing") for item in normalized_records}
+        if not statuses or "error" in statuses or "missing" in statuses:
+            return "fail"
+        if statuses == {"ok"}:
+            return "pass"
+        return "partial"
+
+    def _metadata_reliability_status(self, normalized_records: list[dict[str, Any]], warning_codes: list[str]) -> str:
+        if any(code in {"timestamp_conflict", "exiftool_failed", "ffprobe_metadata_failed"} for code in warning_codes):
+            return "fail"
+        if any(
+            item.get("capture_time_source") in {"filename", "filesystem"} or item.get("timezone_source") is None
+            for item in normalized_records
+            if item.get("normalized_capture_time")
+        ):
+            return "partial"
+        return "pass"
+
+    def _chronology_reliability(self, normalized_records: list[dict[str, Any]]) -> dict[str, Any]:
+        assets_with_time = [item for item in normalized_records if item.get("normalized_capture_time")]
+        if not assets_with_time:
+            return {"status": "fail", "reasons": ["no_capture_times"]}
+        filename_assets = [item for item in assets_with_time if item.get("capture_time_source") == "filename"]
+        unique_filename_times = {str(item.get("normalized_capture_time")) for item in filename_assets}
+        unique_times = {str(item.get("normalized_capture_time")) for item in assets_with_time}
+        reasons: list[str] = []
+        if filename_assets and len(unique_filename_times) == 1 and len(filename_assets) > 1:
+            reasons.append("filename_times_collapsed")
+        if any(item.get("capture_time_source") == "filesystem" for item in assets_with_time):
+            reasons.append("filesystem_fallback_present")
+        if any(item.get("capture_time_source") == "filename" and not item.get("filename_time_has_clock") for item in assets_with_time):
+            reasons.append("date_only_filename_fallback")
+        if len(unique_times) == 1 and len(assets_with_time) > 1:
+            reasons.append("all_timestamps_identical")
+        status = "pass"
+        if any(reason in {"filename_times_collapsed", "all_timestamps_identical"} for reason in reasons):
+            status = "fail"
+        elif reasons:
+            status = "partial"
+        return {"status": status, "reasons": reasons}
 
     def _location_confidence(self, gps_raw: dict[str, Any] | None) -> float | None:
         if not gps_raw:
@@ -993,16 +1045,24 @@ class AssetMetadataBuilder:
                 return {
                     "raw": whatsapp.group(0),
                     "normalized": iso,
-                    "epoch_ms": None,
+                    "utc": None,
+                    "epoch_ms": self._naive_iso_to_sort_epoch_ms(iso),
                     "confidence": 0.35,
+                    "has_clock_time": False,
                 }
             if whatsapp.group("date2") and whatsapp.group("time2"):
-                iso = f"{whatsapp.group('date2')}T{whatsapp.group('time2').replace('.', ':')}"
+                iso = self._filename_time_iso(
+                    whatsapp.group("date2"),
+                    whatsapp.group("time2"),
+                    whatsapp.group("ampm"),
+                )
                 return {
                     "raw": whatsapp.group(0),
                     "normalized": iso,
-                    "epoch_ms": None,
-                    "confidence": 0.35,
+                    "utc": None,
+                    "epoch_ms": self._naive_iso_to_sort_epoch_ms(iso),
+                    "confidence": 0.55,
+                    "has_clock_time": True,
                 }
         generic = _GENERIC_FILENAME_DT_RE.search(filename)
         if not generic:
@@ -1017,9 +1077,21 @@ class AssetMetadataBuilder:
         return {
             "raw": generic.group(0),
             "normalized": iso,
-            "epoch_ms": None,
+            "utc": None,
+            "epoch_ms": self._naive_iso_to_sort_epoch_ms(iso),
             "confidence": 0.35,
+            "has_clock_time": bool(generic.group("hour")),
         }
+
+    def _filename_time_iso(self, date_value: str, time_value: str, ampm: str | None) -> str:
+        hour_text, minute_text, second_text = time_value.split(".")
+        hour = int(hour_text)
+        if ampm:
+            if hour == 12:
+                hour = 0
+            if ampm.upper() == "PM":
+                hour += 12
+        return f"{date_value}T{hour:02d}:{minute_text}:{second_text}"
 
     def _filesystem_times(self, path: Path) -> dict[str, Any]:
         stat = path.stat()
@@ -1057,4 +1129,15 @@ class AssetMetadataBuilder:
             return None
         if parsed.tzinfo is None:
             return None
+        return int(parsed.timestamp() * 1000)
+
+    def _naive_iso_to_sort_epoch_ms(self, iso_value: str | None) -> int | None:
+        if not iso_value:
+            return None
+        try:
+            parsed = dt.datetime.fromisoformat(iso_value)
+        except ValueError:
+            return None
+        if parsed.tzinfo is None:
+            parsed = parsed.replace(tzinfo=dt.timezone.utc)
         return int(parsed.timestamp() * 1000)

@@ -47,6 +47,8 @@ class AssetRecord:
     height: int | None = None
     rotation: int | None = None
     folder_category: str | None = None
+    sha256: str | None = None
+    duplicate_of_asset_id: str | None = None
     metadata_status: str = "pending"
     capture_time_iso: str | None = None
     capture_time_source: str | None = None

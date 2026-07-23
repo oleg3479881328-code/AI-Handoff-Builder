@@ -3,8 +3,8 @@
 - Date: 2026-07-23
 - Repository: `oleg3479881328-code/AI-Handoff-Builder`
 - Active contract: `Yt-Dlp-Download-Manager` issue `#67`
-- Current branch: `codex/release-candidate-light-dark-ui`
-- Current phase: Release-candidate acceptance refresh completed locally; final publication handoff in progress
+- Current branch: `codex/real-package-hardening-v1`
+- Current phase: Real Package Hardening v1 implemented locally from the accepted RC baseline; final acceptance is blocked by source-set mismatch against the coordinator's `51 asset / 17 photo` expectation
 
 ## What Exists Now
 
@@ -22,6 +22,12 @@
   - live theme switching without restart
   - themed dialogs, summary window, Local Edit Runner, and Voice Studio
   - themed text/list widgets and focus styling
+- The new hardening branch additionally changes the v1 handoff pipeline so that:
+  - WhatsApp filenames with `AM/PM` now parse to real clock times instead of collapsing to midnight
+  - exact SHA-256 duplicate groups are detected and exposed through `duplicate_of_asset_id`
+  - artifact coverage is separated from metadata and chronology quality statuses
+  - `gps_missing` is downgraded to `info`
+  - scene provenance is exported explicitly as `detected_scene`, `uniform_coverage`, or `short_full_video`
 
 ## Accepted Baseline Verified
 
@@ -57,12 +63,41 @@
   - `git diff --check` -> only LF/CRLF warning in `app.py`
 - Portable build:
   - `cmd /c "echo.| build_exe.bat"` -> success on 2026-07-23
+- Full regression suite on the hardening branch:
+  - `python -m pytest -q` -> `93 passed in 44.63s`
+- Targeted hardening regressions:
+  - `python -m pytest -q tests/test_pipeline.py -k "whatsapp or chronology or duplicate or quality or gps_missing or metadata_contract_failure"` -> `10 passed`
 - Existing packaged runtime still includes:
   - `dist\AI Handoff Builder\AI Handoff Builder.exe`
   - `dist\AI Handoff Builder\bin\ffmpeg.exe`
   - `dist\AI Handoff Builder\bin\ffprobe.exe`
   - `dist\AI Handoff Builder\bin\exiftool.exe`
   - `dist\AI Handoff Builder\bin\exiftool_files\**`
+
+## Real Package Hardening v1 Result
+
+- New working branch was cut from the accepted RC commit:
+  - base branch: `codex/release-candidate-light-dark-ui`
+  - base commit: `56d927a3e93f1ee4b161cbcfe55f729fc2207091`
+  - working branch: `codex/real-package-hardening-v1`
+- Real rebuild completed on the locally available `WEDDING_PROJECTv2` source set:
+  - source path used: `tmp_metadata_real\WEDDING_PROJECTv2_20260722_192513\source\zip_001_Раскладывание_вещей`
+  - new output ZIP: `tmp_real_package_hardening_v1\WEDDING_PROJECTv2_ANALYSIS_HANDOFF.zip`
+- The rebuilt package now proves:
+  - filename-derived timestamps are no longer all `00:00:00`
+  - chronology is ordered by the parsed file times
+  - `artifact_coverage_ok=true`
+  - `metadata_completeness=partial`
+  - `metadata_reliability=partial`
+  - `chronology_reliability=pass`
+  - `gps_missing` warnings were downgraded to `info`
+  - `scene_count=67`
+  - `missing_artifact_paths=[]`
+  - `failed_asset_count=0`
+- The locally available source set did **not** satisfy the coordinator's expected proof shape:
+  - actual local counts: `50 asset / 34 video / 16 photo`
+  - actual exact duplicate count: `0`
+  - therefore the acceptance proof `51 asset / exact duplicate detected` is still blocked by source mismatch, not by the implemented code path
 
 ## UI Evidence
 
@@ -117,6 +152,6 @@
 
 ## Immediate Next Actions
 
-1. Commit and push `codex/release-candidate-light-dark-ui`.
-2. Update only the existing Notion Implementation Report with final status, evidence, and exact publication SHA.
-3. Wait for coordinator / owner review. No merge.
+1. Commit and push `codex/real-package-hardening-v1`.
+2. Update the current Notion Implementation Report with the hardening results and the source-mismatch blocker proof.
+3. Wait for coordinator decision on the `50/34/16` vs `51/34/17` source mismatch. No merge.

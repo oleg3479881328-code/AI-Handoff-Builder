@@ -1,96 +1,82 @@
 # Latest Log
 
 Date: 2026-07-23
-Step: Release-candidate Light/Dark UI acceptance refresh, paired GUI proof, and publication prep
+Step: Real Package Hardening v1 from the accepted RC baseline
 
 ## Completed
 
-- Continued from the accepted metadata branch ancestry without re-merging accepted Voicebox work.
-- Confirmed local ancestry from accepted Voicebox baseline into accepted metadata head before RC work:
-  - `5f6a6e5b70251dd06d47824440b06a969c314579` -> ancestor of `7d06faac3bdc7ab9ba423a5876a3e5607e5444e8`
-- Created and used release-candidate branch:
-  - `codex/release-candidate-light-dark-ui`
-- Added centralized theme tokens and persistent selection storage in:
-  - `handoff_builder/theme.py`
-- Updated the existing Tkinter app so the release candidate now supports:
-  - visible Dark / Light switch in the persistent header
-  - saved theme choice between launches
-  - themed dialogs for info / warning / error
-  - themed Prepare Handoff summary window
-  - themed Local Edit Runner panes and text surfaces
-  - themed Voice Studio window and controls
-  - themed listboxes / text widgets / focus states
-- Added theme regression coverage in:
-  - `tests/test_theme.py`
-- Preserved the already-completed real end-to-end evidence on this RC line:
-  - real analysis handoff package
-  - imported minimal real `AI_EDIT_PACKAGE`
-  - preview render
-  - three real `Olga` takes
-  - approved take
-  - patch
-  - rerendered MP4
-- Generated paired Light/Dark GUI screenshots for the required screens and states:
-  - Prepare Handoff
-  - summary dialog
-  - Local Edit Runner
-  - busy render state
-  - Voice Studio
-  - info / warning / error dialogs
-- Stored paired screenshot artifacts at:
-  - `tmp_rc_theme_screenshots\dark_prepare_main.png`
-  - `tmp_rc_theme_screenshots\light_prepare_main.png`
-  - `tmp_rc_theme_screenshots\dark_summary.png`
-  - `tmp_rc_theme_screenshots\light_summary.png`
-  - `tmp_rc_theme_screenshots\dark_local_edit_runner.png`
-  - `tmp_rc_theme_screenshots\light_local_edit_runner.png`
-  - `tmp_rc_theme_screenshots\dark_local_edit_runner_busy.png`
-  - `tmp_rc_theme_screenshots\light_local_edit_runner_busy.png`
-  - `tmp_rc_theme_screenshots\dark_voice_studio.png`
-  - `tmp_rc_theme_screenshots\light_voice_studio.png`
-  - `tmp_rc_theme_screenshots\dark_dialog_info.png`
-  - `tmp_rc_theme_screenshots\light_dialog_info.png`
-  - `tmp_rc_theme_screenshots\dark_dialog_warning.png`
-  - `tmp_rc_theme_screenshots\light_dialog_warning.png`
-  - `tmp_rc_theme_screenshots\dark_dialog_error.png`
-  - `tmp_rc_theme_screenshots\light_dialog_error.png`
-- Generated machine-readable UI validation artifacts:
-  - `tmp_rc_theme_screenshots\theme_ui_validation.json`
-  - `tmp_rc_theme_screenshots\voice_studio_theme_validation.json`
-- Verified visible key controls at:
-  - `100%` scaling
-  - `125%` scaling
-  - `150%` scaling
-- Recorded keyboard focus traversal for both Dark and Light themes across:
-  - header theme controls
-  - notebook
-  - source action buttons
-  - source listbox
-  - settings entries
+- Started from accepted RC commit:
+  - branch: `codex/release-candidate-light-dark-ui`
+  - commit: `56d927a3e93f1ee4b161cbcfe55f729fc2207091`
+- Created the new working branch:
+  - `codex/real-package-hardening-v1`
+- Implemented narrow hardening changes in the existing v1 handoff pipeline:
+  - WhatsApp `AM/PM` filename parsing now preserves real clock time instead of collapsing to `00:00:00`
+  - exact SHA-256 duplicate wiring was added through `sha256` and `duplicate_of_asset_id`
+  - quality output was split into:
+    - `artifact_coverage_ok`
+    - `metadata_completeness`
+    - `metadata_reliability`
+    - `chronology_reliability`
+  - `gps_missing` was downgraded from `warning` to `info`
+  - scene provenance export now uses a stable origin label derived from the detection mode
+- Updated local transfer-state docs:
+  - `PROJECT_STATE.md`
+  - `logs/latest.md`
 
 ## Verification
 
-- `python -m pytest -q` -> `87 passed in 48.49s`
-- `python -m compileall handoff_builder app.py` -> success
-- `git diff --check` -> only LF/CRLF warning in `app.py`
-- earlier portable build on the same RC code line:
-  - `cmd /c "echo.| build_exe.bat"` -> success on 2026-07-23
-- real RC rerender artifact remains valid at:
-  - `tmp_rc_real_e2e\workspace\renders\46cf0e82d55d5a4d49ac\reel.mp4`
-- paired Voice Studio UI proof confirms:
-  - `Voice Studio готов. Можно прослушать takes и нажать Approve.`
-  - job label `b15f0c360c9f8daf9ccd | approved | takes=3 | approved=yes`
-  - `take_count=3`
+- Targeted hardening regressions:
+  - `python -m pytest -q tests/test_pipeline.py -k "whatsapp or chronology or duplicate or quality or gps_missing or metadata_contract_failure"` -> `10 passed`
+- Full regression suite:
+  - `python -m pytest -q` -> `93 passed in 44.63s`
+- Real rebuild on the locally available wedding source set:
+  - source folder:
+    - `tmp_metadata_real\WEDDING_PROJECTv2_20260722_192513\source\zip_001_Раскладывание_вещей`
+  - output ZIP:
+    - `tmp_real_package_hardening_v1\WEDDING_PROJECTv2_ANALYSIS_HANDOFF.zip`
+- New rebuilt package facts:
+  - `source_asset_count=50`
+  - `source_video_count=34`
+  - `source_photo_count=16`
+  - `scene_count=67`
+  - `artifact_coverage_ok=true`
+  - `metadata_completeness=partial`
+  - `metadata_reliability=partial`
+  - `chronology_reliability=pass`
+  - `missing_artifact_paths=[]`
+  - `failed_asset_count=0`
+  - `duplicate_asset_count=0`
+- Real chronology proof from the rebuilt package:
+  - first normalized timestamps now include real clock values such as:
+    - `2026-07-19T20:33:32`
+    - `2026-07-19T20:33:33`
+    - `2026-07-19T20:33:44`
+    - `2026-07-19T20:34:28`
+    - `2026-07-19T20:36:05`
+  - chronology no longer collapses all assets to midnight
+- Warning severity split from the rebuilt package:
+  - `gps_missing` -> `info` (`50`)
+  - `filename_fallback` -> `warning` (`50`)
 
-## Notes
+## Blocker
 
-- The scaling JSON was regenerated to exclude unmapped `1x1` widgets from non-visible panes; the final pass/fail result now reflects only visible controls.
-- Tkinter emits harmless `invalid command name "..._poll_events"` shutdown messages during automation teardown because the app schedules `after(...)` polling and the test harness destroys the window immediately after capture.
-- The working branch still has not been merged into `main`.
+- The coordinator's expected proof target was:
+  - `51 asset / 34 video / 17 photo`
+  - one exact duplicate detected
+- The locally available real source set on this machine is:
+  - `50 asset / 34 video / 16 photo`
+  - exact duplicate groups detected: `0`
+- This mismatch was confirmed from:
+  - the source directory file count
+  - previous local `validation_report.json` files
+  - the new rebuilt package
+- Result:
+  - code changes are implemented and verified locally
+  - acceptance proof for `51/34/17` is blocked by source-set mismatch, not by an unimplemented code path
 
 ## Next
 
-- Commit the RC theme integration and documentation refresh.
-- Push `codex/release-candidate-light-dark-ui`.
-- Update only the existing Notion Implementation Report with final status, commit SHA, changed files, evidence, and clean tracked worktree proof.
-- Wait for review. No merge.
+- Commit and push `codex/real-package-hardening-v1`.
+- Update the current Notion Implementation Report with the implemented fixes, rebuilt package evidence, and the source-mismatch blocker.
+- Wait for coordinator decision. No merge, release, or tag.

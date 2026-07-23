@@ -20,6 +20,7 @@ from .utils import (
     media_type_for,
     relative_posix,
     safe_extract_zip,
+    sha256_file,
     slugify,
     stable_asset_id,
 )
@@ -250,6 +251,7 @@ class HandoffBuilder:
                     extension=source.suffix.lower(),
                     size_bytes=source.stat().st_size,
                     folder_category=category,
+                    sha256=sha256_file(source),
                 )
                 assets.append(asset)
                 asset_index[asset.asset_id] = asset
@@ -257,6 +259,9 @@ class HandoffBuilder:
             except Exception as exc:
                 registry_failures.append((source, str(exc)))
                 self.log(f"REGISTRY FAILED: {source}: {exc}")
+
+        duplicate_groups = self._mark_exact_duplicates(assets)
+        duplicate_asset_count = sum(1 for asset in assets if asset.duplicate_of_asset_id)
 
         completed = 0
         max_workers = max(1, min(int(self.config.worker_count or 1), 2))
@@ -400,6 +405,13 @@ class HandoffBuilder:
                 + ", ".join(missing_manifest_metadata)
             )
         metadata_hard_failures.extend(self._metadata_contract_failures(metadata_result.normalized_records))
+        artifact_coverage_ok = (
+            not failed
+            and not videos_without_scenes
+            and not photos_without_copies
+            and not missing_paths
+        )
+        chronology_reliability = metadata_result.chronology_report.get("chronology_reliability", "fail")
 
         validation = {
             "schema_version": "1.0",
@@ -422,6 +434,11 @@ class HandoffBuilder:
             "extraction_error_count": metadata_result.coverage_summary["extraction_error_count"],
             "gps_export_mode": metadata_result.coverage_summary["gps_export_mode"],
             "metadata_coverage_status": metadata_result.coverage_summary["metadata_coverage_status"],
+            "artifact_coverage_ok": artifact_coverage_ok,
+            "metadata_completeness": metadata_result.coverage_summary["metadata_completeness"],
+            "metadata_reliability": metadata_result.coverage_summary["metadata_reliability"],
+            "chronology_reliability": chronology_reliability,
+            "chronology_reliability_reasons": metadata_result.chronology_report.get("chronology_reliability_reasons", []),
             "metadata_status_counts": {
                 "ok": metadata_result.coverage_summary["ok_count"],
                 "partial": metadata_result.coverage_summary["partial_count"],
@@ -442,6 +459,8 @@ class HandoffBuilder:
             "metadata_hard_failures": metadata_hard_failures,
             "missing_manifest_metadata": missing_manifest_metadata,
             "duplicate_metadata_ids": duplicate_metadata_ids,
+            "duplicate_asset_count": duplicate_asset_count,
+            "duplicate_groups": duplicate_groups,
             "videos_without_scenes": [a.asset_id for a in videos_without_scenes],
             "photos_without_analysis_copies": [a.asset_id for a in photos_without_copies],
             "failed_assets": [
@@ -453,13 +472,7 @@ class HandoffBuilder:
                 for asset in failed
             ],
             "missing_artifact_paths": missing_paths,
-            "coverage_ok": (
-                not failed
-                and not videos_without_scenes
-                and not photos_without_copies
-                and not missing_paths
-                and not metadata_hard_failures
-            ),
+            "coverage_ok": artifact_coverage_ok,
         }
 
         manifest = {
@@ -507,11 +520,15 @@ SUMMARY
 - Photos: {len(source_photos)}
 - Scenes/coverage segments: {len(scenes)}
 - Failed assets: {len(failed)}
-- Coverage OK: {validation['coverage_ok']}
+- Artifact coverage OK: {validation['artifact_coverage_ok']}
 - Metadata records: {validation['metadata_records_total']}
 - Assets with capture time: {validation['assets_with_capture_time']}
 - Assets with GPS: {validation['assets_with_gps']}
 - Metadata warnings: {validation['metadata_warning_count']}
+- Metadata completeness: {validation['metadata_completeness']}
+- Metadata reliability: {validation['metadata_reliability']}
+- Chronology reliability: {validation['chronology_reliability']}
+- Exact duplicates: {validation['duplicate_asset_count']}
 
 IMPORTANT
 Every source video must have at least one keyframe and one preview.
@@ -556,7 +573,9 @@ FILES
         self.progress(1.0, f"Done: {archive_path.name}")
         self.log(
             f"Created {archive_path} ({human_bytes(archive_path.stat().st_size)}), "
-            f"coverage_ok={validation['coverage_ok']}"
+            f"artifact_coverage_ok={validation['artifact_coverage_ok']} "
+            f"metadata_completeness={validation['metadata_completeness']} "
+            f"chronology_reliability={validation['chronology_reliability']}"
         )
         return BuildResult(
             archive_path=archive_path,
@@ -581,6 +600,30 @@ FILES
                 scene.scene_id,
             ),
         )
+
+    def _mark_exact_duplicates(self, assets: list[AssetRecord]) -> list[dict[str, object]]:
+        by_sha: dict[str, list[AssetRecord]] = {}
+        for asset in assets:
+            if not asset.sha256:
+                continue
+            by_sha.setdefault(asset.sha256, []).append(asset)
+
+        groups: list[dict[str, object]] = []
+        for sha256, members in sorted(by_sha.items()):
+            canonical = members[0]
+            duplicates = members[1:]
+            for duplicate in duplicates:
+                duplicate.duplicate_of_asset_id = canonical.asset_id
+            if duplicates:
+                groups.append(
+                    {
+                        "sha256": sha256,
+                        "canonical_asset_id": canonical.asset_id,
+                        "duplicate_asset_ids": [item.asset_id for item in duplicates],
+                        "member_count": len(members),
+                    }
+                )
+        return groups
 
     def _build_asset_manifest_entry(self, asset: AssetRecord, metadata_record: dict[str, object]) -> dict[str, object]:
         location = dict(metadata_record.get("location") or {})
@@ -607,6 +650,7 @@ FILES
         payload["device_id"] = metadata_record.get("device_id") if metadata_record else None
         payload["time_confidence"] = metadata_record.get("time_confidence") if metadata_record else None
         payload["location_confidence"] = metadata_record.get("location_confidence") if metadata_record else None
+        payload["segment_origin"] = self._segment_origin(scene.detection_mode)
         payload["normalized_start_time"] = self._shift_iso_by_ms(
             metadata_record.get("capture_time_project") if metadata_record else None,
             scene.start_ms,
@@ -633,6 +677,14 @@ FILES
         if rotation in {90, 270}:
             portrait = not portrait
         return "portrait" if portrait else "landscape"
+
+    def _segment_origin(self, detection_mode: str) -> str:
+        mapping = {
+            "scene_detection": "detected_scene",
+            "uniform_coverage": "uniform_coverage",
+            "short_full_video": "short_full_video",
+        }
+        return mapping.get(detection_mode, detection_mode)
 
     def _metadata_contract_failures(self, normalized_records: list[dict[str, object]]) -> list[str]:
         failures: list[str] = []

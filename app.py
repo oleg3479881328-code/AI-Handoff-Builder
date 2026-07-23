@@ -738,7 +738,7 @@ class App(tk.Tk):
         coverage_ok = bool(summary.get("coverage_ok"))
         tk.Label(
             body,
-            text="Coverage OK" if coverage_ok else "Coverage needs attention",
+            text="Artifact coverage OK" if coverage_ok else "Artifact coverage needs attention",
             font=("Segoe UI Semibold", 18),
             fg=self.theme_palette.success if coverage_ok else self.theme_palette.error,
             bg=self.theme_palette.app_bg,
@@ -753,8 +753,12 @@ class App(tk.Tk):
             f"{summary.get('assets_with_capture_time', 0)} assets with capture time",
             f"{summary.get('assets_with_gps', 0)} assets with GPS",
             f"{summary.get('metadata_status_counts', {}).get('partial', 0)} partial metadata records",
+            f"Metadata completeness: {summary.get('metadata_completeness', '-')}",
+            f"Metadata reliability: {summary.get('metadata_reliability', '-')}",
+            f"Chronology reliability: {summary.get('chronology_reliability', '-')}",
+            f"Exact duplicates: {summary.get('duplicate_asset_count', 0)}",
             f"{summary.get('failed_asset_count', 0)} lost files",
-            f"Coverage OK: {coverage_ok}",
+            f"Artifact coverage OK: {coverage_ok}",
         ]
         for line in lines:
             ttk.Label(body, text=line).pack(anchor="w", pady=(10 if line == lines[0] else 4, 0))
@@ -763,7 +767,7 @@ class App(tk.Tk):
             failed = summary.get("failed_assets", [])
             ttk.Label(
                 body,
-                text=f"Export is not a green success because coverage_ok=false. Failed assets: {len(failed)}",
+                text=f"Export is not a green success because artifact coverage is false. Failed assets: {len(failed)}",
                 wraplength=460,
             ).pack(anchor="w", pady=(14, 0))
 
