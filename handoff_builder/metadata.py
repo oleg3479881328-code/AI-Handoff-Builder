@@ -4,8 +4,10 @@ import datetime as dt
 import hashlib
 import json
 import math
+import os
 import re
 from dataclasses import dataclass
+from collections import defaultdict
 from pathlib import Path
 from typing import Any
 
@@ -31,6 +33,7 @@ _GENERIC_FILENAME_DT_RE = re.compile(
 class MetadataBuildResult:
     raw_records: list[dict[str, Any]]
     normalized_records: list[dict[str, Any]]
+    local_asset_registry: dict[str, Any]
     device_clock_profiles: dict[str, Any]
     chronology_report: dict[str, Any]
     location_clusters: dict[str, Any]
@@ -67,9 +70,11 @@ class AssetMetadataBuilder:
 
             asset.metadata_status = normalized_record["metadata_status"]
             asset.capture_time_iso = normalized_record.get("normalized_capture_time")
+            asset.capture_time_source = normalized_record.get("capture_time_source")
             asset.capture_time_confidence = normalized_record.get("time_confidence")
             asset.timezone_source = normalized_record.get("timezone_source")
-            asset.gps_present = bool(normalized_record.get("gps_raw"))
+            asset.gps_present = bool(normalized_record.get("location", {}).get("latitude") is not None)
+            asset.location_confidence = normalized_record.get("location_confidence")
             asset.device_id = normalized_record.get("device_id")
 
         location_clusters = self._build_location_clusters(normalized_records)
@@ -102,9 +107,22 @@ class AssetMetadataBuilder:
             "tool_status": tool_status,
             "warnings": warnings,
         }
+        local_asset_registry = {
+            "schema_version": METADATA_SCHEMA_VERSION,
+            "assets": [
+                {
+                    "asset_id": asset.asset_id,
+                    "source_path": asset.source_path,
+                    "relative_source_path": asset.relative_source_path,
+                    "original_name": asset.original_name,
+                }
+                for asset in assets
+            ],
+        }
         return MetadataBuildResult(
-            raw_records=raw_records,
-            normalized_records=normalized_records,
+            raw_records=[self._sanitize_raw_record_for_export(item) for item in raw_records],
+            normalized_records=[self._sanitize_normalized_record_for_export(item) for item in normalized_records],
+            local_asset_registry=local_asset_registry,
             device_clock_profiles=device_clock_profiles,
             chronology_report=chronology_report,
             location_clusters=location_clusters,
@@ -151,34 +169,50 @@ class AssetMetadataBuilder:
                 )
             )
             return {}
-        args = [
-            str(tool_status["exiftool"]["path"]),
-            "-json",
-            "-n",
-            "-G",
-            "-api",
-            "largefilesupport=1",
-        ]
-        args.extend(asset.source_path for asset in assets)
-        try:
-            completed = run_command(args, cancel_event=None)
-            payload = json.loads(completed.stdout or "[]")
-        except (FFmpegError, json.JSONDecodeError) as exc:
-            tool_status["exiftool"]["status"] = "error"
-            tool_status["exiftool"]["error"] = str(exc)
-            warnings.append(
-                self._warning(
-                    code="exiftool_failed",
-                    severity="warning",
-                    message=f"ExifTool failed; continuing with fallbacks. {exc}",
-                )
-            )
-            return {}
         result: dict[str, dict[str, Any]] = {}
-        for item in payload:
-            source_file = str(item.get("SourceFile") or "")
-            if source_file:
-                result[str(Path(source_file).resolve())] = item
+        grouped_assets: dict[Path, list[AssetRecord]] = defaultdict(list)
+        for asset in assets:
+            grouped_assets[Path(asset.source_path).resolve().parent].append(asset)
+
+        exiftool_errors: list[str] = []
+        exiftool_env = os.environ.copy()
+        for key in ("LANG", "LC_ALL", "LC_CTYPE"):
+            exiftool_env.pop(key, None)
+
+        for parent_dir, group in grouped_assets.items():
+            args = [
+                str(tool_status["exiftool"]["path"]),
+                "-json",
+                "-n",
+                "-G",
+                "-api",
+                "largefilesupport=1",
+            ]
+            args.extend(Path(asset.source_path).name for asset in group)
+            try:
+                completed = run_command(args, cancel_event=None, cwd=parent_dir, env=exiftool_env)
+                payload = json.loads(completed.stdout or "[]")
+            except (FFmpegError, json.JSONDecodeError) as exc:
+                exiftool_errors.append(f"{parent_dir}: {exc}")
+                warnings.append(
+                    self._warning(
+                        code="exiftool_failed",
+                        severity="warning",
+                        message=f"ExifTool failed in {parent_dir}; continuing with fallbacks. {exc}",
+                    )
+                )
+                continue
+
+            for item in payload:
+                source_file = str(item.get("SourceFile") or "")
+                if source_file:
+                    result[str((parent_dir / source_file).resolve())] = item
+
+        if exiftool_errors and not result:
+            tool_status["exiftool"]["status"] = "error"
+            tool_status["exiftool"]["error"] = "\n".join(exiftool_errors)
+        elif exiftool_errors:
+            tool_status["exiftool"]["group_errors"] = exiftool_errors
         return result
 
     def _build_asset_record(
@@ -196,7 +230,8 @@ class AssetMetadataBuilder:
         raw_record = {
             "schema_version": METADATA_SCHEMA_VERSION,
             "asset_id": asset.asset_id,
-            "source_path": asset.source_path,
+            "original_name": asset.original_name,
+            "relative_source_path": asset.relative_source_path,
             "media_type": asset.media_type,
             "tool_sources": {
                 "exiftool": bool(exiftool_payload),
@@ -224,15 +259,30 @@ class AssetMetadataBuilder:
                 if not exif:
                     return {}
                 payload: dict[str, Any] = {}
+                gps_ifd: dict[str, Any] = {}
+                get_ifd = getattr(exif, "get_ifd", None)
+                if callable(get_ifd):
+                    try:
+                        raw_gps_ifd = get_ifd(_GPS_TAG_ID)
+                    except Exception:
+                        raw_gps_ifd = None
+                    if isinstance(raw_gps_ifd, dict):
+                        gps_ifd = {
+                            _GPS_NAME_BY_ID.get(gps_key, str(gps_key)): self._json_safe_value(gps_value)
+                            for gps_key, gps_value in raw_gps_ifd.items()
+                        }
                 for tag_id, value in exif.items():
                     name = ExifTags.TAGS.get(tag_id, str(tag_id))
-                    if tag_id == _GPS_TAG_ID and isinstance(value, dict):
-                        gps_payload: dict[str, Any] = {}
-                        for gps_key, gps_value in value.items():
-                            gps_payload[_GPS_NAME_BY_ID.get(gps_key, str(gps_key))] = gps_value
-                        payload[name] = gps_payload
+                    if tag_id == _GPS_TAG_ID:
+                        if gps_ifd:
+                            payload[name] = gps_ifd
+                        elif isinstance(value, dict):
+                            gps_payload: dict[str, Any] = {}
+                            for gps_key, gps_value in value.items():
+                                gps_payload[_GPS_NAME_BY_ID.get(gps_key, str(gps_key))] = self._json_safe_value(gps_value)
+                            payload[name] = gps_payload
                     else:
-                        payload[name] = value
+                        payload[name] = self._json_safe_value(value)
                 return payload
         except Exception:
             return {}
@@ -313,24 +363,40 @@ class AssetMetadataBuilder:
             "asset_id": asset.asset_id,
             "metadata_status": metadata_status,
             "media_type": asset.media_type,
+            "original_name": asset.original_name,
             "relative_source_path": asset.relative_source_path,
             "source_order_index": source_index,
             "capture_time_raw": capture["raw"],
-            "capture_time_corrected": capture["corrected"],
+            "capture_time_source": capture["source"],
+            "capture_time_corrected": capture["project"],
+            "capture_time_utc": capture["utc"],
+            "capture_time_project": capture["project"],
             "normalized_capture_time": capture["normalized"],
             "normalized_capture_time_epoch_ms": capture["epoch_ms"],
             "time_source": capture["source"],
             "time_confidence": capture["confidence"],
+            "timezone_raw": capture["timezone_raw"],
             "timezone_offset_minutes": capture["timezone_offset_minutes"],
             "timezone_source": capture["timezone_source"],
             "clock_offset_ms": 0,
             "device_id": device["device_id"],
             "device_make": device["make"],
             "device_model": device["model"],
+            "camera_make": device["make"],
+            "camera_model": device["model"],
             "lens_model": device["lens_model"],
             "gps_export_mode": self.config.gps_export_mode,
-            "gps_raw": gps_raw,
-            "gps_exported": exported_location,
+            "gps_raw": self._gps_payload_only(gps_raw),
+            "gps_source": gps_raw["source"] if gps_raw else None,
+            "location": {
+                "cluster_id": None,
+                "export_mode": self.config.gps_export_mode,
+                "source": gps_raw["source"] if gps_raw else None,
+                "confidence": self._location_confidence(gps_raw),
+                **self._location_payload(exported_location),
+            },
+            "location_source": gps_raw["source"] if gps_raw else None,
+            "location_confidence": self._location_confidence(gps_raw),
             "location_cluster_id": None,
             "chronology_rank": None,
             "filename_time_hint": capture["filename_hint"],
@@ -354,19 +420,23 @@ class AssetMetadataBuilder:
         candidates = self._time_candidates(exiftool_payload, pillow_payload, ffprobe_payload)
         raw_value = None
         normalized = None
-        corrected = None
+        capture_time_utc = None
+        capture_time_project = None
         timezone_offset_minutes = None
+        timezone_raw = None
         timezone_source = None
         source = "missing"
-        confidence = "missing"
+        confidence = None
         epoch_ms = None
 
         if candidates:
             best = candidates[0]
             raw_value = best["raw"]
             normalized = best["normalized"]
-            corrected = best["normalized"]
+            capture_time_utc = best["utc"]
+            capture_time_project = best["project"]
             timezone_offset_minutes = best["timezone_offset_minutes"]
+            timezone_raw = best["timezone_raw"]
             timezone_source = best["timezone_source"]
             source = best["source"]
             confidence = best["confidence"]
@@ -397,7 +467,7 @@ class AssetMetadataBuilder:
             if filename_hint:
                 raw_value = filename_hint["raw"]
                 normalized = filename_hint["normalized"]
-                corrected = filename_hint["normalized"]
+                capture_time_project = filename_hint["normalized"]
                 source = "filename"
                 confidence = filename_hint["confidence"]
                 epoch_ms = filename_hint["epoch_ms"]
@@ -415,9 +485,10 @@ class AssetMetadataBuilder:
             else:
                 raw_value = filesystem["modified_at"]
                 normalized = filesystem["modified_at"]
-                corrected = filesystem["modified_at"]
+                capture_time_utc = filesystem["modified_at"]
+                capture_time_project = filesystem["modified_at"]
                 source = "filesystem"
-                confidence = "low"
+                confidence = 0.2
                 epoch_ms = self._iso_to_epoch_ms(filesystem["modified_at"])
                 warning_codes.append("filesystem_fallback")
                 sources.append("filesystem")
@@ -432,11 +503,13 @@ class AssetMetadataBuilder:
 
         return {
             "raw": raw_value,
-            "corrected": corrected,
+            "utc": capture_time_utc,
+            "project": capture_time_project,
             "normalized": normalized,
             "epoch_ms": epoch_ms,
             "source": source,
             "confidence": confidence,
+            "timezone_raw": timezone_raw,
             "timezone_offset_minutes": timezone_offset_minutes,
             "timezone_source": timezone_source,
             "warning_codes": warning_codes,
@@ -467,7 +540,7 @@ class AssetMetadataBuilder:
             candidate = self._normalize_datetime_candidate(
                 raw_value,
                 source="metadata",
-                confidence="high",
+                confidence=0.95,
                 timezone_value=offset_value,
                 timezone_source=offset_tag if offset_value else None,
             )
@@ -482,7 +555,7 @@ class AssetMetadataBuilder:
             candidate = self._normalize_datetime_candidate(
                 raw_value,
                 source="ffprobe",
-                confidence="medium",
+                confidence=0.8,
                 timezone_value=None,
                 timezone_source="embedded" if ("Z" in str(raw_value) or "+" in str(raw_value)) else None,
             )
@@ -516,7 +589,7 @@ class AssetMetadataBuilder:
         raw_value: Any,
         *,
         source: str,
-        confidence: str,
+        confidence: float,
         timezone_value: Any,
         timezone_source: str | None,
     ) -> dict[str, Any] | None:
@@ -528,9 +601,12 @@ class AssetMetadataBuilder:
         return {
             "raw": str(raw_value),
             "normalized": parsed["iso"],
+            "utc": parsed["utc"],
+            "project": parsed["project"],
             "epoch_ms": parsed["epoch_ms"],
             "source": source,
-            "confidence": confidence if parsed["timezone_offset_minutes"] is not None else "medium",
+            "confidence": confidence if parsed["timezone_offset_minutes"] is not None else round(confidence - 0.15, 3),
+            "timezone_raw": str(timezone_value) if timezone_value not in (None, "") else None,
             "timezone_offset_minutes": parsed["timezone_offset_minutes"],
             "timezone_source": timezone_source,
         }
@@ -563,6 +639,8 @@ class AssetMetadataBuilder:
         iso = parsed.isoformat(timespec="seconds")
         return {
             "iso": iso,
+            "utc": parsed.astimezone(dt.timezone.utc).isoformat(timespec="seconds") if parsed.tzinfo else None,
+            "project": iso,
             "epoch_ms": self._iso_to_epoch_ms(iso) if parsed.tzinfo else None,
             "timezone_offset_minutes": int(parsed.utcoffset().total_seconds() // 60) if parsed.tzinfo else None,
         }
@@ -586,6 +664,7 @@ class AssetMetadataBuilder:
                 "latitude": float(lat),
                 "longitude": float(lon),
                 "altitude": float(alt) if alt is not None else None,
+                "source": "EXIF:GPSLatitude/GPSLongitude",
             }
         gps = pillow_payload.get("GPSInfo") or {}
         if not gps:
@@ -599,7 +678,12 @@ class AssetMetadataBuilder:
             altitude = float(altitude_value) if altitude_value is not None else None
         except Exception:
             altitude = None
-        return {"latitude": latitude, "longitude": longitude, "altitude": altitude}
+        return {
+            "latitude": latitude,
+            "longitude": longitude,
+            "altitude": altitude,
+            "source": "Pillow:GPSInfo",
+        }
 
     def _gps_to_decimal(self, value: Any, ref: Any) -> float | None:
         if value is None:
@@ -629,7 +713,11 @@ class AssetMetadataBuilder:
         if not gps_raw or self.config.gps_export_mode == "excluded":
             return None
         if self.config.gps_export_mode == "exact":
-            return dict(gps_raw)
+            return {
+                "latitude": float(gps_raw["latitude"]),
+                "longitude": float(gps_raw["longitude"]),
+                "altitude": float(gps_raw["altitude"]) if gps_raw.get("altitude") is not None else None,
+            }
         if self.config.gps_export_mode == "rounded":
             return {
                 "latitude": round(float(gps_raw["latitude"]), 3),
@@ -637,7 +725,10 @@ class AssetMetadataBuilder:
                 "altitude": round(float(gps_raw["altitude"]), 1) if gps_raw.get("altitude") is not None else None,
             }
         return {
-            "venue_label": f"cluster_{round(float(gps_raw['latitude']), 2)}_{round(float(gps_raw['longitude']), 2)}"
+            "latitude": None,
+            "longitude": None,
+            "altitude": None,
+            "venue_label": f"cluster_{round(float(gps_raw['latitude']), 2)}_{round(float(gps_raw['longitude']), 2)}",
         }
 
     def _resolve_device(
@@ -683,7 +774,7 @@ class AssetMetadataBuilder:
     def _build_location_clusters(self, normalized_records: list[dict[str, Any]]) -> dict[str, Any]:
         clusters: dict[tuple[float, float], list[dict[str, Any]]] = {}
         for record in normalized_records:
-            gps = record.get("gps_exported") or record.get("gps_raw")
+            gps = record.get("gps_raw")
             if not gps or "latitude" not in gps or "longitude" not in gps:
                 continue
             key = (round(float(gps["latitude"]), 2), round(float(gps["longitude"]), 2))
@@ -696,7 +787,7 @@ class AssetMetadataBuilder:
             items.append(
                 {
                     "location_cluster_id": cluster_id,
-                    "centroid": {"latitude": key[0], "longitude": key[1]},
+                    "centroid": self._cluster_centroid_payload(key),
                     "members": [record["asset_id"] for record in members],
                     "asset_id": members[0]["asset_id"],
                 }
@@ -707,6 +798,15 @@ class AssetMetadataBuilder:
             "cluster_count": len(items),
             "clusters": items,
         }
+
+    def _cluster_centroid_payload(self, key: tuple[float, float]) -> dict[str, Any]:
+        if self.config.gps_export_mode == "exact":
+            return {"latitude": key[0], "longitude": key[1]}
+        if self.config.gps_export_mode == "rounded":
+            return {"latitude": round(key[0], 3), "longitude": round(key[1], 3)}
+        if self.config.gps_export_mode == "venue_label_only":
+            return {"latitude": None, "longitude": None, "venue_label": f"cluster_{key[0]}_{key[1]}"}
+        return {"latitude": None, "longitude": None}
 
     def _build_chronology(self, normalized_records: list[dict[str, Any]]) -> dict[str, Any]:
         ordered = sorted(
@@ -746,8 +846,8 @@ class AssetMetadataBuilder:
                 device_id,
                 {
                     "device_id": device_id,
-                    "device_make": record.get("device_make"),
-                    "device_model": record.get("device_model"),
+                    "device_make": record.get("camera_make"),
+                    "device_model": record.get("camera_model"),
                     "asset_ids": [],
                     "clock_offset_ms": 0,
                 },
@@ -767,10 +867,10 @@ class AssetMetadataBuilder:
     ) -> dict[str, Any]:
         metadata_records_total = len(normalized_records)
         capture_time_count = len([item for item in normalized_records if item.get("normalized_capture_time")])
-        gps_count = len([item for item in normalized_records if item.get("gps_raw")])
+        gps_count = len([item for item in normalized_records if item.get("location_source")])
         device_count = len([item for item in normalized_records if item.get("device_id")])
-        filename_fallback_count = len([item for item in normalized_records if item.get("time_source") == "filename"])
-        filesystem_fallback_count = len([item for item in normalized_records if item.get("time_source") == "filesystem"])
+        filename_fallback_count = len([item for item in normalized_records if item.get("capture_time_source") == "filename"])
+        filesystem_fallback_count = len([item for item in normalized_records if item.get("capture_time_source") == "filesystem"])
         missing_metadata_count = len([item for item in normalized_records if item.get("metadata_status") == "missing"])
         extraction_error_count = len([item for item in warnings if item.get("code") in {"exiftool_failed", "ffprobe_metadata_failed"}])
         return {
@@ -792,6 +892,98 @@ class AssetMetadataBuilder:
             "error_count": len([item for item in normalized_records if item.get("metadata_status") == "error"]),
         }
 
+    def _location_confidence(self, gps_raw: dict[str, Any] | None) -> float | None:
+        if not gps_raw:
+            return None
+        if self.config.gps_export_mode == "exact":
+            return 0.95
+        if self.config.gps_export_mode == "rounded":
+            return 0.9
+        if self.config.gps_export_mode == "venue_label_only":
+            return 0.8
+        return None
+
+    def _gps_payload_only(self, gps_raw: dict[str, Any] | None) -> dict[str, Any] | None:
+        if not gps_raw:
+            return None
+        return {
+            "latitude": gps_raw["latitude"],
+            "longitude": gps_raw["longitude"],
+            "altitude": gps_raw.get("altitude"),
+        }
+
+    def _location_payload(self, exported_location: dict[str, Any] | None) -> dict[str, Any]:
+        if not exported_location:
+            return {"latitude": None, "longitude": None, "altitude_m": None}
+        return {
+            "latitude": exported_location.get("latitude"),
+            "longitude": exported_location.get("longitude"),
+            "altitude_m": exported_location.get("altitude"),
+            **({"venue_label": exported_location["venue_label"]} if "venue_label" in exported_location else {}),
+        }
+
+    def _sanitize_raw_record_for_export(self, raw_record: dict[str, Any]) -> dict[str, Any]:
+        exported = dict(raw_record)
+        exported["filesystem"] = {
+            "modified_at": raw_record["filesystem"]["modified_at"],
+            "created_at": raw_record["filesystem"]["created_at"],
+        }
+        exported["exiftool"] = self._json_safe_value(raw_record["exiftool"])
+        exported["pillow"] = self._json_safe_value(raw_record["pillow"])
+        exported["ffprobe"] = self._json_safe_value(raw_record["ffprobe"])
+        if self.config.gps_export_mode != "exact":
+            exported["exiftool"] = self._redact_gps_tags(raw_record["exiftool"])
+            exported["pillow"] = self._redact_gps_tags(raw_record["pillow"])
+        return exported
+
+    def _sanitize_normalized_record_for_export(self, record: dict[str, Any]) -> dict[str, Any]:
+        exported = dict(record)
+        if self.config.gps_export_mode == "excluded":
+            exported["gps_raw"] = None
+            exported["location"] = {
+                "cluster_id": exported.get("location_cluster_id"),
+                "export_mode": self.config.gps_export_mode,
+                "source": None,
+                "confidence": None,
+                "latitude": None,
+                "longitude": None,
+                "altitude_m": None,
+            }
+            exported["location_source"] = None
+            exported["location_confidence"] = None
+        elif self.config.gps_export_mode in {"rounded", "venue_label_only"} and exported.get("gps_raw"):
+            exported["gps_raw"] = None
+        return exported
+
+    def _redact_gps_tags(self, payload: dict[str, Any]) -> dict[str, Any]:
+        if not payload:
+            return {}
+        redacted: dict[str, Any] = {}
+        for key, value in payload.items():
+            if "GPS" in str(key):
+                continue
+            redacted[key] = value
+        return redacted
+
+    def _json_safe_value(self, value: Any) -> Any:
+        if value is None or isinstance(value, (str, int, float, bool)):
+            return value
+        if isinstance(value, bytes):
+            return value.decode("utf-8", errors="replace")
+        if isinstance(value, dict):
+            return {str(key): self._json_safe_value(item) for key, item in value.items()}
+        if isinstance(value, (list, tuple, set)):
+            return [self._json_safe_value(item) for item in value]
+        if hasattr(value, "numerator") and hasattr(value, "denominator"):
+            try:
+                denominator = float(value.denominator)
+                if denominator == 0:
+                    return str(value)
+                return float(value.numerator) / denominator
+            except Exception:
+                return str(value)
+        return str(value)
+
     def _filename_hint(self, filename: str) -> dict[str, Any] | None:
         whatsapp = _WHATSAPP_RE.search(filename)
         if whatsapp:
@@ -802,7 +994,7 @@ class AssetMetadataBuilder:
                     "raw": whatsapp.group(0),
                     "normalized": iso,
                     "epoch_ms": None,
-                    "confidence": "low",
+                    "confidence": 0.35,
                 }
             if whatsapp.group("date2") and whatsapp.group("time2"):
                 iso = f"{whatsapp.group('date2')}T{whatsapp.group('time2').replace('.', ':')}"
@@ -810,7 +1002,7 @@ class AssetMetadataBuilder:
                     "raw": whatsapp.group(0),
                     "normalized": iso,
                     "epoch_ms": None,
-                    "confidence": "low",
+                    "confidence": 0.35,
                 }
         generic = _GENERIC_FILENAME_DT_RE.search(filename)
         if not generic:
@@ -826,7 +1018,7 @@ class AssetMetadataBuilder:
             "raw": generic.group(0),
             "normalized": iso,
             "epoch_ms": None,
-            "confidence": "low",
+            "confidence": 0.35,
         }
 
     def _filesystem_times(self, path: Path) -> dict[str, Any]:

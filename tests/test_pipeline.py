@@ -1,14 +1,18 @@
 from __future__ import annotations
 
 import json
+import subprocess
+import zipfile
 from pathlib import Path
 
 from PIL import Image
+from PIL.TiffImagePlugin import IFDRational
 
 from handoff_builder.ffmpeg_tools import FFmpegTools
 from handoff_builder.metadata import AssetMetadataBuilder
 from handoff_builder.models import AssetRecord, BuilderConfig
 from handoff_builder.pipeline import HandoffBuilder
+from handoff_builder.utils import stable_asset_id
 
 
 class FakeFFmpegTools:
@@ -19,6 +23,8 @@ class FakeFFmpegTools:
             "height": 1080,
             "rotation": 0,
             "codec": "h264",
+            "fps": 29.97,
+            "audio_present": True,
         }
 
     def make_proxy(self, source: Path, destination: Path, target_height: int = 720) -> None:
@@ -159,8 +165,8 @@ def test_all_artifact_paths_exist_and_unicode_windows_paths_work(tmp_path: Path)
         assert (result.package_root / scene["keyframe_path"]).exists()
         assert (result.package_root / scene["preview_path"]).exists()
 
-    assert any("источник с пробелом" in asset["source_path"] for asset in manifest["assets"])
-    assert any("невеста.jpg" in asset["source_path"] for asset in manifest["assets"])
+    assert any(asset["relative_source_path"] == "невеста.jpg" for asset in manifest["assets"])
+    assert "source_path" not in manifest["assets"][0]
 
 
 def test_process_photo_handles_unicode_windows_paths(tmp_path: Path):
@@ -207,7 +213,7 @@ def test_pipeline_writes_metadata_artifacts_and_keeps_one_record_per_asset(tmp_p
         result.package_root / "metadata" / "device_clock_profiles.json",
         result.package_root / "metadata" / "chronology_report.json",
         result.package_root / "metadata" / "location_clusters.json",
-        result.package_root / "metadata_warnings.json",
+        result.package_root / "metadata" / "metadata_warnings.json",
     ]
     for path in expected_paths:
         assert path.exists(), path
@@ -255,6 +261,7 @@ def test_metadata_builder_normalizes_exif_time_timezone_and_gps(tmp_path: Path):
 
     assert normalized["normalized_capture_time"] == "2024-07-16T14:22:11+03:00"
     assert normalized["gps_raw"] == {"latitude": 40.7128, "longitude": -74.006, "altitude": None}
+    assert normalized["location_source"] == "EXIF:GPSLatitude/GPSLongitude"
     assert normalized["metadata_status"] == "ok"
     assert normalized["device_id"] is not None
 
@@ -286,7 +293,7 @@ def test_metadata_builder_uses_ffprobe_quicktime_time_for_video(tmp_path: Path):
     )
 
     assert normalized["normalized_capture_time"] == "2024-07-16T10:00:00+00:00"
-    assert normalized["time_source"] == "ffprobe"
+    assert normalized["capture_time_source"] == "ffprobe"
 
 
 def test_whatsapp_filename_hint_is_low_confidence_and_timezone_unknown(tmp_path: Path):
@@ -296,7 +303,7 @@ def test_whatsapp_filename_hint_is_low_confidence_and_timezone_unknown(tmp_path:
 
     assert hint is not None
     assert hint["normalized"] == "2024-07-16T00:00:00"
-    assert hint["confidence"] == "low"
+    assert hint["confidence"] == 0.35
 
 
 def test_conflicting_timestamps_produce_warning_without_guessing_timezone(tmp_path: Path):
@@ -354,7 +361,7 @@ def test_gps_export_modes_are_stable(tmp_path: Path):
 
     assert exact == gps
     assert rounded == {"latitude": 40.713, "longitude": -74.006, "altitude": 15.7}
-    assert venue_only == {"venue_label": "cluster_40.71_-74.01"}
+    assert venue_only == {"latitude": None, "longitude": None, "altitude": None, "venue_label": "cluster_40.71_-74.01"}
     assert excluded is None
 
 
@@ -385,6 +392,18 @@ def test_chronology_is_deterministic_on_repeat(tmp_path: Path):
     assert first == second
 
 
+def test_stable_asset_id_ignores_mtime_changes(tmp_path: Path):
+    source = tmp_path / "source" / "clip.mp4"
+    _make_video_placeholder(source)
+
+    first = stable_asset_id(source, tmp_path / "source")
+    current_atime = source.stat().st_atime
+    source.touch()
+    second = stable_asset_id(source, tmp_path / "source")
+
+    assert first == second
+
+
 def test_missing_exiftool_generates_explicit_warning_and_filesystem_fallback(tmp_path: Path):
     source = tmp_path / "plain.jpg"
     _make_photo(source)
@@ -403,4 +422,194 @@ def test_missing_exiftool_generates_explicit_warning_and_filesystem_fallback(tmp
     result = builder.build([asset])
 
     assert any(item["code"] == "exiftool_unavailable" for item in result.warnings_payload["warnings"])
-    assert result.normalized_records[0]["time_source"] in {"metadata", "filesystem"}
+    assert result.normalized_records[0]["capture_time_source"] in {"metadata", "filesystem"}
+
+
+def test_portable_package_excludes_absolute_source_paths_and_keeps_local_registry(tmp_path: Path):
+    source = tmp_path / "источник & Oleg's"
+    _make_photo(source / "IMG-20240716-WA0001.jpg")
+
+    builder = HandoffBuilder(
+        BuilderConfig(project_name="PORTABLE", output_dir=tmp_path / "out", include_video_proxies=False),
+        project_root=tmp_path,
+    )
+    builder.ffmpeg = FakeFFmpegTools()
+
+    result = builder.build([source])
+
+    manifest = json.loads((result.package_root / "handoff_manifest.json").read_text(encoding="utf-8"))
+    assert all("source_path" not in asset for asset in manifest["assets"])
+    assert result.local_asset_registry_path is not None
+    registry = json.loads(result.local_asset_registry_path.read_text(encoding="utf-8"))
+    assert registry["assets"][0]["source_path"].endswith("IMG-20240716-WA0001.jpg")
+    with zipfile.ZipFile(result.archive_path) as archive:
+        names = set(archive.namelist())
+        assert "local_asset_registry.json" not in names
+        assert "metadata/metadata_warnings.json" in names
+
+
+def test_exiftool_uses_parent_cwd_for_unicode_zip_roots(tmp_path: Path, monkeypatch):
+    source = tmp_path / "Раскладывание вещей" / "IMG-20240716-WA0001.jpg"
+    _make_photo(source)
+    asset = AssetRecord(
+        asset_id="asset-unicode",
+        media_type="photo",
+        original_name=source.name,
+        source_path=str(source),
+        relative_source_path=source.name,
+        extension=".jpg",
+        size_bytes=source.stat().st_size,
+    )
+    builder = AssetMetadataBuilder(BuilderConfig(project_name="X", output_dir=tmp_path), project_root=tmp_path)
+    builder._find_optional_executable = lambda name: str(tmp_path / "bin" / "exiftool.exe") if name == "exiftool" else None  # type: ignore[method-assign]
+
+    calls: list[dict[str, object]] = []
+
+    def fake_run_command(args, **kwargs):
+        calls.append({"args": args, "cwd": kwargs.get("cwd"), "env": kwargs.get("env")})
+        return subprocess.CompletedProcess(
+            args=args,
+            returncode=0,
+            stdout='[{"SourceFile":"IMG-20240716-WA0001.jpg","EXIF:DateTimeOriginal":"2024:07:16 12:34:56"}]',
+            stderr="",
+        )
+
+    monkeypatch.setattr("handoff_builder.metadata.run_command", fake_run_command)
+
+    result = builder.build([asset])
+
+    assert result.tool_status["exiftool"]["status"] == "available"
+    assert len(calls) == 1
+    assert calls[0]["cwd"] == source.parent.resolve()
+    assert calls[0]["args"][-1] == source.name
+    env = calls[0]["env"]
+    assert isinstance(env, dict)
+    assert "LANG" not in env
+    assert "LC_ALL" not in env
+    assert "LC_CTYPE" not in env
+
+
+def test_raw_metadata_export_serializes_pillow_rationals(tmp_path: Path):
+    builder = AssetMetadataBuilder(BuilderConfig(project_name="X", output_dir=tmp_path, gps_export_mode="exact"))
+    raw_record = {
+        "schema_version": "1.0",
+        "asset_id": "asset-rational",
+        "original_name": "camA_photo.jpg",
+        "relative_source_path": "camA_photo.jpg",
+        "media_type": "photo",
+        "tool_sources": {"exiftool": False, "pillow": True, "ffprobe": False, "filesystem": True},
+        "exiftool": {},
+        "pillow": {"XResolution": IFDRational(72, 1), "GPSInfo": {"GPSAltitude": IFDRational(5, 1)}},
+        "ffprobe": {},
+        "filesystem": {"modified_at": "2026-07-23T00:00:00+00:00", "created_at": "2026-07-23T00:00:00+00:00"},
+    }
+
+    exported = builder._sanitize_raw_record_for_export(raw_record)
+
+    assert exported["pillow"]["XResolution"] == 72.0
+    assert exported["pillow"]["GPSInfo"]["GPSAltitude"] == 5.0
+    json.dumps(exported, ensure_ascii=False)
+
+
+def test_extract_pillow_metadata_reads_gps_ifd_offsets(tmp_path: Path, monkeypatch):
+    path = tmp_path / "photo.jpg"
+    _make_photo(path)
+
+    class FakeExif(dict):
+        def get_ifd(self, tag_id: int):
+            if tag_id == 34853:
+                return {
+                    1: "N",
+                    2: ((40, 1), (42, 1), (46, 1)),
+                    3: "W",
+                    4: ((74, 1), (0, 1), (216, 10)),
+                    6: IFDRational(5, 1),
+                }
+            return None
+
+    class FakeImage:
+        def __enter__(self):
+            return self
+
+        def __exit__(self, exc_type, exc, tb):
+            return False
+
+        def getexif(self):
+            return FakeExif({34853: 226, 271: "Canon", 272: "R6"})
+
+    monkeypatch.setattr("handoff_builder.metadata.Image.open", lambda _: FakeImage())
+
+    builder = AssetMetadataBuilder(BuilderConfig(project_name="X", output_dir=tmp_path))
+    payload = builder._extract_pillow_metadata(path)
+
+    assert payload["GPSInfo"]["GPSLatitudeRef"] == "N"
+    assert payload["GPSInfo"]["GPSLongitudeRef"] == "W"
+    assert payload["GPSInfo"]["GPSAltitude"] == 5.0
+    assert payload["Make"] == "Canon"
+    assert payload["Model"] == "R6"
+
+
+def test_metadata_contract_failure_marks_coverage_not_ok(tmp_path: Path):
+    source = tmp_path / "source"
+    _make_photo(source / "IMG-20240716-WA0001.jpg")
+
+    builder = HandoffBuilder(
+        BuilderConfig(project_name="BROKEN_META", output_dir=tmp_path / "out", include_video_proxies=False),
+        project_root=tmp_path,
+    )
+    builder.ffmpeg = FakeFFmpegTools()
+
+    original_build = builder.metadata.build
+
+    def broken_build(assets):
+        result = original_build(assets)
+        result.normalized_records[0]["capture_time_source"] = None
+        result.normalized_records[0]["time_confidence"] = None
+        return result
+
+    builder.metadata.build = broken_build  # type: ignore[method-assign]
+    result = builder.build([source])
+
+    assert result.validation["coverage_ok"] is False
+    assert any("computed capture time missing source/confidence" in item for item in result.validation["metadata_hard_failures"])
+
+
+def test_prepare_handoff_succeeds_without_voicebox_runtime(tmp_path: Path):
+    source = tmp_path / "source"
+    _make_photo(source / "IMG-20240716-WA0001.jpg")
+
+    builder = HandoffBuilder(
+        BuilderConfig(project_name="NO_VOICEBOX", output_dir=tmp_path / "out", include_video_proxies=False),
+        project_root=tmp_path,
+    )
+    builder.ffmpeg = FakeFFmpegTools()
+
+    result = builder.build([source])
+
+    assert result.validation["coverage_ok"] is True
+
+
+def test_prepare_handoff_contract_is_stable_with_or_without_voicebox(tmp_path: Path):
+    source = tmp_path / "source"
+    _make_photo(source / "IMG-20240716-WA0001.jpg")
+
+    def build_once(name: str):
+        builder = HandoffBuilder(
+            BuilderConfig(project_name=name, output_dir=tmp_path / name, include_video_proxies=False),
+            project_root=tmp_path,
+        )
+        builder.ffmpeg = FakeFFmpegTools()
+        result = builder.build([source])
+        manifest = json.loads((result.package_root / "handoff_manifest.json").read_text(encoding="utf-8"))
+        manifest.pop("created_at", None)
+        return manifest
+
+    without_voicebox = build_once("WITHOUT_VOICEBOX")
+    with_voicebox = build_once("WITH_VOICEBOX")
+
+    without_voicebox["project_name"] = "SAME"
+    with_voicebox["project_name"] = "SAME"
+    without_voicebox["summary"]["project_name"] = "SAME"
+    with_voicebox["summary"]["project_name"] = "SAME"
+    assert without_voicebox["assets"] == with_voicebox["assets"]
+    assert without_voicebox["summary"]["metadata_report_paths"] == with_voicebox["summary"]["metadata_report_paths"]

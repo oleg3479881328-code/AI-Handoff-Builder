@@ -127,6 +127,8 @@ class HandoffBuilder:
         asset.width = meta["width"]
         asset.height = meta["height"]
         asset.rotation = meta["rotation"]
+        asset.fps = meta.get("fps")
+        asset.audio_present = bool(meta.get("audio_present"))
 
         if self.config.include_video_proxies:
             proxy = package_root / "video_proxies" / f"asset_{asset.asset_id}.mp4"
@@ -356,6 +358,8 @@ class HandoffBuilder:
                     missing_paths.append(rel)
 
         metadata_dir = package_root / "metadata"
+        local_asset_registry_path = job_root / "local_asset_registry.json"
+        json_dump(local_asset_registry_path, metadata_result.local_asset_registry)
         json_dump(
             metadata_dir / "asset_metadata_raw.json",
             {
@@ -375,8 +379,9 @@ class HandoffBuilder:
         json_dump(metadata_dir / "device_clock_profiles.json", metadata_result.device_clock_profiles)
         json_dump(metadata_dir / "chronology_report.json", metadata_result.chronology_report)
         json_dump(metadata_dir / "location_clusters.json", metadata_result.location_clusters)
-        json_dump(package_root / "metadata_warnings.json", metadata_result.warnings_payload)
+        json_dump(metadata_dir / "metadata_warnings.json", metadata_result.warnings_payload)
 
+        metadata_by_asset_id = {record["asset_id"]: record for record in metadata_result.normalized_records}
         metadata_ids = [record["asset_id"] for record in metadata_result.normalized_records]
         duplicate_metadata_ids = sorted({value for value in metadata_ids if metadata_ids.count(value) > 1})
         metadata_hard_failures: list[str] = []
@@ -389,6 +394,7 @@ class HandoffBuilder:
         missing_manifest_metadata = sorted(asset.asset_id for asset in assets if asset.asset_id not in set(metadata_ids))
         if missing_manifest_metadata:
             metadata_hard_failures.append("manifest references assets without metadata records")
+        metadata_hard_failures.extend(self._metadata_contract_failures(metadata_result.normalized_records))
 
         validation = {
             "schema_version": "1.0",
@@ -419,13 +425,14 @@ class HandoffBuilder:
             },
             "metadata_tool_status": metadata_result.tool_status,
             "metadata_warning_count": len(metadata_result.warnings_payload["warnings"]),
-            "metadata_warning_path": "metadata_warnings.json",
+            "metadata_warning_path": "metadata/metadata_warnings.json",
             "metadata_report_paths": {
                 "raw": "metadata/asset_metadata_raw.json",
                 "normalized": "metadata/asset_metadata_normalized.json",
                 "device_clock_profiles": "metadata/device_clock_profiles.json",
                 "chronology_report": "metadata/chronology_report.json",
                 "location_clusters": "metadata/location_clusters.json",
+                "warnings": "metadata/metadata_warnings.json",
             },
             "metadata_hard_failures": metadata_hard_failures,
             "missing_manifest_metadata": missing_manifest_metadata,
@@ -466,7 +473,7 @@ class HandoffBuilder:
                 "gps_export_mode": self.config.gps_export_mode,
             },
             "summary": validation,
-            "assets": [asset.to_dict() for asset in assets],
+            "assets": [self._build_asset_manifest_entry(asset, metadata_by_asset_id[asset.asset_id]) for asset in assets],
             "contact_sheets": [
                 relative_posix(path, package_root)
                 for path in photo_sheets + video_sheets + scene_sheets
@@ -477,7 +484,7 @@ class HandoffBuilder:
             "project_name": self.config.project_name,
             "scene_count": len(scenes),
             "gps_export_mode": self.config.gps_export_mode,
-            "scenes": [scene.to_dict() for scene in scenes],
+            "scenes": [self._build_scene_manifest_entry(scene, metadata_by_asset_id.get(scene.asset_id)) for scene in scenes],
         }
 
         json_dump(package_root / "handoff_manifest.json", manifest)
@@ -516,7 +523,7 @@ FILES
 - metadata/device_clock_profiles.json
 - metadata/chronology_report.json
 - metadata/location_clusters.json
-- metadata_warnings.json
+- metadata/metadata_warnings.json
 - photo_analysis_copies/
 - video_proxies/
 - scene_keyframes/
@@ -553,6 +560,71 @@ FILES
             validation_path=package_root / "validation_report.json",
             validation=validation,
             failed_sources=[asset.source_path for asset in failed if asset.source_path],
-            metadata_warnings_path=package_root / "metadata_warnings.json",
+            metadata_warnings_path=metadata_dir / "metadata_warnings.json",
+            local_asset_registry_path=local_asset_registry_path,
             canceled=False,
         )
+
+    def _build_asset_manifest_entry(self, asset: AssetRecord, metadata_record: dict[str, object]) -> dict[str, object]:
+        location = dict(metadata_record.get("location") or {})
+        location["cluster_id"] = metadata_record.get("location_cluster_id")
+        return {
+            **asset.to_dict(),
+            "type": asset.media_type,
+            "resolution": {"width": asset.width, "height": asset.height},
+            "orientation": self._orientation_for(asset.width, asset.height, asset.rotation),
+            "fps": asset.fps,
+            "audio_present": asset.audio_present,
+            "capture_time": metadata_record.get("capture_time_project"),
+            "capture_time_utc": metadata_record.get("capture_time_utc"),
+            "capture_time_source": metadata_record.get("capture_time_source"),
+            "time_confidence": metadata_record.get("time_confidence"),
+            "location": location,
+            "location_confidence": metadata_record.get("location_confidence"),
+            "metadata_warnings": metadata_record.get("warnings", []),
+        }
+
+    def _build_scene_manifest_entry(self, scene: SceneRecord, metadata_record: dict[str, object] | None) -> dict[str, object]:
+        payload = scene.to_dict()
+        payload["metadata_asset_id"] = scene.asset_id
+        payload["device_id"] = metadata_record.get("device_id") if metadata_record else None
+        payload["time_confidence"] = metadata_record.get("time_confidence") if metadata_record else None
+        payload["location_confidence"] = metadata_record.get("location_confidence") if metadata_record else None
+        payload["normalized_start_time"] = self._shift_iso_by_ms(
+            metadata_record.get("capture_time_project") if metadata_record else None,
+            scene.start_ms,
+        )
+        payload["normalized_end_time"] = self._shift_iso_by_ms(
+            metadata_record.get("capture_time_project") if metadata_record else None,
+            scene.end_ms,
+        )
+        return payload
+
+    def _shift_iso_by_ms(self, iso_value: object, offset_ms: int) -> str | None:
+        if not iso_value:
+            return None
+        try:
+            parsed = dt.datetime.fromisoformat(str(iso_value))
+        except ValueError:
+            return None
+        return (parsed + dt.timedelta(milliseconds=offset_ms)).isoformat(timespec="seconds")
+
+    def _orientation_for(self, width: int | None, height: int | None, rotation: int | None) -> str | None:
+        if not width or not height:
+            return None
+        portrait = height > width
+        if rotation in {90, 270}:
+            portrait = not portrait
+        return "portrait" if portrait else "landscape"
+
+    def _metadata_contract_failures(self, normalized_records: list[dict[str, object]]) -> list[str]:
+        failures: list[str] = []
+        for record in normalized_records:
+            asset_id = str(record["asset_id"])
+            if record.get("normalized_capture_time") and (not record.get("capture_time_source") or record.get("time_confidence") is None):
+                failures.append(f"computed capture time missing source/confidence for {asset_id}")
+            location = record.get("location") or {}
+            if any(location.get(key) is not None for key in ("latitude", "longitude", "venue_label")):
+                if not record.get("location_source") or record.get("location_confidence") is None:
+                    failures.append(f"computed location missing source/confidence for {asset_id}")
+        return sorted(set(failures))

@@ -49,10 +49,14 @@ class AssetRecord:
     folder_category: str | None = None
     metadata_status: str = "pending"
     capture_time_iso: str | None = None
-    capture_time_confidence: str | None = None
+    capture_time_source: str | None = None
+    capture_time_confidence: float | None = None
     timezone_source: str | None = None
     gps_present: bool = False
+    location_confidence: float | None = None
     device_id: str | None = None
+    fps: float | None = None
+    audio_present: bool | None = None
     chronology_rank: int | None = None
     location_cluster_id: str | None = None
     analysis_copy: str | None = None
@@ -61,7 +65,9 @@ class AssetRecord:
     scene_ids: list[str] = field(default_factory=list)
 
     def to_dict(self) -> dict[str, Any]:
-        return asdict(self)
+        payload = asdict(self)
+        payload.pop("source_path", None)
+        return payload
 
 
 @dataclass(slots=True)
@@ -93,4 +99,5 @@ class BuildResult:
     validation: dict[str, Any]
     failed_sources: list[str]
     metadata_warnings_path: Path | None = None
+    local_asset_registry_path: Path | None = None
     canceled: bool = False

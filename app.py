@@ -463,7 +463,7 @@ class App(tk.Tk):
 
         ttk.Label(
             body,
-            text=f"Metadata warnings: {summary.get('metadata_warning_count', 0)} at metadata_warnings.json",
+            text=f"Metadata warnings: {summary.get('metadata_warning_count', 0)} at metadata/metadata_warnings.json",
             wraplength=460,
         ).pack(anchor="w", pady=(8, 0))
 

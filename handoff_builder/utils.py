@@ -32,7 +32,14 @@ def stable_asset_id(path: Path, root: Path | None = None) -> str:
     except (ValueError, OSError):
         rel = path.name
     stat = path.stat()
-    payload = f"{rel}|{stat.st_size}|{stat.st_mtime_ns}".encode("utf-8", "surrogatepass")
+    content_hash = hashlib.sha1()
+    with path.open("rb") as handle:
+        while True:
+            chunk = handle.read(1024 * 1024)
+            if not chunk:
+                break
+            content_hash.update(chunk)
+    payload = f"{rel}|{stat.st_size}|{content_hash.hexdigest()}".encode("utf-8", "surrogatepass")
     return hashlib.sha1(payload).hexdigest()[:12]
 
 
