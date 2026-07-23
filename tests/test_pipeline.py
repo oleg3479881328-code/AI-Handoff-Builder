@@ -444,7 +444,8 @@ def test_chronology_sorts_by_filename_clock_time(tmp_path: Path):
 
     chronology = builder._build_chronology(normalized_records)
 
-    assert chronology["chronology_reliability"] == "pass"
+    assert chronology["chronology_reliability"] == "partial"
+    assert "filename_only_timeline" in chronology["chronology_reliability_reasons"]
     assert [item["asset_id"] for item in chronology["assets"]] == ["early", "late"]
 
 

@@ -4,7 +4,7 @@
 - Repository: `oleg3479881328-code/AI-Handoff-Builder`
 - Active contract: `Yt-Dlp-Download-Manager` issue `#67`
 - Current branch: `codex/real-package-hardening-v1`
-- Current phase: Real Package Hardening v1 implemented locally from the accepted RC baseline; final acceptance is blocked by source-set mismatch against the coordinator's `51 asset / 17 photo` expectation
+- Current phase: Real Package Hardening v1 implemented locally from the accepted RC baseline; duplicate behavior and chronology reliability proof added, while the full `51 asset / 17 photo` rebuild remains blocked by source availability
 
 ## What Exists Now
 
@@ -97,7 +97,20 @@
 - The locally available source set did **not** satisfy the coordinator's expected proof shape:
   - actual local counts: `50 asset / 34 video / 16 photo`
   - actual exact duplicate count: `0`
-  - therefore the acceptance proof `51 asset / exact duplicate detected` is still blocked by source mismatch, not by the implemented code path
+- therefore the acceptance proof `51 asset / exact duplicate detected` is still blocked by source mismatch, not by the implemented code path
+- A follow-up duplicate proof was completed with a byte-identical real-file copy:
+  - source original found locally:
+    - `tmp_metadata_real\WEDDING_PROJECTv2_20260722_192513\source\zip_001_Раскладывание_вещей\WhatsApp Image 2026-07-19 at 9.08.02 PM.jpeg`
+  - second original with the `1` prefix was not found in the available source-set copies or searched ZIP/material directories on this machine
+  - minimal real-file proof output:
+    - `tmp_duplicate_realfile_proof\out\DUPLICATE_REALFILE_PROOF_ANALYSIS_HANDOFF.zip`
+  - proof package confirms:
+    - `duplicate_asset_count=1`
+    - canonical asset: `afb107b5e8a3`
+    - duplicate asset: `9824a4d37d40`
+    - shared `sha256=ef8c01e22bef2529c0524ae78b897191aee8b184b09e5869a57551739231965a`
+    - `duplicate_of_asset_id` is populated in the duplicate manifest entry
+    - `chronology_reliability=fail` for the two-file duplicate proof because the filename-only timestamps are identical and should not be treated as trustworthy chronology
 
 ## UI Evidence
 
@@ -153,5 +166,5 @@
 ## Immediate Next Actions
 
 1. Commit and push `codex/real-package-hardening-v1`.
-2. Update the current Notion Implementation Report with the hardening results and the source-mismatch blocker proof.
-3. Wait for coordinator decision on the `50/34/16` vs `51/34/17` source mismatch. No merge.
+2. Update the current Notion Implementation Report with the duplicate proof and chronology-reliability correction.
+3. Wait for coordinator decision on the remaining `51/34/17` source-availability blocker. No merge.

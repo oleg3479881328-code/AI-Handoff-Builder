@@ -931,6 +931,8 @@ class AssetMetadataBuilder:
         reasons: list[str] = []
         if filename_assets and len(unique_filename_times) == 1 and len(filename_assets) > 1:
             reasons.append("filename_times_collapsed")
+        if len(filename_assets) == len(assets_with_time):
+            reasons.append("filename_only_timeline")
         if any(item.get("capture_time_source") == "filesystem" for item in assets_with_time):
             reasons.append("filesystem_fallback_present")
         if any(item.get("capture_time_source") == "filename" and not item.get("filename_time_has_clock") for item in assets_with_time):
