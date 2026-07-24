@@ -1,7 +1,7 @@
 # Project
 
 - Name: `AI-Handoff-Builder`
-- Description: Standalone Windows application for preparing ChatGPT handoff packages from local photo/video media and, in the next phase, importing AI edit plans for safe local rendering.
+- Description: Standalone Windows application for preparing ChatGPT handoff packages from local photo/video media and importing AI edit plans for safe local rendering.
 - Type: Desktop application / local media-processing tool
 
 ## Purpose
@@ -10,54 +10,66 @@ This project exists to keep original media and final rendering on Oleg's Windows
 
 Current success for this stage means:
 
-- the project is durably published in its own GitHub repository;
-- the existing Windows-ready v1 baseline is preserved;
-- issue `#67` becomes executable from a transfer-ready repo state.
+- preserve the accepted Windows-ready release-candidate baseline;
+- fix the no-silent-asset-loss defect tracked in issue `#2`;
+- validate an optional local HyperFrames authoring/rendering path inside the same application without replacing the existing FFmpeg renderer;
+- keep all personal media and generated outputs local.
 
 ## Source Of Truth
 
 - Code and execution source of truth: GitHub repository `oleg3479881328-code/AI-Handoff-Builder`
-- Active implementation contract: issue `#67` in `Yt-Dlp-Download-Manager`
+- Broad v2 implementation contract: issue `#67` in `Yt-Dlp-Download-Manager`
+- HyperFrames Lab implementation contract: issue `#3` in this repository
+- Handoff completeness defect: issue `#2` in this repository
 - Readable project-management layer: existing Notion page referenced by the owner
 
 ## Current Status
 
 - Mode: active execution
-- Phase: owner-facing v2 desktop workflow and immutable patch rerender loop implemented on feature branch `feat/v2-gui-patch-loop`
-- Health: v1 remains stable and v2 now supports workspace → package import → preview render → QC → patch → rerender inside the same Tkinter app
+- Phase: release candidate preserved; HyperFrames discovery branch initialized
+- Active branch: `feat/hyperframes-lab`
+- Health: current FFmpeg, Voice Studio, metadata, and Light/Dark release-candidate baseline remains intact; HyperFrames is not yet locally validated
 
 ## Done So Far
 
 - Built and verified the standalone v1 Windows app locally from the owner's source folder.
-- Added Windows hardening for v1: coverage-aware summary, cancel/retry-failed, bounded workers, Unicode-safe CLI, portable PyInstaller build with bundled `ffmpeg` and `ffprobe`.
-- Created the dedicated GitHub repository `AI-Handoff-Builder` on July 20, 2026.
-- Published the initial baseline to `main` with remote commit `dbaa4199d45137370166c716b40f33b2eafa7c7c`.
-- Completed the milestone 2 existing-solution scan and v2 architecture skeleton on feature branch `feat/v2-architecture-skeleton`.
-- Completed the milestone 3 first vertical slice on feature branch `feat/v2-import-persist-queue`: safe package import, SQLite persistence, queue operations, render report stub, and CLI commands.
-- Completed Milestone 4 on feature branch `feat/v2-preview-render-worker`: semantic plan validation, deterministic FFmpeg compilation, real 720x1280 preview rendering, basic QC, queue terminal states, and render report finalization.
-- Completed Milestone 5 on feature branch `feat/v2-gui-patch-loop`: Tkinter v2 workspace workflow, immutable patch lineage, rerender loop, exact-workspace path contract, patch CLI commands, and GUI/controller tests.
+- Added Windows hardening for v1: coverage-aware summary, cancel/retry-failed, bounded workers, Unicode-safe CLI, portable PyInstaller build with bundled FFmpeg, ffprobe, and ExifTool.
+- Implemented the v2 local workspace, package import, safe preview render, QC, immutable patch/rerender loop, and Voice Studio inside the existing Tkinter app.
+- Completed the release-candidate Light/Dark theme layer on `codex/release-candidate-light-dark-ui` with `87 passed` and a successful portable build.
+- Recorded the missing-audio / incomplete-handoff defect in issue `#2`.
+- Approved HyperFrames as an existing open-source donor for an optional local experimental renderer.
+- Created branch `feat/hyperframes-lab` from the release candidate.
+- Added the integration decision and a trusted 1080x1920 photo-composition prototype under `prototypes/hyperframes/`.
+- Created executable implementation handoff issue `#3`.
 
 ## Current Focus
 
-Keep the milestone 5 branch review-ready and use it as the base for wider renderer capability only after owner review.
+Validate the official HyperFrames CLI locally on Windows with the six owner café photographs, then add the smallest safe adapter and themed in-app `HyperFrames Lab` surface without weakening the current FFmpeg boundary.
 
 ## Next Practical Step
 
-Review and accept the milestone 5 desktop patch loop, then widen supported renderer operations incrementally without weakening the allowlisted compiler boundary.
+Executor runs issue `#3` on the owner Windows workspace: verify the official HyperFrames runtime, preview and render the checked-in trusted composition using the six private local photographs, then implement and test the bounded adapter inside the existing app.
 
 ## Key Decisions And Constraints
 
 - Do not create a second application; extend the current standalone AI Handoff Builder.
-- Use bundled `ffmpeg` / `ffprobe` as the production renderer.
-- Do not introduce Remotion, browser rendering, PostgreSQL, microservices, or cloud rendering in this MVP.
-- The renderer must compile only allowlisted operations into safe FFmpeg argument arrays and must not use `shell=True`.
-- Patch application must remain immutable and allowlisted; no generic JSON Patch or arbitrary file writes.
+- The bundled FFmpeg / ffprobe renderer remains the default production renderer.
+- HyperFrames is approved only as an optional local experimental module until real owner-media validation succeeds.
+- HyperFrames must not use cloud rendering in this integration.
+- Do not execute arbitrary HTML or JavaScript supplied by an AI package; compile only allowlisted plans into trusted repository-owned templates.
+- No remote scripts, fonts, media, iframes, arbitrary URLs, raw command strings, or `shell=True`.
+- Do not modify originals on the owner machine.
+- Personal media and generated outputs must not be committed to the public repository.
+- Schema `1.0` must not be changed in place; future capability widening requires a new version.
 - GitHub is the execution source of truth for this project.
-- Existing Solution First applies before inventing new renderer/schema patterns.
+- Existing Solution First applies before inventing renderer, preview, or authoring patterns.
+- No merge to `main` without owner authorization.
 
 ## Read Next
 
 - `PROJECT_STATE.md`
 - `logs/latest.md`
-- `docs/EXECUTOR_TASK.md`
-- Issue `#67`: `https://github.com/oleg3479881328-code/Yt-Dlp-Download-Manager/issues/67`
+- `docs/HYPERFRAMES_INTEGRATION.md`
+- `prototypes/hyperframes/README.md`
+- Issue `#3`: `https://github.com/oleg3479881328-code/AI-Handoff-Builder/issues/3`
+- Issue `#2`: `https://github.com/oleg3479881328-code/AI-Handoff-Builder/issues/2`
