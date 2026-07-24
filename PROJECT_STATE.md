@@ -1,14 +1,17 @@
 # Current State
 
-- Date: 2026-07-23
+- Date: 2026-07-24
 - Repository: `oleg3479881328-code/AI-Handoff-Builder`
-- Active contract: `Yt-Dlp-Download-Manager` issue `#67`
-- Current branch: `codex/release-candidate-light-dark-ui`
-- Current phase: Release-candidate acceptance refresh completed locally; final publication handoff in progress
+- Broad v2 contract: `Yt-Dlp-Download-Manager` issue `#67`
+- HyperFrames contract: repository issue `#3`
+- Handoff completeness defect: repository issue `#2`
+- Current branch: `feat/hyperframes-lab`
+- Base branch: `codex/release-candidate-light-dark-ui`
+- Current phase: HyperFrames existing-solution decision, trusted prototype, and executor handoff prepared; local Windows validation pending
 
-## What Exists Now
+## Accepted Baseline Preserved
 
-- The existing standalone desktop app remains the only app surface:
+- Existing standalone desktop app remains the only app surface:
   - Tkinter GUI
   - v1 Prepare Handoff ZIP builder
   - v2 Local Edit Runner
@@ -16,107 +19,97 @@
   - CLI
   - FFmpeg / ffprobe / ExifTool runtime
   - PyInstaller packaging
-- The release-candidate branch now adds a centralized Light/Dark theme layer with:
-  - semantic design tokens in `handoff_builder/theme.py`
-  - persistent theme selection storage between launches
-  - live theme switching without restart
-  - themed dialogs, summary window, Local Edit Runner, and Voice Studio
-  - themed text/list widgets and focus styling
-
-## Accepted Baseline Verified
-
-- Accepted metadata HEAD: `7d06faac3bdc7ab9ba423a5876a3e5607e5444e8`
-- Accepted voice baseline kept intact in branch history: `5f6a6e5b70251dd06d47824440b06a969c314579`
-- Ancestry proof was verified locally:
-  - `git merge-base --is-ancestor 5f6a6e5b70251dd06d47824440b06a969c314579 7d06faac3bdc7ab9ba423a5876a3e5607e5444e8`
-  - result: baseline ancestry OK
-
-## Release-Candidate Results
-
-- Added the centralized theme layer in:
-  - `handoff_builder/theme.py`
-- Updated the main application in:
-  - `app.py`
-- Added theme regression coverage in:
-  - `tests/test_theme.py`
-- The release-candidate UI now has:
-  - visible Light / Dark switch in the persistent header
-  - saved theme choice across launches
-  - themed message dialogs for info / warning / error
-  - themed Prepare Handoff summary dialog
-  - themed Voice Studio top-level window
-  - themed Local Edit Runner panels, buttons, tables, and text surfaces
-
-## Fresh Validation From 2026-07-23
-
-- Full regression suite:
+- Release-candidate baseline commit:
+  - `56d927a3e93f1ee4b161cbcfe55f729fc2207091`
+- Existing regression evidence:
   - `python -m pytest -q` -> `87 passed in 48.49s`
-- Bytecode check:
   - `python -m compileall handoff_builder app.py` -> success
-- Diff hygiene:
-  - `git diff --check` -> only LF/CRLF warning in `app.py`
-- Portable build:
-  - `cmd /c "echo.| build_exe.bat"` -> success on 2026-07-23
-- Existing packaged runtime still includes:
-  - `dist\AI Handoff Builder\AI Handoff Builder.exe`
-  - `dist\AI Handoff Builder\bin\ffmpeg.exe`
-  - `dist\AI Handoff Builder\bin\ffprobe.exe`
-  - `dist\AI Handoff Builder\bin\exiftool.exe`
-  - `dist\AI Handoff Builder\bin\exiftool_files\**`
+  - portable build -> success on 2026-07-23
+- Existing real end-to-end FFmpeg rerender proof remains intact.
 
-## UI Evidence
+## Owner Decision Added
 
-- Paired Light/Dark screenshots now exist at:
-  - `tmp_rc_theme_screenshots\dark_prepare_main.png`
-  - `tmp_rc_theme_screenshots\light_prepare_main.png`
-  - `tmp_rc_theme_screenshots\dark_summary.png`
-  - `tmp_rc_theme_screenshots\light_summary.png`
-  - `tmp_rc_theme_screenshots\dark_local_edit_runner.png`
-  - `tmp_rc_theme_screenshots\light_local_edit_runner.png`
-  - `tmp_rc_theme_screenshots\dark_local_edit_runner_busy.png`
-  - `tmp_rc_theme_screenshots\light_local_edit_runner_busy.png`
-  - `tmp_rc_theme_screenshots\dark_voice_studio.png`
-  - `tmp_rc_theme_screenshots\light_voice_studio.png`
-  - `tmp_rc_theme_screenshots\dark_dialog_info.png`
-  - `tmp_rc_theme_screenshots\light_dialog_info.png`
-  - `tmp_rc_theme_screenshots\dark_dialog_warning.png`
-  - `tmp_rc_theme_screenshots\light_dialog_warning.png`
-  - `tmp_rc_theme_screenshots\dark_dialog_error.png`
-  - `tmp_rc_theme_screenshots\light_dialog_error.png`
-- Scaling and keyboard-focus evidence now exists at:
-  - `tmp_rc_theme_screenshots\theme_ui_validation.json`
-  - `tmp_rc_theme_screenshots\voice_studio_theme_validation.json`
-- The scaling validation confirms visible key controls fit at:
-  - `100%`
-  - `125%`
-  - `150%`
-- The focus validation records keyboard traversal across header theme controls, notebook, source actions, listbox, and entries for both themes.
+HyperFrames will be evaluated **inside the existing AI Handoff Builder**, not as a second application.
 
-## Real End-To-End Evidence Kept Intact
+The integration is bounded as follows:
 
-- Real handoff CLI proof package:
-  - `tmp_prepare_cli_proof\WEDDING_PROJECTv2_ANALYSIS_HANDOFF.zip`
-- Real RC workspace and rerender proof:
-  - `tmp_rc_real_e2e\workspace`
-  - first preview render job: `f35260850bb76dead667`
-  - rerender job: `46cf0e82d55d5a4d49ac`
-  - rerender MP4: `tmp_rc_real_e2e\workspace\renders\46cf0e82d55d5a4d49ac\reel.mp4`
-- Real Voice Studio evidence kept in the same workspace:
-  - voice job: `b15f0c360c9f8daf9ccd`
-  - approved take: `b558be4c77dbac793612`
-  - alignment artifacts under `tmp_rc_real_e2e\workspace\voice\jobs\b15f0c360c9f8daf9ccd\alignment\`
+- FFmpeg remains the default production renderer;
+- HyperFrames is optional, local, and experimental;
+- no cloud rendering;
+- no arbitrary AI-authored HTML or JavaScript execution;
+- only trusted repository-owned composition templates or allowlisted plan compilation;
+- no personal assets or rendered outputs in GitHub;
+- no merge to `main` without owner authorization.
+
+## Work Completed In This Step
+
+- Re-entered through Project Execution OS `START_HERE.md` and `docs/ROUTER.md`.
+- Read the active project entrypoint, state, latest log, current release-candidate branch, renderer service, semantic validation, schema dispatch, and edit-plan schema.
+- Confirmed the current edit-plan schema `1.0` supports only video assets and `video_segment` operations.
+- Confirmed the current render service directly uses the safe FFmpeg compiler/backend and must not be weakened.
+- Checked the official HyperFrames repository and official documentation as the selected existing donor.
+- Created branch:
+  - `feat/hyperframes-lab`
+- Added:
+  - `docs/HYPERFRAMES_INTEGRATION.md`
+  - `prototypes/hyperframes/README.md`
+  - `prototypes/hyperframes/comp.html`
+- Created GitHub issue:
+  - `#3 HyperFrames Lab: local 9:16 photo prototype and safe in-app adapter`
+- Updated `PROJECT.md` for the new owner-approved scope.
+
+## Trusted Prototype
+
+The checked-in prototype is designed for:
+
+- six private local photographs;
+- 1080x1920;
+- 30 FPS;
+- 12 seconds;
+- wide -> medium -> portrait -> close-up flow;
+- deterministic seek-driven pan/zoom and cross-fades;
+- no external scripts, fonts, media, or network dependencies.
+
+The actual photographs are intentionally not committed.
+
+Expected private source filenames:
+
+- `20260722_172637.jpg`
+- `20260722_172633.jpg`
+- `20260722_172635.jpg`
+- `20260722_172119.jpg`
+- `20260722_172122.jpg`
+- `20260722_172124.jpg`
+
+## Current Health
+
+- Existing application baseline: preserved
+- HyperFrames architecture decision: prepared
+- Repository prototype: prepared but unvalidated
+- Local Windows HyperFrames runtime: not yet checked
+- Real owner-media HyperFrames MP4: not yet rendered
+- Python adapter: not yet implemented
+- Tkinter HyperFrames Lab controls: not yet implemented
+
+## Immediate Next Actions
+
+1. Executor starts from issue `#3` on branch `feat/hyperframes-lab`.
+2. Validate the official HyperFrames CLI and `doctor` on the owner Windows machine.
+3. Copy the six private photographs into the ignored prototype asset folder without modifying originals.
+4. Preview, lint, inspect, and render the trusted prototype twice.
+5. Record MP4 metadata, SHA-256 comparison, preview screenshot, and all runtime versions.
+6. Only after the direct prototype succeeds, implement the bounded Python adapter and minimal themed Tkinter controls.
+7. Run the full existing regression suite and update transfer-ready evidence.
+8. Push the feature branch and wait for owner review. No merge.
 
 ## Constraints Still In Force
 
 - Extend the existing standalone app only.
 - Do not modify originals on the owner machine.
-- Use safe FFmpeg argument arrays only.
+- Keep the safe FFmpeg renderer as default.
+- Use explicit subprocess argument arrays only.
 - No `shell=True`.
+- No raw untrusted HTML/JavaScript execution.
+- No cloud rendering for HyperFrames.
+- No tracked private media or generated output.
 - No merge to `main`.
-- Keep GitHub and the active issue contract as the source of truth.
-
-## Immediate Next Actions
-
-1. Commit and push `codex/release-candidate-light-dark-ui`.
-2. Update only the existing Notion Implementation Report with final status, evidence, and exact publication SHA.
-3. Wait for coordinator / owner review. No merge.
