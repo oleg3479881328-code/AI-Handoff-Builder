@@ -1,96 +1,107 @@
 # Latest Log
 
-Date: 2026-07-23
-Step: Release-candidate Light/Dark UI acceptance refresh, paired GUI proof, and publication prep
+Date: 2026-07-24
+Step: HyperFrames existing-solution decision, trusted prototype scaffold, and executor handoff
+
+## Owner Decision
+
+- Integrate HyperFrames inside the existing `AI-Handoff-Builder`.
+- Do as much repository work as possible directly.
+- Hand off only the Windows-local installation, real private-media validation, adapter implementation, and GUI work that require executor access.
 
 ## Completed
 
-- Continued from the accepted metadata branch ancestry without re-merging accepted Voicebox work.
-- Confirmed local ancestry from accepted Voicebox baseline into accepted metadata head before RC work:
-  - `5f6a6e5b70251dd06d47824440b06a969c314579` -> ancestor of `7d06faac3bdc7ab9ba423a5876a3e5607e5444e8`
-- Created and used release-candidate branch:
+- Re-entered the system through:
+  - `Project-Execution-OS/START_HERE.md`
+  - `Project-Execution-OS/docs/ROUTER.md`
+- Read the current project entrypoint and transfer-ready state from branch:
   - `codex/release-candidate-light-dark-ui`
-- Added centralized theme tokens and persistent selection storage in:
-  - `handoff_builder/theme.py`
-- Updated the existing Tkinter app so the release candidate now supports:
-  - visible Dark / Light switch in the persistent header
-  - saved theme choice between launches
-  - themed dialogs for info / warning / error
-  - themed Prepare Handoff summary window
-  - themed Local Edit Runner panes and text surfaces
-  - themed Voice Studio window and controls
-  - themed listboxes / text widgets / focus states
-- Added theme regression coverage in:
-  - `tests/test_theme.py`
-- Preserved the already-completed real end-to-end evidence on this RC line:
-  - real analysis handoff package
-  - imported minimal real `AI_EDIT_PACKAGE`
-  - preview render
-  - three real `Olga` takes
-  - approved take
-  - patch
-  - rerendered MP4
-- Generated paired Light/Dark GUI screenshots for the required screens and states:
-  - Prepare Handoff
-  - summary dialog
-  - Local Edit Runner
-  - busy render state
-  - Voice Studio
-  - info / warning / error dialogs
-- Stored paired screenshot artifacts at:
-  - `tmp_rc_theme_screenshots\dark_prepare_main.png`
-  - `tmp_rc_theme_screenshots\light_prepare_main.png`
-  - `tmp_rc_theme_screenshots\dark_summary.png`
-  - `tmp_rc_theme_screenshots\light_summary.png`
-  - `tmp_rc_theme_screenshots\dark_local_edit_runner.png`
-  - `tmp_rc_theme_screenshots\light_local_edit_runner.png`
-  - `tmp_rc_theme_screenshots\dark_local_edit_runner_busy.png`
-  - `tmp_rc_theme_screenshots\light_local_edit_runner_busy.png`
-  - `tmp_rc_theme_screenshots\dark_voice_studio.png`
-  - `tmp_rc_theme_screenshots\light_voice_studio.png`
-  - `tmp_rc_theme_screenshots\dark_dialog_info.png`
-  - `tmp_rc_theme_screenshots\light_dialog_info.png`
-  - `tmp_rc_theme_screenshots\dark_dialog_warning.png`
-  - `tmp_rc_theme_screenshots\light_dialog_warning.png`
-  - `tmp_rc_theme_screenshots\dark_dialog_error.png`
-  - `tmp_rc_theme_screenshots\light_dialog_error.png`
-- Generated machine-readable UI validation artifacts:
-  - `tmp_rc_theme_screenshots\theme_ui_validation.json`
-  - `tmp_rc_theme_screenshots\voice_studio_theme_validation.json`
-- Verified visible key controls at:
-  - `100%` scaling
-  - `125%` scaling
-  - `150%` scaling
-- Recorded keyboard focus traversal for both Dark and Light themes across:
-  - header theme controls
-  - notebook
-  - source action buttons
-  - source listbox
-  - settings entries
+- Preserved the release-candidate baseline commit:
+  - `56d927a3e93f1ee4b161cbcfe55f729fc2207091`
+- Inspected the current renderer and plan boundary:
+  - `handoff_builder/v2/services/render_service.py`
+  - `handoff_builder/v2/plans/semantic.py`
+  - `handoff_builder/v2/plans/schema.py`
+  - `schemas/edit_plan/1.0.json`
+- Confirmed current schema `1.0` supports only video assets and `video_segment` operations.
+- Confirmed current rendering directly uses the safe FFmpeg compiler/backend and must remain the production default.
+- Checked the official HyperFrames donor:
+  - official repository
+  - Apache-2.0 license
+  - Windows local CLI
+  - local browser preview
+  - lint / inspect / render / doctor commands
+  - bundled Chromium management
+  - FFmpeg-based deterministic MP4 pipeline
+- Created feature branch:
+  - `feat/hyperframes-lab`
+- Added the safe integration decision:
+  - `docs/HYPERFRAMES_INTEGRATION.md`
+- Added a private-assets-only local prototype guide:
+  - `prototypes/hyperframes/README.md`
+- Added a trusted 1080x1920, 30 FPS, 12-second composition prototype:
+  - `prototypes/hyperframes/comp.html`
+- Created full executor handoff:
+  - issue `#3 HyperFrames Lab: local 9:16 photo prototype and safe in-app adapter`
+- Updated:
+  - `PROJECT.md`
+  - `PROJECT_STATE.md`
 
-## Verification
+## Security Decision
 
-- `python -m pytest -q` -> `87 passed in 48.49s`
-- `python -m compileall handoff_builder app.py` -> success
-- `git diff --check` -> only LF/CRLF warning in `app.py`
-- earlier portable build on the same RC code line:
-  - `cmd /c "echo.| build_exe.bat"` -> success on 2026-07-23
-- real RC rerender artifact remains valid at:
-  - `tmp_rc_real_e2e\workspace\renders\46cf0e82d55d5a4d49ac\reel.mp4`
-- paired Voice Studio UI proof confirms:
-  - `Voice Studio готов. Можно прослушать takes и нажать Approve.`
-  - job label `b15f0c360c9f8daf9ccd | approved | takes=3 | approved=yes`
-  - `take_count=3`
+HyperFrames must not execute arbitrary HTML or JavaScript supplied by an AI package.
 
-## Notes
+Required boundary:
 
-- The scaling JSON was regenerated to exclude unmapped `1x1` widgets from non-visible panes; the final pass/fail result now reflects only visible controls.
-- Tkinter emits harmless `invalid command name "..._poll_events"` shutdown messages during automation teardown because the app schedules `after(...)` polling and the test harness destroys the window immediately after capture.
-- The working branch still has not been merged into `main`.
+```text
+validated allowlisted plan
+-> trusted repository-owned compiler/template
+-> generated local composition
+-> HyperFrames local preview/render
+```
+
+Still forbidden:
+
+- cloud rendering;
+- raw command strings;
+- `shell=True`;
+- remote scripts, fonts, media, iframes, or arbitrary URLs;
+- modifying owner originals;
+- committing personal media or generated MP4 files;
+- replacing the existing default FFmpeg renderer;
+- merge to `main` without owner authorization.
+
+## Repository Commits Created In This Step
+
+- `4e8df8ed13f8faabfa53df879b91122a4ae3bfbb` - integration decision
+- `9f871fcb17a707a8885d0c22a25e6281e64a3419` - prototype instructions
+- `e275a6b2b30d84e94335b2f2cafb48464d9714c9` - trusted composition prototype
+- `6a1aae3364d0349322226cc34eb7558f9633b676` - project entrypoint update
+- `2df9b0c06e1f319342452fa6428b6bb50f76e45e` - current-state update
+
+## Validation Performed
+
+- GitHub branch creation succeeded.
+- All listed files were written to `feat/hyperframes-lab`.
+- GitHub issue `#3` was created with implementation scope, security boundary, acceptance criteria, validation commands, and execution-report contract.
+
+## Validation Not Performed
+
+The following require the owner Windows workspace and are delegated through issue `#3`:
+
+- Node/npm/HyperFrames runtime verification;
+- `hyperframes doctor`;
+- copying the six private photographs into the ignored local prototype folder;
+- browser preview;
+- HyperFrames lint and inspect;
+- real MP4 rendering and repeated-render hash comparison;
+- Python adapter implementation;
+- Tkinter HyperFrames Lab controls;
+- full local Python regression and portable build.
 
 ## Next
 
-- Commit the RC theme integration and documentation refresh.
-- Push `codex/release-candidate-light-dark-ui`.
-- Update only the existing Notion Implementation Report with final status, commit SHA, changed files, evidence, and clean tracked worktree proof.
-- Wait for review. No merge.
+- Executor opens issue `#3` and begins immediately on branch `feat/hyperframes-lab`.
+- Use the six exact private photo filenames recorded in the issue.
+- Return an `EXECUTION REPORT` with runtime versions, preview evidence, MP4 evidence, repeat-render comparison, tests, commit SHA, and blockers.
+- No merge.
