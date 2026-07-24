@@ -41,6 +41,7 @@ Step: HyperFrames existing-solution decision, trusted prototype scaffold, and ex
   - `prototypes/hyperframes/README.md`
 - Added a trusted 1080x1920, 30 FPS, 12-second composition prototype:
   - `prototypes/hyperframes/comp.html`
+- Added `.gitignore` protection for local prototype assets, outputs, dependencies, and runtime state.
 - Created full executor handoff:
   - issue `#3 HyperFrames Lab: local 9:16 photo prototype and safe in-app adapter`
 - Updated:
@@ -78,11 +79,20 @@ Still forbidden:
 - `e275a6b2b30d84e94335b2f2cafb48464d9714c9` - trusted composition prototype
 - `6a1aae3364d0349322226cc34eb7558f9633b676` - project entrypoint update
 - `2df9b0c06e1f319342452fa6428b6bb50f76e45e` - current-state update
+- `92cbbd06b54d03deb9a848174eba2ce367dc1221` - private asset/output ignore rules
 
 ## Validation Performed
 
 - GitHub branch creation succeeded.
-- All listed files were written to `feat/hyperframes-lab`.
+- GitHub compare confirmed `feat/hyperframes-lab` is based exactly on release-candidate commit `56d927a3e93f1ee4b161cbcfe55f729fc2207091`, is ahead, and is not behind.
+- Changed-file set is bounded to:
+  - `.gitignore`
+  - `PROJECT.md`
+  - `PROJECT_STATE.md`
+  - `logs/latest.md`
+  - `docs/HYPERFRAMES_INTEGRATION.md`
+  - `prototypes/hyperframes/README.md`
+  - `prototypes/hyperframes/comp.html`
 - GitHub issue `#3` was created with implementation scope, security boundary, acceptance criteria, validation commands, and execution-report contract.
 
 ## Validation Not Performed
