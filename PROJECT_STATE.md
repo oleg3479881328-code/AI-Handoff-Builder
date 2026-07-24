@@ -163,8 +163,66 @@
 - No merge to `main`.
 - Keep GitHub and the active issue contract as the source of truth.
 
+## Official Acceptance Run From 2026-07-24
+
+- Acceptance dataset used locally:
+  - ZIP path: `C:\Users\oleg3\Downloads\Photos-1-001.zip`
+  - ZIP SHA-256: `C27C40C4AAC0E6E88F849A0173BFFB605498CDBC6DF4196C2D06D1F38C301A20`
+  - ZIP size: `338759229` bytes
+  - ZIP contents: `53 asset / 35 photo / 18 video`
+- The first current-branch reproduction on this dataset exposed the live blocker:
+  - photos normalized to local EXIF time such as `2026-07-23T17:01:58-04:00`
+  - videos normalized to naive QuickTime clock values such as `2026-07-23T21:01:33`
+  - chronology was split into photo-first/video-last blocks instead of one mixed timeline
+  - metadata warnings were `18 timestamp_conflict + 18 timezone_unknown`
+  - hardening fields were present, so the remaining failure was specifically timezone normalization
+- The blocker was fixed in `handoff_builder/metadata.py` by:
+  - separating photo EXIF timestamp lookup from video QuickTime timestamp lookup
+  - treating Samsung/QuickTime video create times as UTC when a companion offset is available
+  - projecting video capture time into the local project offset using:
+    - `ffprobe:com.samsung.android.utc_offset`
+    - fallback: `exiftool:AndroidTimeZone`
+- Added regression coverage in `tests/test_pipeline.py` for:
+  - Samsung QuickTime UTC -> local project time projection without `timestamp_conflict`
+  - mixed photo/video chronology ordering under `America/New_York`
+- Full validation after the fix on the same dataset:
+  - output ZIP: `tmp_acceptance_photos_1_001_fixed\PHOTOS-1-001_ANALYSIS_HANDOFF.zip`
+  - output ZIP SHA-256: `4FF1349878ACF9DC6E2359D8F0D4A4550B9A930EAEE6B8E98ABE5AFE92F59293`
+  - machine-readable validation report:
+    - `tmp_acceptance_photos_1_001_fixed\PHOTOS-1-001_20260724_042222\package\validation_report.json`
+    - SHA-256: `838315287D87A2B1131007715557B046B54FA2EBE1C4C8869267454E2F4DAA0F`
+  - counts:
+    - `source_asset_count=53`
+    - `source_photo_count=35`
+    - `source_video_count=18`
+    - `failed_asset_count=0`
+    - `missing_artifact_paths=[]`
+    - `duplicate_asset_count=0`
+  - quality statuses:
+    - `artifact_coverage_ok=true`
+    - `metadata_completeness=pass`
+    - `metadata_reliability=pass`
+    - `chronology_reliability=pass`
+    - `chronology_reliability_reasons=[]`
+  - chronology proof now mixes media by real time:
+    - rank 1: `20260723_170122.mp4` -> `2026-07-23T17:01:33-04:00`
+    - rank 4: `20260723_170158.jpg` -> `2026-07-23T17:01:58-04:00`
+    - rank 13: `20260723_170321.mp4` -> `2026-07-23T17:03:31-04:00`
+    - rank 15: `20260723_170345.jpg` -> `2026-07-23T17:03:45-04:00`
+  - warnings after the fix:
+    - `metadata_warning_count=0`
+  - hardening fields verified in the package:
+    - asset manifest entries include `sha256` and `duplicate_of_asset_id`
+    - summary contains `artifact_coverage_ok`, `metadata_completeness`, `metadata_reliability`, `chronology_reliability`
+    - scene entries include `segment_origin`
+  - GPS/privacy/orientation/integrity:
+    - `gps_export_mode=rounded`
+    - `assets_with_gps=53`
+    - photo analysis copies open upright at portrait dimensions such as `960x1280`
+    - all proxies, previews, keyframes, storyboards, and contact sheets exist physically
+
 ## Immediate Next Actions
 
-1. Commit and push `codex/real-package-hardening-v1`.
-2. Update the current Notion Implementation Report with the duplicate proof and chronology-reliability correction.
-3. Wait for coordinator decision on the remaining `51/34/17` source-availability blocker. No merge.
+1. Commit and push the timezone-normalization fix in `codex/real-package-hardening-v1`.
+2. Update the current Notion Implementation Report with the official acceptance run evidence.
+3. Reply to the coordinator in the active Notion thread, then stop. No merge, release, or tag.

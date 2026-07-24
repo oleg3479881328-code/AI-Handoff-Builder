@@ -297,6 +297,54 @@ def test_metadata_builder_uses_ffprobe_quicktime_time_for_video(tmp_path: Path):
     assert normalized["capture_time_source"] == "ffprobe"
 
 
+def test_video_quicktime_utc_is_projected_into_local_offset_without_conflict(tmp_path: Path):
+    source = tmp_path / "clip.mp4"
+    _make_video_placeholder(source)
+    asset = AssetRecord(
+        asset_id="asset-video-local",
+        media_type="video",
+        original_name=source.name,
+        source_path=str(source),
+        relative_source_path=source.name,
+        extension=".mp4",
+        size_bytes=source.stat().st_size,
+    )
+    builder = AssetMetadataBuilder(BuilderConfig(project_name="X", output_dir=tmp_path))
+    warnings: list[dict] = []
+
+    normalized = builder._normalize_asset_record(
+        asset,
+        raw_record={
+            "exiftool": {
+                "QuickTime:CreateDate": "2026:07:23 21:01:33",
+                "QuickTime:TrackCreateDate": "2026:07:23 21:01:33",
+                "QuickTime:MediaCreateDate": "2026:07:23 21:01:33",
+                "QuickTime:AndroidTimeZone": "-0400",
+            },
+            "pillow": {},
+            "ffprobe": {
+                "format": {
+                    "tags": {
+                        "creation_time": "2026-07-23T21:01:33.000000Z",
+                        "com.samsung.android.utc_offset": "-0400",
+                    }
+                }
+            },
+            "filesystem": {"modified_at": "2026-07-24T08:17:16+00:00", "created_at": "2026-07-24T08:17:16+00:00"},
+            "tool_sources": {"exiftool": True, "pillow": False, "ffprobe": True, "filesystem": True},
+        },
+        source_index=0,
+        warnings=warnings,
+    )
+
+    assert normalized["normalized_capture_time"] == "2026-07-23T21:01:33+00:00"
+    assert normalized["capture_time_project"] == "2026-07-23T17:01:33-04:00"
+    assert normalized["capture_time_utc"] == "2026-07-23T21:01:33+00:00"
+    assert normalized["timezone_source"] == "ffprobe:com.samsung.android.utc_offset"
+    assert not any(item["code"] == "timestamp_conflict" for item in warnings)
+    assert not any(item["code"] == "timezone_unknown" for item in warnings)
+
+
 def test_whatsapp_filename_hint_is_low_confidence_and_timezone_unknown(tmp_path: Path):
     builder = AssetMetadataBuilder(BuilderConfig(project_name="X", output_dir=tmp_path))
 
@@ -447,6 +495,33 @@ def test_chronology_sorts_by_filename_clock_time(tmp_path: Path):
     assert chronology["chronology_reliability"] == "partial"
     assert "filename_only_timeline" in chronology["chronology_reliability_reasons"]
     assert [item["asset_id"] for item in chronology["assets"]] == ["early", "late"]
+
+
+def test_chronology_mixes_photo_and_video_by_real_time_with_local_projection(tmp_path: Path):
+    builder = AssetMetadataBuilder(BuilderConfig(project_name="X", output_dir=tmp_path))
+    photo = {
+        "asset_id": "photo",
+        "normalized_capture_time_epoch_ms": builder._iso_to_epoch_ms("2026-07-23T17:01:58-04:00"),
+        "normalized_capture_time": "2026-07-23T17:01:58-04:00",
+        "capture_time_source": "metadata",
+        "time_source": "metadata",
+        "device_id": "photo-device",
+        "source_order_index": 1,
+    }
+    video = {
+        "asset_id": "video",
+        "normalized_capture_time_epoch_ms": builder._iso_to_epoch_ms("2026-07-23T21:01:33+00:00"),
+        "normalized_capture_time": "2026-07-23T21:01:33+00:00",
+        "capture_time_source": "metadata",
+        "time_source": "metadata",
+        "device_id": None,
+        "source_order_index": 0,
+    }
+
+    chronology = builder._build_chronology([photo, video])
+
+    assert [item["asset_id"] for item in chronology["assets"]] == ["video", "photo"]
+    assert chronology["chronology_reliability"] == "pass"
 
 
 def test_stable_asset_id_ignores_mtime_changes(tmp_path: Path):

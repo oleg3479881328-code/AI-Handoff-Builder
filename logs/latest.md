@@ -1,108 +1,92 @@
 # Latest Log
 
-Date: 2026-07-23
-Step: Real Package Hardening v1 from the accepted RC baseline
+Date: 2026-07-24
+Step: Official Acceptance Run on `Photos-1-001.zip` from `codex/real-package-hardening-v1`
 
 ## Completed
 
-- Started from accepted RC commit:
-  - branch: `codex/release-candidate-light-dark-ui`
-  - commit: `56d927a3e93f1ee4b161cbcfe55f729fc2207091`
-- Created the new working branch:
-  - `codex/real-package-hardening-v1`
-- Implemented narrow hardening changes in the existing v1 handoff pipeline:
-  - WhatsApp `AM/PM` filename parsing now preserves real clock time instead of collapsing to `00:00:00`
-  - exact SHA-256 duplicate wiring was added through `sha256` and `duplicate_of_asset_id`
-  - quality output was split into:
-    - `artifact_coverage_ok`
-    - `metadata_completeness`
-    - `metadata_reliability`
-    - `chronology_reliability`
-  - `gps_missing` was downgraded from `warning` to `info`
-  - scene provenance export now uses a stable origin label derived from the detection mode
+- Used the full local acceptance dataset:
+  - ZIP path:
+    - `C:\Users\oleg3\Downloads\Photos-1-001.zip`
+  - ZIP SHA-256:
+    - `C27C40C4AAC0E6E88F849A0173BFFB605498CDBC6DF4196C2D06D1F38C301A20`
+  - ZIP contents:
+    - `53 asset / 35 JPG / 18 MP4`
+- Reproduced the active blocker on the accepted hardening branch:
+  - photos normalized to local EXIF times like `17:xx-04:00`
+  - videos normalized to naive QuickTime times like `21:xx`
+  - chronology was split by media type instead of mixed by real time
+  - warnings were:
+    - `18 timestamp_conflict`
+    - `18 timezone_unknown`
+- Implemented the narrow blocker fix in `handoff_builder/metadata.py`:
+  - do not route video QuickTime dates through the generic photo-style `CreateDate` path
+  - when Samsung/QuickTime video metadata includes a companion local offset, treat the naive QuickTime create times as UTC and project them into the local offset
+  - prefer project-offset hints from:
+    - `ffprobe:com.samsung.android.utc_offset`
+    - fallback: `exiftool:AndroidTimeZone`
+- Added regression coverage in `tests/test_pipeline.py`:
+  - `test_video_quicktime_utc_is_projected_into_local_offset_without_conflict`
+  - `test_chronology_mixes_photo_and_video_by_real_time_with_local_projection`
 - Updated local transfer-state docs:
   - `PROJECT_STATE.md`
   - `logs/latest.md`
 
 ## Verification
 
-- Targeted hardening regressions:
-  - `python -m pytest -q tests/test_pipeline.py -k "whatsapp or chronology or duplicate or quality or gps_missing or metadata_contract_failure"` -> `10 passed`
+- Targeted timezone/chronology regressions:
+  - `python -m pytest -q tests/test_pipeline.py -k "quicktime or chronology"` -> `6 passed`
 - Full regression suite:
-  - `python -m pytest -q` -> `93 passed in 44.63s`
-- Real rebuild on the locally available wedding source set:
-  - source folder:
-    - `tmp_metadata_real\WEDDING_PROJECTv2_20260722_192513\source\zip_001_Раскладывание_вещей`
+  - `python -m pytest -q` -> `95 passed in 28.14s`
+- Official acceptance rebuild on the same `Photos-1-001.zip` dataset:
   - output ZIP:
-    - `tmp_real_package_hardening_v1\WEDDING_PROJECTv2_ANALYSIS_HANDOFF.zip`
-- New rebuilt package facts:
-  - `source_asset_count=50`
-  - `source_video_count=34`
-  - `source_photo_count=16`
-  - `scene_count=67`
+    - `tmp_acceptance_photos_1_001_fixed\PHOTOS-1-001_ANALYSIS_HANDOFF.zip`
+  - output ZIP SHA-256:
+    - `4FF1349878ACF9DC6E2359D8F0D4A4550B9A930EAEE6B8E98ABE5AFE92F59293`
+  - validation report:
+    - `tmp_acceptance_photos_1_001_fixed\PHOTOS-1-001_20260724_042222\package\validation_report.json`
+  - validation report SHA-256:
+    - `838315287D87A2B1131007715557B046B54FA2EBE1C4C8869267454E2F4DAA0F`
+- Acceptance package facts:
+  - `source_asset_count=53`
+  - `source_video_count=18`
+  - `source_photo_count=35`
+  - `scene_count=19`
   - `artifact_coverage_ok=true`
-  - `metadata_completeness=partial`
-  - `metadata_reliability=partial`
+  - `metadata_completeness=pass`
+  - `metadata_reliability=pass`
   - `chronology_reliability=pass`
   - `missing_artifact_paths=[]`
   - `failed_asset_count=0`
   - `duplicate_asset_count=0`
-- Real chronology proof from the rebuilt package:
-  - first normalized timestamps now include real clock values such as:
-    - `2026-07-19T20:33:32`
-    - `2026-07-19T20:33:33`
-    - `2026-07-19T20:33:44`
-    - `2026-07-19T20:34:28`
-    - `2026-07-19T20:36:05`
-  - chronology no longer collapses all assets to midnight
-- Warning severity split from the rebuilt package:
-  - `gps_missing` -> `info` (`50`)
-  - `filename_fallback` -> `warning` (`50`)
-
-## Additional proof completed after the first hardening push
-
-- Tightened chronology quality semantics:
-  - filename-only timelines no longer receive unconditional `chronology_reliability=pass`
-  - if chronology relies only on filename timestamps, the result is now at least `partial`
-  - if identical filename times collapse chronology order, the result is `fail`
-- Added and verified a real-file duplicate proof because the original `1WhatsApp ...` source file was not found in the available local source copies:
-  - original file found locally:
-    - `tmp_metadata_real\WEDDING_PROJECTv2_20260722_192513\source\zip_001_Раскладывание_вещей\WhatsApp Image 2026-07-19 at 9.08.02 PM.jpeg`
-  - byte-identical copy created for integration proof:
-    - `1WhatsApp Image 2026-07-19 at 9.08.02 PM.jpeg`
-  - proof output ZIP:
-    - `tmp_duplicate_realfile_proof\out\DUPLICATE_REALFILE_PROOF_ANALYSIS_HANDOFF.zip`
-  - proof validation facts:
-    - `source_asset_count=2`
-    - `source_photo_count=2`
-    - `artifact_coverage_ok=true`
-    - `duplicate_asset_count=1`
-    - `chronology_reliability=fail`
-    - `chronology_reliability_reasons=[filename_times_collapsed, filename_only_timeline, all_timestamps_identical]`
-  - duplicate mapping proof from the manifest:
-    - canonical asset: `afb107b5e8a3` (`1WhatsApp Image 2026-07-19 at 9.08.02 PM.jpeg`)
-    - duplicate asset: `9824a4d37d40` (`WhatsApp Image 2026-07-19 at 9.08.02 PM.jpeg`)
-    - shared SHA-256:
-      - `ef8c01e22bef2529c0524ae78b897191aee8b184b09e5869a57551739231965a`
-
-## Blocker
-
-- The coordinator's expected proof target was:
-  - `51 asset / 34 video / 17 photo`
-  - one exact duplicate detected
-- The locally available real source set on this machine is:
-  - `50 asset / 34 video / 16 photo`
-  - exact duplicate groups detected: `0`
-- This mismatch was confirmed from:
-  - the source directory file count
-  - previous local `validation_report.json` files
-  - the new rebuilt package
-- Result:
-  - code changes are implemented and verified locally
-  - acceptance proof for `51/34/17` is still blocked by source availability, not by an unimplemented duplicate or chronology code path
+- Mixed chronology proof from the accepted package:
+  - rank `1`: `20260723_170122.mp4` -> `2026-07-23T17:01:33-04:00`
+  - rank `4`: `20260723_170158.jpg` -> `2026-07-23T17:01:58-04:00`
+  - rank `13`: `20260723_170321.mp4` -> `2026-07-23T17:03:31-04:00`
+  - rank `15`: `20260723_170345.jpg` -> `2026-07-23T17:03:45-04:00`
+  - later ranks stay mixed as well:
+    - `20260723_171002.mp4` -> rank `44`
+    - `20260723_171107.jpg` -> rank `45`
+    - `20260723_171215.mp4` -> rank `49`
+    - `20260723_171307.jpg` -> rank `51`
+- Warning cleanup after the fix:
+  - `metadata_warning_count=0`
+- Hardening fields verified in the package:
+  - every asset entry includes `sha256` and `duplicate_of_asset_id`
+  - summary contains:
+    - `artifact_coverage_ok`
+    - `metadata_completeness`
+    - `metadata_reliability`
+    - `chronology_reliability`
+  - scene manifest contains `segment_origin`
+- GPS/privacy/orientation/integrity checks:
+  - `gps_export_mode=rounded`
+  - `assets_with_gps=53`
+  - sample photo analysis copies open upright at `960x1280`
+  - all proxies, previews, keyframes, storyboards, and contact sheets exist physically
 
 ## Next
 
-- Commit and push the chronology/duplicate-proof follow-up in `codex/real-package-hardening-v1`.
-- Update the current Notion Implementation Report with the new duplicate proof and chronology-reliability correction.
-- Wait for coordinator decision. No merge, release, or tag.
+- Commit and push the timezone-normalization blocker fix in `codex/real-package-hardening-v1`.
+- Update the current Notion Implementation Report with the official acceptance run evidence.
+- Reply to the coordinator in the active Notion thread and stop. No merge, release, or tag.

@@ -420,7 +420,7 @@ class AssetMetadataBuilder:
     ) -> dict[str, Any]:
         warning_codes: list[str] = []
         sources: list[str] = []
-        candidates = self._time_candidates(exiftool_payload, pillow_payload, ffprobe_payload)
+        candidates = self._time_candidates(asset.media_type, exiftool_payload, pillow_payload, ffprobe_payload)
         raw_value = None
         normalized = None
         capture_time_utc = None
@@ -523,20 +523,32 @@ class AssetMetadataBuilder:
 
     def _time_candidates(
         self,
+        media_type: str,
         exiftool_payload: dict[str, Any],
         pillow_payload: dict[str, Any],
         ffprobe_payload: dict[str, Any],
     ) -> list[dict[str, Any]]:
         candidates: list[dict[str, Any]] = []
-        exif_specs = [
-            ("DateTimeOriginal", "OffsetTimeOriginal"),
-            ("CreateDate", "OffsetTime"),
-            ("DateTimeDigitized", "OffsetTimeDigitized"),
-            ("MediaCreateDate", None),
-            ("TrackCreateDate", None),
-            ("CreationDate", None),
-        ]
-        for time_tag, offset_tag in exif_specs:
+        project_timezone_value, project_timezone_source = self._project_timezone_hint(exiftool_payload, ffprobe_payload)
+        exif_specs: list[tuple[str, str | None, bool, str | None, str | None]] = []
+        if media_type != "video":
+            exif_specs.extend(
+                [
+                    ("DateTimeOriginal", "OffsetTimeOriginal", False, None, None),
+                    ("CreateDate", "OffsetTime", False, None, None),
+                    ("DateTimeDigitized", "OffsetTimeDigitized", False, None, None),
+                ]
+            )
+        if media_type == "video":
+            exif_specs.extend(
+                [
+                    ("MediaCreateDate", None, True, project_timezone_value, project_timezone_source),
+                    ("TrackCreateDate", None, True, project_timezone_value, project_timezone_source),
+                    ("CreationDate", None, True, project_timezone_value, project_timezone_source),
+                    ("CreateDate", None, True, project_timezone_value, project_timezone_source),
+                ]
+            )
+        for time_tag, offset_tag, assume_utc_if_naive, project_timezone_override, timezone_source_override in exif_specs:
             raw_value = self._lookup_tag(exiftool_payload, time_tag) or pillow_payload.get(time_tag)
             if not raw_value:
                 continue
@@ -546,7 +558,9 @@ class AssetMetadataBuilder:
                 source="metadata",
                 confidence=0.95,
                 timezone_value=offset_value,
-                timezone_source=offset_tag if offset_value else None,
+                timezone_source=offset_tag if offset_value else timezone_source_override,
+                project_timezone_value=project_timezone_override,
+                assume_utc_if_naive=assume_utc_if_naive,
             )
             if candidate:
                 candidates.append(candidate)
@@ -562,6 +576,8 @@ class AssetMetadataBuilder:
                 confidence=0.8,
                 timezone_value=None,
                 timezone_source="embedded" if ("Z" in str(raw_value) or "+" in str(raw_value)) else None,
+                project_timezone_value=project_timezone_value,
+                assume_utc_if_naive=bool(project_timezone_value),
             )
             if candidate:
                 candidates.append(candidate)
@@ -596,10 +612,17 @@ class AssetMetadataBuilder:
         confidence: float,
         timezone_value: Any,
         timezone_source: str | None,
+        project_timezone_value: Any = None,
+        assume_utc_if_naive: bool = False,
     ) -> dict[str, Any] | None:
         if raw_value is None:
             return None
-        parsed = self._parse_datetime(raw_value, timezone_value)
+        parsed = self._parse_datetime(
+            raw_value,
+            timezone_value,
+            project_timezone_value=project_timezone_value,
+            assume_utc_if_naive=assume_utc_if_naive,
+        )
         if not parsed:
             return None
         return {
@@ -610,12 +633,21 @@ class AssetMetadataBuilder:
             "epoch_ms": parsed["epoch_ms"],
             "source": source,
             "confidence": confidence if parsed["timezone_offset_minutes"] is not None else round(confidence - 0.15, 3),
-            "timezone_raw": str(timezone_value) if timezone_value not in (None, "") else None,
+            "timezone_raw": str(project_timezone_value if project_timezone_value not in (None, "") else timezone_value)
+            if (project_timezone_value not in (None, "") or timezone_value not in (None, ""))
+            else None,
             "timezone_offset_minutes": parsed["timezone_offset_minutes"],
             "timezone_source": timezone_source,
         }
 
-    def _parse_datetime(self, raw_value: Any, timezone_value: Any = None) -> dict[str, Any] | None:
+    def _parse_datetime(
+        self,
+        raw_value: Any,
+        timezone_value: Any = None,
+        *,
+        project_timezone_value: Any = None,
+        assume_utc_if_naive: bool = False,
+    ) -> dict[str, Any] | None:
         text = str(raw_value).strip()
         if not text or text.startswith("0000:00:00"):
             return None
@@ -627,6 +659,7 @@ class AssetMetadataBuilder:
             normalized_text = normalized_text.replace(" ", "T", 1)
 
         tzinfo = self._parse_timezone(timezone_value)
+        project_tzinfo = self._parse_timezone(project_timezone_value)
         try:
             parsed = dt.datetime.fromisoformat(normalized_text)
         except ValueError:
@@ -640,14 +673,35 @@ class AssetMetadataBuilder:
                 return None
         if parsed.tzinfo is None and tzinfo is not None:
             parsed = parsed.replace(tzinfo=tzinfo)
+        elif parsed.tzinfo is None and assume_utc_if_naive:
+            parsed = parsed.replace(tzinfo=dt.timezone.utc)
         iso = parsed.isoformat(timespec="seconds")
+        project_iso = iso
+        if parsed.tzinfo and project_tzinfo is not None:
+            project_iso = parsed.astimezone(project_tzinfo).isoformat(timespec="seconds")
         return {
             "iso": iso,
             "utc": parsed.astimezone(dt.timezone.utc).isoformat(timespec="seconds") if parsed.tzinfo else None,
-            "project": iso,
+            "project": project_iso,
             "epoch_ms": self._iso_to_epoch_ms(iso) if parsed.tzinfo else None,
             "timezone_offset_minutes": int(parsed.utcoffset().total_seconds() // 60) if parsed.tzinfo else None,
         }
+
+    def _project_timezone_hint(
+        self,
+        exiftool_payload: dict[str, Any],
+        ffprobe_payload: dict[str, Any],
+    ) -> tuple[str | None, str | None]:
+        ffprobe_tags = ffprobe_payload.get("format", {}).get("tags", {})
+        for key in ("com.samsung.android.utc_offset", "com.android.utc_offset"):
+            raw_value = ffprobe_tags.get(key)
+            if raw_value:
+                return str(raw_value), f"ffprobe:{key}"
+        for key in ("AndroidTimeZone",):
+            raw_value = self._lookup_tag(exiftool_payload, key)
+            if raw_value:
+                return str(raw_value), f"exiftool:{key}"
+        return None, None
 
     def _parse_timezone(self, timezone_value: Any) -> dt.tzinfo | None:
         if timezone_value in (None, ""):
