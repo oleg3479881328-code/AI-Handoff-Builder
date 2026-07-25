@@ -1,0 +1,12 @@
+{
+  "name": "ai-handoff-hyperframes-photo-demo",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "dev": "npx --yes hyperframes@0.7.71 preview",
+    "check": "npx --yes hyperframes@0.7.71 check",
+    "lint": "npx --yes hyperframes@0.7.71 lint",
+    "inspect": "npx --yes hyperframes@0.7.71 inspect",
+    "render": "npx --yes hyperframes@0.7.71 render -o out/hyperframes_photo_demo.mp4"
+  }
+}

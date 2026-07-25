@@ -8,3 +8,9 @@ build/
 *.pyc
 tmp_smoke_*/
 Thumbs.db
+
+# HyperFrames local-only prototype material
+prototypes/hyperframes/assets/
+prototypes/hyperframes/out/
+prototypes/hyperframes/node_modules/
+prototypes/hyperframes/.hyperframes/

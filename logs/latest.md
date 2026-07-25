@@ -1,96 +1,171 @@
 # Latest Log
 
-Date: 2026-07-23
-Step: Release-candidate Light/Dark UI acceptance refresh, paired GUI proof, and publication prep
+Date: 2026-07-25
+Step: HyperFrames documentation alignment for draft PR #4
 
 ## Completed
 
-- Continued from the accepted metadata branch ancestry without re-merging accepted Voicebox work.
-- Confirmed local ancestry from accepted Voicebox baseline into accepted metadata head before RC work:
-  - `5f6a6e5b70251dd06d47824440b06a969c314579` -> ancestor of `7d06faac3bdc7ab9ba423a5876a3e5607e5444e8`
-- Created and used release-candidate branch:
-  - `codex/release-candidate-light-dark-ui`
-- Added centralized theme tokens and persistent selection storage in:
-  - `handoff_builder/theme.py`
-- Updated the existing Tkinter app so the release candidate now supports:
-  - visible Dark / Light switch in the persistent header
-  - saved theme choice between launches
-  - themed dialogs for info / warning / error
-  - themed Prepare Handoff summary window
-  - themed Local Edit Runner panes and text surfaces
-  - themed Voice Studio window and controls
-  - themed listboxes / text widgets / focus states
-- Added theme regression coverage in:
-  - `tests/test_theme.py`
-- Preserved the already-completed real end-to-end evidence on this RC line:
-  - real analysis handoff package
-  - imported minimal real `AI_EDIT_PACKAGE`
-  - preview render
-  - three real `Olga` takes
-  - approved take
-  - patch
-  - rerendered MP4
-- Generated paired Light/Dark GUI screenshots for the required screens and states:
-  - Prepare Handoff
-  - summary dialog
-  - Local Edit Runner
-  - busy render state
-  - Voice Studio
-  - info / warning / error dialogs
-- Stored paired screenshot artifacts at:
-  - `tmp_rc_theme_screenshots\dark_prepare_main.png`
-  - `tmp_rc_theme_screenshots\light_prepare_main.png`
-  - `tmp_rc_theme_screenshots\dark_summary.png`
-  - `tmp_rc_theme_screenshots\light_summary.png`
-  - `tmp_rc_theme_screenshots\dark_local_edit_runner.png`
-  - `tmp_rc_theme_screenshots\light_local_edit_runner.png`
-  - `tmp_rc_theme_screenshots\dark_local_edit_runner_busy.png`
-  - `tmp_rc_theme_screenshots\light_local_edit_runner_busy.png`
-  - `tmp_rc_theme_screenshots\dark_voice_studio.png`
-  - `tmp_rc_theme_screenshots\light_voice_studio.png`
-  - `tmp_rc_theme_screenshots\dark_dialog_info.png`
-  - `tmp_rc_theme_screenshots\light_dialog_info.png`
-  - `tmp_rc_theme_screenshots\dark_dialog_warning.png`
-  - `tmp_rc_theme_screenshots\light_dialog_warning.png`
-  - `tmp_rc_theme_screenshots\dark_dialog_error.png`
-  - `tmp_rc_theme_screenshots\light_dialog_error.png`
-- Generated machine-readable UI validation artifacts:
-  - `tmp_rc_theme_screenshots\theme_ui_validation.json`
-  - `tmp_rc_theme_screenshots\voice_studio_theme_validation.json`
-- Verified visible key controls at:
-  - `100%` scaling
-  - `125%` scaling
-  - `150%` scaling
-- Recorded keyboard focus traversal for both Dark and Light themes across:
-  - header theme controls
-  - notebook
-  - source action buttons
-  - source listbox
-  - settings entries
+- Confirmed the official current local runtime:
+  - `node --version` -> `v24.13.0`
+  - `npm --version` -> `11.6.2`
+  - `hyperframes --version` -> `0.7.71`
+- Installed the official HyperFrames CLI globally and completed browser provisioning with:
+  - `npm install -g hyperframes`
+  - `hyperframes browser ensure`
+- Ran `hyperframes doctor --json` and confirmed the required local render path works after browser provisioning:
+  - Version OK
+  - Node.js OK
+  - FFmpeg OK
+  - FFprobe OK
+  - Chrome OK
+- Located the six private owner JPEGs on this Windows machine and copied them into:
+  - `prototypes/hyperframes/assets/`
+  - originals were not modified or moved
+- Detected and fixed real compatibility drift between the issue assumptions and current HyperFrames `0.7.71`:
+  - current CLI expects a project directory, not direct `comp.html` entry
+  - current project shape uses:
+    - `index.html`
+    - `meta.json`
+    - `hyperframes.json`
+    - `package.json`
+  - `inspect` is deprecated but still usable; current CLI points toward `check`
+- Converted the trusted prototype into the current CLI-compatible project format while preserving the same 9:16 visual intent.
+- Fixed all live lint/runtime issues reported by the current CLI:
+  - added `class="clip"` to timed elements
+  - assigned overlapping cross-fade shots to separate tracks
+  - removed duplicate live root-composition discovery from legacy `comp.html`
+  - marked the intended text overlap explicitly
+- Validated the trusted prototype on real local owner media:
+  - `hyperframes lint . --json` -> clean
+  - `hyperframes inspect .` -> clean
+  - `hyperframes render . -o out/hyperframes_photo_demo.mp4`
+  - `hyperframes render . -o out/hyperframes_photo_demo_second.mp4`
+- Confirmed deterministic output:
+  - first SHA-256: `C4CF14908710486616C28B3674E1EB0465FBFD92F5DA9CE3D19718DC3A5EE45D`
+  - second SHA-256: `C4CF14908710486616C28B3674E1EB0465FBFD92F5DA9CE3D19718DC3A5EE45D`
+- Probed the produced MP4:
+  - `1080x1920`
+  - `30 FPS`
+  - `12.000000 s`
+  - `22269151` bytes
+  - video-only, no audio stream
+- Started local preview successfully:
+  - `hyperframes preview . --background --no-open --force-new`
+  - active server on `http://localhost:3002`
+  - endpoint returned `200`
+- Captured preview evidence artifacts:
+  - `prototypes/hyperframes/out/preview-studio.png`
+  - `prototypes/hyperframes/out/preview-studio-loaded.png`
+- Confirmed the loaded Studio project route in a real browser session:
+  - `http://127.0.0.1:3002/#project/hyperframes?v=1&t=0&tab=renders&rc=1`
+- Implemented the bounded Python adapter:
+  - `handoff_builder/v2/hyperframes_lab.py`
+  - safety boundary:
+    - only trusted prototype root or active workspace paths
+    - explicit argument arrays only
+    - no `shell=True`
+    - no remote scripts/iframes/fetch/network patterns in trusted HTML
+    - structured success/failure metadata
+- Added the minimal themed in-app `HyperFrames Lab` surface inside `app.py`:
+  - choose trusted project dir
+  - refresh doctor
+  - open local preview
+  - render MP4
+  - cancel request
+  - open output folder
+- Fixed the real UI-thread bug discovered during owner-facing validation:
+  - background HyperFrames worker no longer reads `tk.StringVar` values off the Tk main thread
+- Validated the owner-facing Tkinter flow directly from the real `App()` object:
+  - `Refresh Doctor` succeeded
+  - `Render MP4` succeeded
+  - output artifact:
+    - `prototypes/hyperframes/out/hyperframes_lab_render.mp4`
+  - output SHA-256:
+    - `D18B2EBF2F1CDAA46C0B700D351EC69670E06005E1D4B39A0CCB98554018E1C7`
+- Added focused tests:
+  - `tests/test_v2_hyperframes_lab.py`
+- Revalidated the repository:
+  - `python -m pytest -q tests/test_v2_hyperframes_lab.py` -> `8 passed in 0.15s`
+  - `python -m pytest -q` -> `95 passed in 28.69s`
+  - `python -m compileall handoff_builder app.py` -> success
+- Completed the coordinator-requested live Windows acceptance pass on `feat/hyperframes-lab`:
+  - launched the app again through `run_windows.bat`
+  - opened `Local Edit Runner (v2)` and confirmed `HyperFrames Lab` controls remain fully visible in both Light and Dark themes
+  - reproduced a real preview acceptance gap:
+    - UI `Open Preview` surfaced only the bare Studio root URL
+    - a fresh browser window at the root URL did not auto-load the trusted local project
+  - fixed the preview routing gap in `handoff_builder/v2/hyperframes_lab.py`:
+    - adapter now returns a project-aware Studio deep-link:
+      - `http://localhost:3003/#project/hyperframes?v=1&t=0&tab=renders&rc=1`
+    - preserved the original root Studio URL separately as structured metadata
+  - added/updated focused proof:
+    - `tests/test_v2_hyperframes_lab.py`
+    - `python -m pytest -q tests/test_v2_hyperframes_lab.py` -> `8 passed in 0.20s`
+    - `python -m pytest -q` -> `95 passed in 39.73s`
+  - reran the real UI flow after the fix:
+    - `Refresh Doctor` succeeded
+    - `Open Preview` exposed the project-aware deep-link in the app status line
+    - dedicated browser capture showed the loaded `hyperframes` project with six owner-photo thumbnails visible on the timeline
+    - browser scrub capture showed the playhead advanced to `00:04 / 00:12` with the preview frame updated
+    - `Render MP4` completed from the real Tkinter app
+    - `Open Output Folder` opened `out - File Explorer`
+  - captured real UI render result:
+    - output: `prototypes/hyperframes/out/hyperframes_lab_render.mp4`
+    - `ffprobe`: `1080x1920`, `30 FPS`, `12.000000 s`, `22252596` bytes, video-only
+    - SHA-256: `D18B2EBF2F1CDAA46C0B700D351EC69670E06005E1D4B39A0CCB98554018E1C7`
+- Addressed the final coordinator code-review blockers on Saturday, July 25, 2026:
+  - removed the owner-machine absolute test path from `tests/test_v2_hyperframes_lab.py`
+  - switched the `.gitignore` assertion to a repository-relative path derived from the test file
+  - hardened the trusted HyperFrames HTML/CSS boundary in `handoff_builder/v2/hyperframes_lab.py`
+  - the validator now rejects any remote `http://` / `https://` reference inside trusted composition HTML/CSS, including remote:
+    - images
+    - video/audio media
+    - `<source>` tags
+    - CSS `url(...)` references
+  - expanded the focused test matrix for remote script, iframe, fetch, image, video, audio, source, and CSS URL cases
+  - validation after the hardening pass:
+    - `python -m pytest -q tests/test_v2_hyperframes_lab.py` -> `13 passed in 0.76s`
+    - `python -m pytest -q` -> `100 passed in 32.73s`
+    - `python -m compileall handoff_builder app.py` -> success
+    - `git diff --check` -> warnings only for LF/CRLF conversion, no content errors
 
-## Verification
+## Acceptance Status
 
-- `python -m pytest -q` -> `87 passed in 48.49s`
-- `python -m compileall handoff_builder app.py` -> success
-- `git diff --check` -> only LF/CRLF warning in `app.py`
-- earlier portable build on the same RC code line:
-  - `cmd /c "echo.| build_exe.bat"` -> success on 2026-07-23
-- real RC rerender artifact remains valid at:
-  - `tmp_rc_real_e2e\workspace\renders\46cf0e82d55d5a4d49ac\reel.mp4`
-- paired Voice Studio UI proof confirms:
-  - `Voice Studio готов. Можно прослушать takes и нажать Approve.`
-  - job label `b15f0c360c9f8daf9ccd | approved | takes=3 | approved=yes`
-  - `take_count=3`
+- Local HyperFrames runtime: satisfied
+- `doctor` evidence: satisfied
+- browser preview opened locally: satisfied
+- preview screenshot captured: satisfied
+- project-aware preview deep-link from the real UI: satisfied
+- loaded Studio composition with six owner-photo timeline thumbnails: satisfied
+- timeline scrubbing in the real browser window: satisfied
+- `Open Output Folder` local-only path behavior: satisfied
+- real 1080x1920 MP4 from the six owner photos: satisfied
+- repeat render comparison: satisfied
+- bounded Python adapter: satisfied
+- minimal themed Tkinter surface: satisfied
+- `shell=True` avoided: satisfied
+- FFmpeg default preserved: satisfied
+- full Python regression suite: satisfied
+- remote media/CSS URL rejection in trusted compositions: satisfied
+- state files updated: satisfied
+- draft PR `#4` into `codex/release-candidate-light-dark-ui`: open and documented
+- GitHub CI/status checks on current PR head: none configured; local regression evidence remains the validation source
 
-## Notes
+## Security Boundary Still In Force
 
-- The scaling JSON was regenerated to exclude unmapped `1x1` widgets from non-visible panes; the final pass/fail result now reflects only visible controls.
-- Tkinter emits harmless `invalid command name "..._poll_events"` shutdown messages during automation teardown because the app schedules `after(...)` polling and the test harness destroys the window immediately after capture.
-- The working branch still has not been merged into `main`.
+- FFmpeg remains the production default renderer.
+- HyperFrames stays optional and local.
+- No cloud rendering.
+- No raw command strings.
+- No `shell=True`.
+- No raw AI-authored HTML/JavaScript execution.
+- No remote scripts, fonts, media, iframes, or arbitrary URLs in trusted compositions.
+- No modification of owner originals.
+- No tracked personal media or generated MP4 files.
+- No merge to `main`.
 
 ## Next
 
-- Commit the RC theme integration and documentation refresh.
-- Push `codex/release-candidate-light-dark-ui`.
-- Update only the existing Notion Implementation Report with final status, commit SHA, changed files, evidence, and clean tracked worktree proof.
-- Wait for review. No merge.
+- Final coordinator verification on draft PR `#4`.
+- Wait for an explicit owner decision before marking ready or merging.
+- Do not merge to `main` or `codex/release-candidate-light-dark-ui`.
