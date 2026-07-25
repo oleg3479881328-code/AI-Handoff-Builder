@@ -257,3 +257,64 @@ Step: HyperFrames documentation alignment for draft PR #4
   - asset resolution evidence:
     - `tmp_issue6_acceptance/workspace/renders/78d6ca7e6b67f69b1818/asset_resolution.json`
     - `resolved_asset_count=10`
+
+## Update: Issue #8 packaged release-candidate acceptance
+
+- Synced to the accepted release-candidate baseline:
+  - branch: `codex/release-candidate-light-dark-ui`
+  - exact HEAD: `bd3867280c19b252489011c3c3b589c05c87c061`
+- Verified source health before packaging work:
+  - `python -m pytest -q` -> `109 passed` on the accepted baseline
+  - `python -m compileall handoff_builder app.py` -> success
+  - `git diff --check` -> clean
+- Confirmed the real packaged defect that blocks Issue #8 acceptance:
+  - current frozen app shipped `prototypes/hyperframes/`
+  - current frozen app missed `_internal/schemas/`
+  - packaged `AI_EDIT_PACKAGE 2.0` import could not rely on the repository schema loader path without this fix
+- Implemented the dedicated packaging-only fix on branch:
+  - `feat/issue-8-packaged-schema-fix`
+  - changes:
+    - `AI Handoff Builder.spec`
+    - `build_exe.bat`
+    - `tests/test_packaged_resources.py`
+- Post-fix validation:
+  - `python -m pytest -q tests/test_packaged_resources.py tests/test_v2_ai_edit_package_2.py -q` -> passed
+  - `python -m pytest -q` -> `111 passed in 30.35s`
+  - `python -m compileall handoff_builder app.py` -> success
+  - `git diff --check` -> line-ending warning only for `build_exe.bat`
+- Rebuilt the portable packaged app:
+  - command:
+    - `cmd /c build_exe.bat`
+  - artifact:
+    - `dist/AI Handoff Builder/AI Handoff Builder.exe`
+  - last write UTC:
+    - `2026-07-25T19:47:29Z`
+  - size:
+    - `6233403` bytes
+  - SHA-256:
+    - `3737F885698D1F71AA9196474676B307E02AF66666D9CC6DA9B2BCCB298E2F97`
+- Confirmed packaged resources after rebuild:
+  - `_internal/prototypes/hyperframes/`
+  - `_internal/schemas/ai_edit_package/1.0.json`
+  - `_internal/schemas/ai_edit_package/2.0.json`
+  - `_internal/schemas/edit_plan/1.0.json`
+  - `_internal/schemas/edit_plan/2.0.json`
+  - `_internal/schemas/edit_patch/1.0.json`
+  - `_internal/schemas/render_report/1.0.json`
+  - `_internal/schemas/voiceover_spec/1.0.json`
+- Packaged GUI evidence gathered:
+  - startup screenshot:
+    - `tmp_issue8_startup.png`
+  - `Local Edit Runner (v2)` packaged tab screenshot:
+    - `tmp_issue8_v2tab.png`
+  - packaged workspace-open proof:
+    - `tmp_issue8_open_workspace_probe/after-open.png`
+  - UI status in the packaged app:
+    - `Workspace готов.`
+- Remaining blocker:
+  - the standard Windows `Выберите AI_EDIT_PACKAGE.zip` picker still needs one final working unattended confirmation path
+  - automation now reliably:
+    - opens the packaged dialog
+    - populates the `File name` field with the real `AI_EDIT_PACKAGE.zip` path
+  - but the automated confirm step has not yet produced imported workspace markers
+  - therefore the packaging/resource defect is fixed and proven, while the last packaged import/render acceptance step remains open
