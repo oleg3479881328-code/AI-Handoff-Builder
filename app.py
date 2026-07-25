@@ -6,6 +6,7 @@ import queue
 import subprocess
 import threading
 import tkinter as tk
+import webbrowser
 from pathlib import Path
 from tkinter import filedialog, ttk
 
@@ -15,6 +16,7 @@ from handoff_builder.models import BuildResult, BuilderConfig
 from handoff_builder.pipeline import HandoffBuilder
 from handoff_builder.theme import ThemePalette, ThemeSettingsStore, get_theme_palette
 from handoff_builder.v2.gui_controller import V2RunnerController
+from handoff_builder.v2.hyperframes_lab import HyperFramesAdapter, HyperFramesLabError
 from handoff_builder.v2.services import (
     list_voice_jobs,
     show_plan,
@@ -95,6 +97,12 @@ class App(tk.Tk):
         self.voice_pacing = tk.IntVar(value=5)
         self.voice_emotion = tk.IntVar(value=5)
         self.voice_artifacts = tk.StringVar(value="minor")
+        self.hyperframes_project_path = tk.StringVar(value=str(Path(__file__).resolve().parent / "prototypes" / "hyperframes"))
+        self.hyperframes_status_text = tk.StringVar(value="HyperFrames Lab: trusted local prototype or workspace composition only.")
+        self.hyperframes_runtime_text = tk.StringVar(value="Doctor: not checked")
+        self.hyperframes_preview_url = tk.StringVar(value="")
+        self.hyperframes_last_result: dict | None = None
+        self.hyperframes_cancel_event: threading.Event | None = None
 
         self._build_ui()
         self._apply_theme()
@@ -219,8 +227,8 @@ class App(tk.Tk):
     def _build_v2_tab(self) -> None:
         outer = self.v2_tab
         outer.columnconfigure(0, weight=1)
-        outer.rowconfigure(3, weight=1)
         outer.rowconfigure(4, weight=1)
+        outer.rowconfigure(5, weight=1)
 
         workspace_frame = ttk.LabelFrame(outer, text="Workspace", padding=10)
         workspace_frame.grid(row=0, column=0, sticky="ew")
@@ -256,8 +264,34 @@ class App(tk.Tk):
 
         ttk.Label(outer, textvariable=self.v2_status_text).grid(row=2, column=0, sticky="w", pady=(8, 8))
 
+        hyperframes_frame = ttk.LabelFrame(outer, text="HyperFrames Lab", padding=10)
+        hyperframes_frame.grid(row=3, column=0, sticky="ew")
+        hyperframes_frame.columnconfigure(1, weight=1)
+        ttk.Label(hyperframes_frame, text="Project dir:").grid(row=0, column=0, sticky="w")
+        ttk.Entry(hyperframes_frame, textvariable=self.hyperframes_project_path).grid(row=0, column=1, sticky="ew", padx=(8, 8))
+        self.hyperframes_choose_button = ttk.Button(hyperframes_frame, text="Choose", command=self._hyperframes_choose_project)
+        self.hyperframes_choose_button.grid(row=0, column=2, sticky="ew")
+        action_row = ttk.Frame(hyperframes_frame)
+        action_row.grid(row=1, column=0, columnspan=3, sticky="ew", pady=(8, 0))
+        self.hyperframes_doctor_button = ttk.Button(action_row, text="Refresh Doctor", command=self._hyperframes_refresh_doctor)
+        self.hyperframes_doctor_button.pack(side="left")
+        self.hyperframes_preview_button = ttk.Button(action_row, text="Open Preview", command=self._hyperframes_open_preview)
+        self.hyperframes_preview_button.pack(side="left", padx=(8, 0))
+        self.hyperframes_render_button = ttk.Button(action_row, text="Render MP4", command=self._hyperframes_render)
+        self.hyperframes_render_button.pack(side="left", padx=(8, 0))
+        self.hyperframes_cancel_button = ttk.Button(action_row, text="Cancel", command=self._hyperframes_request_cancel)
+        self.hyperframes_cancel_button.pack(side="left", padx=(8, 0))
+        self.hyperframes_output_button = ttk.Button(action_row, text="Open Output Folder", command=self._hyperframes_open_output_dir)
+        self.hyperframes_output_button.pack(side="left", padx=(16, 0))
+        ttk.Label(hyperframes_frame, textvariable=self.hyperframes_runtime_text, wraplength=900, justify="left").grid(
+            row=2, column=0, columnspan=3, sticky="w", pady=(8, 0)
+        )
+        ttk.Label(hyperframes_frame, textvariable=self.hyperframes_status_text, wraplength=900, justify="left").grid(
+            row=3, column=0, columnspan=3, sticky="w", pady=(6, 0)
+        )
+
         summary_frame = ttk.LabelFrame(outer, text="Import AI Plan / Patch Summary", padding=10)
-        summary_frame.grid(row=3, column=0, sticky="nsew")
+        summary_frame.grid(row=4, column=0, sticky="nsew", pady=(10, 0))
         summary_frame.columnconfigure(0, weight=1)
         summary_frame.rowconfigure(0, weight=1)
         self.v2_summary = tk.Text(summary_frame, height=10, wrap="word", state="disabled")
@@ -265,7 +299,7 @@ class App(tk.Tk):
         self._register_text_widget(self.v2_summary)
 
         lower = ttk.Panedwindow(outer, orient="horizontal")
-        lower.grid(row=4, column=0, sticky="nsew", pady=(10, 0))
+        lower.grid(row=5, column=0, sticky="nsew", pady=(10, 0))
 
         queue_frame = ttk.Frame(lower, padding=4)
         queue_frame.columnconfigure(0, weight=1)
@@ -916,6 +950,85 @@ class App(tk.Tk):
         if self.v2_current_details:
             self._open_path(Path(self.v2_current_details["ffmpeg_command_path"]))
 
+    def _hyperframes_choose_project(self) -> None:
+        value = filedialog.askdirectory(title="Выберите trusted HyperFrames project folder")
+        if value:
+            self.hyperframes_project_path.set(value)
+
+    def _hyperframes_adapter(self, *, workspace_root: Path | None = None) -> HyperFramesAdapter:
+        return HyperFramesAdapter(
+            trusted_prototype_root=Path(__file__).resolve().parent / "prototypes" / "hyperframes",
+            workspace_root=workspace_root,
+            project_root=Path(__file__).resolve().parent,
+            cancel_event=self.hyperframes_cancel_event,
+        )
+
+    def _hyperframes_set_busy(self, busy: bool, message: str | None = None) -> None:
+        state = "disabled" if busy else "normal"
+        for button in (
+            self.hyperframes_choose_button,
+            self.hyperframes_doctor_button,
+            self.hyperframes_preview_button,
+            self.hyperframes_render_button,
+            self.hyperframes_output_button,
+        ):
+            button.configure(state=state)
+        self.hyperframes_cancel_button.configure(state="normal" if busy else "disabled")
+        if message:
+            self.hyperframes_status_text.set(message)
+
+    def _hyperframes_refresh_doctor(self) -> None:
+        self._hyperframes_start("doctor")
+
+    def _hyperframes_open_preview(self) -> None:
+        self._hyperframes_start("preview")
+
+    def _hyperframes_render(self) -> None:
+        self._hyperframes_start("render")
+
+    def _hyperframes_request_cancel(self) -> None:
+        if self.hyperframes_cancel_event is not None:
+            self.hyperframes_cancel_event.set()
+            self.hyperframes_status_text.set("HyperFrames: cancel requested...")
+
+    def _hyperframes_open_output_dir(self) -> None:
+        result = self.hyperframes_last_result or {}
+        output_path = result.get("metadata", {}).get("output_path")
+        if not output_path:
+            self._show_warning("Нет output", "Сначала выполните HyperFrames render.")
+            return
+        self._open_path(Path(output_path).parent)
+
+    def _hyperframes_start(self, action: str) -> None:
+        self.hyperframes_cancel_event = threading.Event()
+        project_dir = Path(self.hyperframes_project_path.get()).expanduser()
+        workspace_root = self.v2_controller.workspace
+        if workspace_root is None:
+            candidate = Path(self.v2_workspace_path.get()).expanduser()
+            workspace_root = candidate if candidate.exists() else None
+        labels = {
+            "doctor": "HyperFrames doctor...",
+            "preview": "Запуск локального HyperFrames preview...",
+            "render": "HyperFrames render MP4...",
+        }
+        self._hyperframes_set_busy(True, labels.get(action, "HyperFrames..."))
+        threading.Thread(target=self._hyperframes_worker, args=(action, project_dir, workspace_root), daemon=True).start()
+
+    def _hyperframes_worker(self, action: str, project_dir: Path, workspace_root: Path | None) -> None:
+        try:
+            adapter = self._hyperframes_adapter(workspace_root=workspace_root)
+            if action == "doctor":
+                result = adapter.doctor()
+            elif action == "preview":
+                result = adapter.open_preview(project_dir)
+            elif action == "render":
+                result = adapter.render(project_dir)
+            else:
+                raise HyperFramesLabError(f"Unknown HyperFrames action: {action}")
+            self.events.put(("hyperframes_result", {"action": action, "result": result}))
+        except Exception as exc:
+            self.events.put(("hyperframes_error", str(exc)))
+
     def _v2_set_busy(self, busy: bool, message: str | None = None) -> None:
         self.v2_busy = busy
         state = "disabled" if busy else "normal"
@@ -931,6 +1044,48 @@ class App(tk.Tk):
         self.v2_cancel_button.configure(state="normal")
         if message:
             self.v2_status_text.set(message)
+
+    def _hyperframes_handle_result(self, payload: dict) -> None:
+        action = payload["action"]
+        result = payload["result"]
+        self.hyperframes_last_result = {
+            "action": action,
+            "command": result.command,
+            "returncode": result.returncode,
+            "stdout": result.stdout,
+            "stderr": result.stderr,
+            "metadata": result.metadata,
+            "success": result.success,
+        }
+        self._hyperframes_set_busy(False)
+        if action == "doctor":
+            checks = result.metadata.get("payload", {}).get("checks", [])
+            chrome_status = next((item.get("detail") for item in checks if item.get("name") == "Chrome"), "unknown")
+            ffmpeg_status = next((item.get("detail") for item in checks if item.get("name") == "FFmpeg"), "unknown")
+            self.hyperframes_runtime_text.set(
+                f"Doctor: success={result.success} | returncode={result.returncode} | Chrome={chrome_status} | FFmpeg={ffmpeg_status}"
+            )
+            self.hyperframes_status_text.set("HyperFrames doctor завершён.")
+            return
+        if action == "preview":
+            studio_url = result.metadata.get("studio_url") or ""
+            self.hyperframes_preview_url.set(studio_url)
+            self.hyperframes_status_text.set(f"HyperFrames preview готов: {studio_url or 'url not found'}")
+            if studio_url:
+                webbrowser.open(studio_url)
+            return
+        if action == "render":
+            metadata = result.metadata
+            probe = metadata.get("probe", {})
+            output_path = metadata.get("output_path", "-")
+            sha256 = metadata.get("sha256", "-")
+            self.hyperframes_status_text.set(
+                "HyperFrames render completed: "
+                f"{probe.get('width', '-')}x{probe.get('height', '-')} | "
+                f"{probe.get('duration', '-')}s | "
+                f"fps={probe.get('fps', '-')} | sha256={sha256}"
+            )
+            self.hyperframes_runtime_text.set(f"Output: {output_path}")
 
     def _write_text(self, widget: tk.Text, value: str) -> None:
         widget.configure(state="normal")
@@ -1625,6 +1780,11 @@ class App(tk.Tk):
                 elif kind == "voice_error":
                     self.voice_status_text.set(f"Voice Studio error: {payload}")
                     self._show_error("Voice Studio error", str(payload))
+                elif kind == "hyperframes_result":
+                    self._hyperframes_handle_result(payload)
+                elif kind == "hyperframes_error":
+                    self._hyperframes_set_busy(False, "HyperFrames operation failed.")
+                    self._show_error("HyperFrames Lab", str(payload))
         except queue.Empty:
             pass
         self.after(120, self._poll_events)

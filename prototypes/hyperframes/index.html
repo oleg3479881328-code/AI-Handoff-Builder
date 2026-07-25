@@ -1,12 +1,12 @@
-<!doctype html>
-<html lang="en">
+<!DOCTYPE html>
+<html lang="en" data-resolution="portrait">
 <head>
-  <meta charset="utf-8" />
-  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=1080, height=1920">
   <title>AI Handoff Builder - HyperFrames Photo Demo</title>
   <style>
     * { box-sizing: border-box; }
-    html, body { margin: 0; width: 100%; height: 100%; overflow: hidden; background: #080808; }
+    html, body { margin: 0; width: 1080px; height: 1920px; overflow: hidden; background: #080808; }
     body { font-family: Arial, Helvetica, sans-serif; }
 
     #stage {
@@ -115,46 +115,40 @@
   </style>
 </head>
 <body>
-  <main
-    id="stage"
-    data-width="1080"
-    data-height="1920"
-    data-duration="12"
-    data-fps="30"
-  >
-    <img id="shot-1" class="shot" src="assets/01-wide.jpg" alt="" data-start="0" data-duration="2.4" data-track-index="0" />
-    <img id="shot-2" class="shot" src="assets/02-wide.jpg" alt="" data-start="2" data-duration="2.4" data-track-index="0" />
-    <img id="shot-3" class="shot" src="assets/03-medium.jpg" alt="" data-start="4" data-duration="2.4" data-track-index="0" />
-    <img id="shot-4" class="shot" src="assets/04-portrait.jpg" alt="" data-start="6" data-duration="2.4" data-track-index="0" />
-    <img id="shot-5" class="shot" src="assets/05-close.jpg" alt="" data-start="8" data-duration="2.4" data-track-index="0" />
-    <img id="shot-6" class="shot" src="assets/06-close.jpg" alt="" data-start="10" data-duration="2" data-track-index="0" />
+  <main data-hf-id="hf-yn1p" id="stage" data-composition-id="ai-handoff-hyperframes-photo-demo" data-start="0" data-duration="12" data-width="1080" data-height="1920">
+    <img data-hf-id="hf-t18b" id="shot-1" class="clip shot" src="assets/01-wide.jpg" alt="" data-start="0" data-duration="2.4" data-track-index="0">
+    <img data-hf-id="hf-6ujm" id="shot-2" class="clip shot" src="assets/02-wide.jpg" alt="" data-start="2" data-duration="2.4" data-track-index="1">
+    <img data-hf-id="hf-0mzj" id="shot-3" class="clip shot" src="assets/03-medium.jpg" alt="" data-start="4" data-duration="2.4" data-track-index="0">
+    <img data-hf-id="hf-lmbu" id="shot-4" class="clip shot" src="assets/04-portrait.jpg" alt="" data-start="6" data-duration="2.4" data-track-index="1">
+    <img data-hf-id="hf-4y3s" id="shot-5" class="clip shot" src="assets/05-close.jpg" alt="" data-start="8" data-duration="2.4" data-track-index="0">
+    <img data-hf-id="hf-rkay" id="shot-6" class="clip shot" src="assets/06-close.jpg" alt="" data-start="10" data-duration="2" data-track-index="1">
 
-    <div class="shade"></div>
-    <div class="grain"></div>
-    <div class="badge">HyperFrames Lab</div>
-    <div id="eyebrow" class="eyebrow">Casual café moment</div>
-    <h1 id="title" class="title">From a wide scene<br />to a close expression.</h1>
-    <div class="progress"><span id="progress-bar"></span></div>
+    <div data-hf-id="hf-q0n7" class="shade"></div>
+    <div data-hf-id="hf-h60x" class="grain"></div>
+    <div data-hf-id="hf-27zg" class="badge">HyperFrames Lab</div>
+    <div data-hf-id="hf-c5m2" id="eyebrow" class="eyebrow" data-layout-allow-overlap="true">Casual cafe moment</div>
+    <h1 data-hf-id="hf-y09u" id="title" class="title" data-layout-allow-overlap="true">From a wide scene<br data-hf-id="hf-x5px">to a close expression.</h1>
+    <div data-hf-id="hf-31j5" class="progress"><span data-hf-id="hf-fr3r" id="progress-bar"></span></div>
   </main>
 
   <script>
     (() => {
-      'use strict';
+      "use strict";
 
       const duration = 12;
       const fade = 0.32;
       const shots = [
-        { id: 'shot-1', start: 0,  length: 2.4, scaleA: 1.00, scaleB: 1.07, xA: 0,  xB: -18, yA: 0,  yB: 12 },
-        { id: 'shot-2', start: 2,  length: 2.4, scaleA: 1.08, scaleB: 1.15, xA: 18, xB: -8,  yA: 4,  yB: -10 },
-        { id: 'shot-3', start: 4,  length: 2.4, scaleA: 1.03, scaleB: 1.12, xA: -8, xB: 8,   yA: 6,  yB: -6 },
-        { id: 'shot-4', start: 6,  length: 2.4, scaleA: 1.02, scaleB: 1.10, xA: 5,  xB: -7,  yA: 8,  yB: -8 },
-        { id: 'shot-5', start: 8,  length: 2.4, scaleA: 1.05, scaleB: 1.15, xA: -8, xB: 8,   yA: 2,  yB: -5 },
-        { id: 'shot-6', start: 10, length: 2.0, scaleA: 1.08, scaleB: 1.18, xA: 8,  xB: -4,  yA: 4,  yB: -8 }
+        { id: "shot-1", start: 0, length: 2.4, scaleA: 1.0, scaleB: 1.07, xA: 0, xB: -18, yA: 0, yB: 12 },
+        { id: "shot-2", start: 2, length: 2.4, scaleA: 1.08, scaleB: 1.15, xA: 18, xB: -8, yA: 4, yB: -10 },
+        { id: "shot-3", start: 4, length: 2.4, scaleA: 1.03, scaleB: 1.12, xA: -8, xB: 8, yA: 6, yB: -6 },
+        { id: "shot-4", start: 6, length: 2.4, scaleA: 1.02, scaleB: 1.1, xA: 5, xB: -7, yA: 8, yB: -8 },
+        { id: "shot-5", start: 8, length: 2.4, scaleA: 1.05, scaleB: 1.15, xA: -8, xB: 8, yA: 2, yB: -5 },
+        { id: "shot-6", start: 10, length: 2.0, scaleA: 1.08, scaleB: 1.18, xA: 8, xB: -4, yA: 4, yB: -8 },
       ];
 
-      const eyebrow = document.getElementById('eyebrow');
-      const title = document.getElementById('title');
-      const progressBar = document.getElementById('progress-bar');
+      const eyebrow = document.getElementById("eyebrow");
+      const title = document.getElementById("title");
+      const progressBar = document.getElementById("progress-bar");
 
       const clamp01 = (value) => Math.max(0, Math.min(1, value));
       const mix = (a, b, p) => a + (b - a) * p;
@@ -173,7 +167,7 @@
           const element = document.getElementById(shot.id);
           const local = t - shot.start;
           if (local < 0 || local > shot.length) {
-            element.style.opacity = '0';
+            element.style.opacity = "0";
             continue;
           }
 
@@ -195,8 +189,15 @@
         progressBar.style.width = `${(t / duration) * 100}%`;
       }
 
-      window.addEventListener('hf-seek', (event) => {
-        setTime(event.detail && typeof event.detail.time === 'number' ? event.detail.time : 0);
+      window.__timelines = window.__timelines || {};
+      window.__timelines["ai-handoff-hyperframes-photo-demo"] = {
+        seek(timeSeconds) {
+          setTime(timeSeconds);
+        },
+      };
+
+      window.addEventListener("hf-seek", (event) => {
+        setTime(event.detail && typeof event.detail.time === "number" ? event.detail.time : 0);
       });
 
       setTime(0);

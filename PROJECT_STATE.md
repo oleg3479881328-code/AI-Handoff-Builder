@@ -1,13 +1,13 @@
 # Current State
 
-- Date: 2026-07-24
+- Date: 2026-07-25
 - Repository: `oleg3479881328-code/AI-Handoff-Builder`
 - Broad v2 contract: `Yt-Dlp-Download-Manager` issue `#67`
 - HyperFrames contract: repository issue `#3`
 - Handoff completeness defect: repository issue `#2`
 - Current branch: `feat/hyperframes-lab`
 - Base branch: `codex/release-candidate-light-dark-ui`
-- Current phase: HyperFrames existing-solution decision, trusted prototype, and executor handoff prepared; local Windows validation pending
+- Current phase: HyperFrames trusted prototype validated locally on Windows, bounded Python adapter implemented, minimal in-app HyperFrames Lab surface validated, and coordinator acceptance effectively satisfied on the local branch
 
 ## Accepted Baseline Preserved
 
@@ -46,17 +46,34 @@ The integration is bounded as follows:
 - Re-entered through Project Execution OS `START_HERE.md` and `docs/ROUTER.md`.
 - Read the active project entrypoint, state, latest log, current release-candidate branch, renderer service, semantic validation, schema dispatch, and edit-plan schema.
 - Confirmed the current edit-plan schema `1.0` supports only video assets and `video_segment` operations.
-- Confirmed the current render service directly uses the safe FFmpeg compiler/backend and must not be weakened.
-- Checked the official HyperFrames repository and official documentation as the selected existing donor.
-- Created branch:
-  - `feat/hyperframes-lab`
-- Added:
-  - `docs/HYPERFRAMES_INTEGRATION.md`
+- Confirmed the current render service directly uses the safe FFmpeg compiler/backend and remains the production default.
+- Checked the official HyperFrames repository and current official CLI/documentation as the selected existing donor.
+- Validated the local Windows runtime with:
+  - `node --version` -> `v24.13.0`
+  - `npm --version` -> `11.6.2`
+  - `hyperframes --version` -> `0.7.71`
+  - `hyperframes doctor --json`
+- Confirmed and copied the six private owner photographs into the ignored local prototype asset folder without modifying originals.
+- Upgraded the checked-in prototype from legacy single-file `comp.html` assumptions to the current HyperFrames `0.7.x` project shape:
+  - `prototypes/hyperframes/index.html`
+  - `prototypes/hyperframes/meta.json`
+  - `prototypes/hyperframes/hyperframes.json`
+  - `prototypes/hyperframes/package.json`
+- Kept `prototypes/hyperframes/comp.html` only as the original discovery draft, no longer a live root composition.
+- Implemented a bounded HyperFrames adapter under:
+  - `handoff_builder/v2/hyperframes_lab.py`
+- Added focused safety/regression coverage:
+  - `tests/test_v2_hyperframes_lab.py`
+- Added a minimal themed `HyperFrames Lab` control surface inside the existing Tkinter application:
+  - project-dir picker
+  - doctor refresh
+  - local preview launch
+  - local MP4 render
+  - cancel request
+  - open output folder
+- Updated:
   - `prototypes/hyperframes/README.md`
-  - `prototypes/hyperframes/comp.html`
-- Created GitHub issue:
-  - `#3 HyperFrames Lab: local 9:16 photo prototype and safe in-app adapter`
-- Updated `PROJECT.md` for the new owner-approved scope.
+  - `app.py`
 
 ## Trusted Prototype
 
@@ -84,23 +101,80 @@ Expected private source filenames:
 ## Current Health
 
 - Existing application baseline: preserved
-- HyperFrames architecture decision: prepared
-- Repository prototype: prepared but unvalidated
-- Local Windows HyperFrames runtime: not yet checked
-- Real owner-media HyperFrames MP4: not yet rendered
-- Python adapter: not yet implemented
-- Tkinter HyperFrames Lab controls: not yet implemented
+- HyperFrames architecture decision: implemented
+- Repository prototype: validated against current HyperFrames CLI
+- Local Windows HyperFrames runtime: checked and working
+- Real owner-media HyperFrames MP4: rendered twice with identical SHA-256
+- Python adapter: implemented with allowlisted path and HTML safety checks
+- Tkinter HyperFrames Lab controls: implemented minimally inside the existing app
+- FFmpeg renderer default: preserved
+- Preview screenshot: satisfied with a loaded Studio capture showing the active project composition and timeline
+
+## Fresh HyperFrames Validation From 2026-07-25
+
+- Official CLI/runtime:
+  - `hyperframes --version` -> `0.7.71`
+  - `hyperframes doctor --json`
+    - required runtime checks passed for:
+      - Version
+      - Node.js
+      - FFmpeg
+      - FFprobe
+      - Chrome after `hyperframes browser ensure`
+    - optional checks still absent:
+      - `whisper-cpp`
+      - `TTS (Kokoro)`
+      - `BGM (MusicGen)`
+      - Docker running
+- Trusted prototype validation:
+  - `hyperframes lint . --json` -> `ok=true`, `0 error`, `0 warning`
+  - `hyperframes inspect .` -> `0 layout issues across 9 sample(s)`
+  - first render:
+    - `prototypes/hyperframes/out/hyperframes_photo_demo.mp4`
+    - size: `22269151` bytes
+    - duration: `12.000000`
+    - dimensions: `1080x1920`
+    - frame rate: `30/1`
+    - audio streams: `0`
+    - SHA-256: `C4CF14908710486616C28B3674E1EB0465FBFD92F5DA9CE3D19718DC3A5EE45D`
+  - second render:
+    - `prototypes/hyperframes/out/hyperframes_photo_demo_second.mp4`
+    - SHA-256: `C4CF14908710486616C28B3674E1EB0465FBFD92F5DA9CE3D19718DC3A5EE45D`
+  - determinism result:
+    - byte-identical output confirmed
+- Preview runtime evidence:
+  - `hyperframes preview . --background --no-open --force-new`
+  - local server responded `200` at `http://localhost:3002`
+  - active preview server listed on port `3002`
+  - loaded Studio route confirmed in a real browser session:
+    - `http://127.0.0.1:3002/#project/hyperframes?v=1&t=0&tab=renders&rc=1`
+  - screenshot artifacts:
+    - `prototypes/hyperframes/out/preview-studio.png`
+    - `prototypes/hyperframes/out/preview-studio-loaded.png`
+- In-app Tkinter validation:
+  - instantiated the existing `App()` locally
+  - confirmed the `Local Edit Runner (v2)` tab remains present
+  - executed the new `HyperFrames Lab` actions through the real UI methods:
+    - `Refresh Doctor`
+    - `Render MP4`
+  - UI returned:
+    - `HyperFrames render completed: 1080x1920 | 12.0s | fps=30.0 | sha256=D18B2EBF2F1CDAA46C0B700D351EC69670E06005E1D4B39A0CCB98554018E1C7`
+  - in-app render artifact:
+    - `prototypes/hyperframes/out/hyperframes_lab_render.mp4`
+- Final regression after the UI thread-safety fix:
+  - `python -m pytest -q tests/test_v2_hyperframes_lab.py` -> `8 passed in 0.15s`
+  - `python -m pytest -q` -> `95 passed in 28.69s`
+  - `python -m compileall app.py` -> success
+- Python regression and compile validation:
+  - `python -m pytest -q tests/test_v2_hyperframes_lab.py` -> `8 passed`
+  - `python -m pytest -q` -> `95 passed in 33.47s`
+  - `python -m compileall handoff_builder app.py` -> success
 
 ## Immediate Next Actions
 
-1. Executor starts from issue `#3` on branch `feat/hyperframes-lab`.
-2. Validate the official HyperFrames CLI and `doctor` on the owner Windows machine.
-3. Copy the six private photographs into the ignored prototype asset folder without modifying originals.
-4. Preview, lint, inspect, and render the trusted prototype twice.
-5. Record MP4 metadata, SHA-256 comparison, preview screenshot, and all runtime versions.
-6. Only after the direct prototype succeeds, implement the bounded Python adapter and minimal themed Tkinter controls.
-7. Run the full existing regression suite and update transfer-ready evidence.
-8. Push the feature branch and wait for owner review. No merge.
+1. Commit and push the current branch state if the owner wants publication now.
+2. Decide whether the prototype remains repository-only or should be widened into workspace-generated trusted compositions next.
+3. Keep FFmpeg as default and expand HyperFrames only behind the same trusted-template boundary.
 
 ## Constraints Still In Force
 

@@ -45,13 +45,16 @@ From this folder on Windows:
 ```text
 npm install -g hyperframes
 hyperframes doctor
-hyperframes preview comp.html
-hyperframes lint comp.html
-hyperframes inspect comp.html
-hyperframes render comp.html --out out/hyperframes_photo_demo.mp4
+hyperframes preview .
+hyperframes lint .
+hyperframes inspect .
+hyperframes render . --out out/hyperframes_photo_demo.mp4
 ```
 
-Preview normally opens at:
+Current HyperFrames releases validate a project directory, not a standalone `comp.html`.
+`comp.html` is kept here as the original discovery draft, while `index.html + meta.json + hyperframes.json + package.json` provide the actual CLI-compatible project shape for `0.7.x`.
+
+Preview normally opens on a local port chosen by HyperFrames, often:
 
 ```text
 http://localhost:5173
@@ -60,7 +63,7 @@ http://localhost:5173
 Use a different port only when required:
 
 ```text
-hyperframes preview comp.html --port 5174
+hyperframes preview . --port 5174
 ```
 
 ## Required evidence
