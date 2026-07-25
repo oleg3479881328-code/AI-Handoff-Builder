@@ -5,6 +5,7 @@ import re
 import threading
 from dataclasses import dataclass
 from pathlib import Path
+from urllib.parse import quote, urlsplit, urlunsplit
 
 from handoff_builder.ffmpeg_tools import run_command
 from handoff_builder.utils import find_executable
@@ -99,14 +100,15 @@ class HyperFramesAdapter:
         safe_project = self.resolve_project_dir(project_dir)
         command = [self.discover_executable(), "preview", str(safe_project), "--background", "--no-open", "--force-new"]
         completed = run_command(command, check=False, cancel_event=self.cancel_event)
-        studio_url = _extract_studio_url(completed.stdout or "")
+        studio_root_url = _extract_studio_url(completed.stdout or "")
+        studio_url = _build_project_studio_url(studio_root_url, safe_project) if studio_root_url else None
         return HyperFramesCommandResult(
             success=completed.returncode == 0 and bool(studio_url),
             command=command,
             returncode=completed.returncode,
             stdout=completed.stdout or "",
             stderr=completed.stderr or "",
-            metadata={"project_dir": str(safe_project), "studio_url": studio_url},
+            metadata={"project_dir": str(safe_project), "studio_url": studio_url, "studio_root_url": studio_root_url},
         )
 
     def render(self, project_dir: Path, *, output_name: str = "hyperframes_lab_render.mp4") -> HyperFramesCommandResult:
@@ -167,6 +169,14 @@ def _extract_json_payload(text: str) -> dict:
 def _extract_studio_url(text: str) -> str | None:
     match = re.search(r"https?://[^\s]+", text)
     return match.group(0) if match else None
+
+
+def _build_project_studio_url(studio_url: str, project_dir: Path) -> str:
+    parsed = urlsplit(studio_url)
+    if not parsed.scheme or not parsed.netloc:
+        return studio_url
+    fragment = f"project/{quote(project_dir.name)}?v=1&t=0&tab=renders&rc=1"
+    return urlunsplit((parsed.scheme, parsed.netloc, parsed.path, parsed.query, fragment))
 
 
 def _compute_sha256(path: Path) -> str:

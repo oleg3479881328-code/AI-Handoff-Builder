@@ -88,6 +88,31 @@ Step: HyperFrames acceptance closeout on local Windows branch
   - `python -m pytest -q tests/test_v2_hyperframes_lab.py` -> `8 passed in 0.15s`
   - `python -m pytest -q` -> `95 passed in 28.69s`
   - `python -m compileall handoff_builder app.py` -> success
+- Completed the coordinator-requested live Windows acceptance pass on `feat/hyperframes-lab`:
+  - launched the app again through `run_windows.bat`
+  - opened `Local Edit Runner (v2)` and confirmed `HyperFrames Lab` controls remain fully visible in both Light and Dark themes
+  - reproduced a real preview acceptance gap:
+    - UI `Open Preview` surfaced only the bare Studio root URL
+    - a fresh browser window at the root URL did not auto-load the trusted local project
+  - fixed the preview routing gap in `handoff_builder/v2/hyperframes_lab.py`:
+    - adapter now returns a project-aware Studio deep-link:
+      - `http://localhost:3003/#project/hyperframes?v=1&t=0&tab=renders&rc=1`
+    - preserved the original root Studio URL separately as structured metadata
+  - added/updated focused proof:
+    - `tests/test_v2_hyperframes_lab.py`
+    - `python -m pytest -q tests/test_v2_hyperframes_lab.py` -> `8 passed in 0.20s`
+    - `python -m pytest -q` -> `95 passed in 39.73s`
+  - reran the real UI flow after the fix:
+    - `Refresh Doctor` succeeded
+    - `Open Preview` exposed the project-aware deep-link in the app status line
+    - dedicated browser capture showed the loaded `hyperframes` project with six owner-photo thumbnails visible on the timeline
+    - browser scrub capture showed the playhead advanced to `00:04 / 00:12` with the preview frame updated
+    - `Render MP4` completed from the real Tkinter app
+    - `Open Output Folder` opened `out - File Explorer`
+  - captured real UI render result:
+    - output: `prototypes/hyperframes/out/hyperframes_lab_render.mp4`
+    - `ffprobe`: `1080x1920`, `30 FPS`, `12.000000 s`, `22252596` bytes, video-only
+    - SHA-256: `D18B2EBF2F1CDAA46C0B700D351EC69670E06005E1D4B39A0CCB98554018E1C7`
 
 ## Acceptance Status
 
@@ -95,6 +120,10 @@ Step: HyperFrames acceptance closeout on local Windows branch
 - `doctor` evidence: satisfied
 - browser preview opened locally: satisfied
 - preview screenshot captured: satisfied
+- project-aware preview deep-link from the real UI: satisfied
+- loaded Studio composition with six owner-photo timeline thumbnails: satisfied
+- timeline scrubbing in the real browser window: satisfied
+- `Open Output Folder` local-only path behavior: satisfied
 - real 1080x1920 MP4 from the six owner photos: satisfied
 - repeat render comparison: satisfied
 - bounded Python adapter: satisfied

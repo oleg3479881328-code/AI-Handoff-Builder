@@ -70,7 +70,8 @@ def test_preview_uses_argument_array_and_returns_url(tmp_path: Path, monkeypatch
     monkeypatch.setattr("handoff_builder.v2.hyperframes_lab.run_command", fake_run)
     result = adapter.open_preview(trusted)
     assert result.success is True
-    assert result.metadata["studio_url"] == "http://127.0.0.1:3002"
+    assert result.metadata["studio_root_url"] == "http://127.0.0.1:3002"
+    assert result.metadata["studio_url"] == "http://127.0.0.1:3002#project/trusted?v=1&t=0&tab=renders&rc=1"
     assert seen[0][:3] == ["hyperframes", "preview", str(trusted.resolve())]
 
 

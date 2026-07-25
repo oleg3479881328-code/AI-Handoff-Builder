@@ -169,6 +169,33 @@ Expected private source filenames:
   - `python -m pytest -q tests/test_v2_hyperframes_lab.py` -> `8 passed`
   - `python -m pytest -q` -> `95 passed in 33.47s`
   - `python -m compileall handoff_builder app.py` -> success
+- Live owner-facing Windows acceptance rerun on Saturday, July 25, 2026:
+  - relaunched the existing app through `run_windows.bat`
+  - confirmed the `Local Edit Runner (v2)` tab and `HyperFrames Lab` controls remain fully visible in both Light and Dark themes
+  - confirmed `Refresh Doctor` succeeds from the real Tkinter window
+  - identified and fixed a preview acceptance defect:
+    - the adapter originally exposed only the bare Studio root URL
+    - updated `handoff_builder/v2/hyperframes_lab.py` to return a project-aware deep-link while keeping the root URL as structured metadata
+    - new expected route shape:
+      - `http://localhost:3003/#project/hyperframes?v=1&t=0&tab=renders&rc=1`
+  - expanded the focused preview test:
+    - `tests/test_v2_hyperframes_lab.py`
+  - reran validation after the preview routing fix:
+    - `python -m pytest -q tests/test_v2_hyperframes_lab.py` -> `8 passed in 0.20s`
+    - `python -m pytest -q` -> `95 passed in 39.73s`
+  - browser proof from the live UI flow now shows:
+    - loaded `hyperframes` project in `HyperFrames Studio`
+    - six owner-photo thumbnails visible on the timeline
+    - scrubbed playhead at `00:04 / 00:12` with updated preview frame
+  - real UI render proof now shows:
+    - `HyperFrames render completed: 1080x1920 | 12.0s | fps=30.0 | sha256=D18B2EBF2F1CDAA46C0B700D351EC69670E06005E1D4B39A0CCB98554018E1C7`
+    - output file explorer window opened as `out - File Explorer`
+    - `ffprobe` for `prototypes/hyperframes/out/hyperframes_lab_render.mp4`:
+      - size: `22252596` bytes
+      - duration: `12.000000`
+      - dimensions: `1080x1920`
+      - frame rate: `30/1`
+      - audio streams: `0`
 
 ## Immediate Next Actions
 
