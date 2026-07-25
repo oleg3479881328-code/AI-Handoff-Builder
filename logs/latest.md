@@ -169,3 +169,28 @@ Step: HyperFrames documentation alignment for draft PR #4
 - Final coordinator verification on draft PR `#4`.
 - Wait for an explicit owner decision before marking ready or merging.
 - Do not merge to `main` or `codex/release-candidate-light-dark-ui`.
+
+## Update: Coordinator Bridge + Tabbed Voice Studio
+
+- Reworked the desktop UI so `Voice Studio` now opens inside the main application notebook as its own tab instead of spawning a second top-level window.
+- Preserved the existing `Open Voice Studio` button in `Local Edit Runner (v2)`, but redirected it to:
+  - switch to the embedded `Voice Studio` tab
+  - trigger a fresh runtime/job refresh in the tabbed surface
+- Added a new in-app `Coordinator Bridge` block inside `Local Edit Runner (v2)` for the missing coordinator workflow handoff step:
+  - paste a coordinator brief / scenario outline
+  - build a trusted local draft summary
+  - send the extracted voice script into `Voice Studio`
+  - save the draft package into the active local workspace
+  - open the saved draft folder directly from the UI
+- Added `handoff_builder/v2/coordinator_bridge.py` to normalize:
+  - JSON coordinator briefs
+  - simple plain-text briefs with `Title`, `Voice`, `Visual`, `Shots`, and `Overlay` sections
+- The exported coordinator payload now stays explicitly local/trusted:
+  - `raw_html_allowed=false`
+  - `remote_urls_allowed=false`
+  - `render_target=local_windows_machine`
+- Added focused regression coverage:
+  - `tests/test_v2_coordinator_bridge.py`
+- Validation for this UI/workflow step:
+  - `python -m pytest -q tests/test_v2_coordinator_bridge.py` -> `3 passed in 0.13s`
+  - `python -m py_compile app.py handoff_builder/v2/coordinator_bridge.py` -> success
