@@ -4,7 +4,7 @@ import hashlib
 import zipfile
 from pathlib import Path
 
-from handoff_builder.utils import safe_extract_zip
+from handoff_builder.utils import PHOTO_EXTENSIONS, VIDEO_EXTENSIONS, safe_extract_zip
 
 from ..errors import ChecksumMismatchError, UnsafePackageError
 
@@ -75,3 +75,20 @@ def verify_package_checksums(root: Path, files: list[dict]) -> tuple[tuple[str, 
             )
         verified.append((rel_path, digest, int(file_entry["size_bytes"])))
     return tuple(verified)
+
+
+def reject_media_payloads(root: Path) -> tuple[str, ...]:
+    forbidden_exts = set(PHOTO_EXTENSIONS) | set(VIDEO_EXTENSIONS) | {
+        ".mp3", ".wav", ".aac", ".m4a", ".flac", ".ogg"
+    }
+    offenders: list[str] = []
+    for file_path in root.rglob("*"):
+        if not file_path.is_file():
+            continue
+        rel_path = file_path.relative_to(root).as_posix()
+        ensure_allowed_package_path(rel_path)
+        if file_path.suffix.lower() in forbidden_exts:
+            offenders.append(rel_path)
+    if offenders:
+        raise UnsafePackageError(f"AI edit package 2.0 must not contain media payloads: {sorted(offenders)}")
+    return tuple(sorted(offenders))

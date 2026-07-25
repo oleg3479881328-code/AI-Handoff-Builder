@@ -4,6 +4,7 @@ import json
 import shutil
 from pathlib import Path
 
+from ..assets import load_active_local_registry, resolve_plan_assets_against_registry
 from ..common import stable_v2_id
 from ..domain.enums import QueueItemStatus
 from ..domain.records import ImportResult, RenderQueueItem
@@ -69,6 +70,10 @@ def import_package_into_workspace(package_zip: Path, workspace: Path) -> ImportR
             raise UnsafePackageError("Edit plan handoff_id does not match package handoff.")
         if str(plan_payload["handoff_sha256"]) != imported.handoff_sha256:
             raise UnsafePackageError("Edit plan handoff_sha256 does not match package handoff.")
+        resolution_report: dict | None = None
+        if plan_version == "2.0":
+            registry_payload = load_active_local_registry(project_root, fallback_dir=package_zip.parent)
+            resolution_report = resolve_plan_assets_against_registry(list(plan_payload["assets"]), registry_payload)
         if plan_payload.get("voiceover"):
             voiceover_path = (package_root / str(plan_payload["voiceover"]["spec_path"])).resolve()
             if package_root not in voiceover_path.parents:
@@ -92,6 +97,7 @@ def import_package_into_workspace(package_zip: Path, workspace: Path) -> ImportR
             plan_hash=plan_hash,
             output_directory=report_path.parent,
         )
+        resolution_report_path = report_path.parent / "asset_resolution.json"
 
         connection.execute("BEGIN")
         try:
@@ -129,6 +135,12 @@ def import_package_into_workspace(package_zip: Path, workspace: Path) -> ImportR
                 )
             )
             write_render_report_stub(report, report_path)
+            if resolution_report is not None:
+                resolution_report_path.parent.mkdir(parents=True, exist_ok=True)
+                resolution_report_path.write_text(
+                    json.dumps(resolution_report, ensure_ascii=False, indent=2),
+                    encoding="utf-8",
+                )
             queue_repo.insert_render_output(
                 output_id=stable_v2_id(render_job_id, "report", length=20),
                 render_job_id=render_job_id,
@@ -146,6 +158,7 @@ def import_package_into_workspace(package_zip: Path, workspace: Path) -> ImportR
                     "render_job_id": render_job_id,
                     "package_sha256": imported.package_sha256,
                     "plan_hash": plan_hash,
+                    "resolved_asset_count": resolution_report["resolved_asset_count"] if resolution_report else 0,
                 },
             )
             connection.commit()

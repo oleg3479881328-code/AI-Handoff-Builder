@@ -43,6 +43,14 @@ def stable_asset_id(path: Path, root: Path | None = None) -> str:
     return hashlib.sha1(payload).hexdigest()[:12]
 
 
+def file_sha256(path: Path) -> str:
+    digest = hashlib.sha256()
+    with path.open("rb") as handle:
+        for chunk in iter(lambda: handle.read(1024 * 1024), b""):
+            digest.update(chunk)
+    return digest.hexdigest()
+
+
 def json_dump(path: Path, data: object) -> None:
     path.parent.mkdir(parents=True, exist_ok=True)
     path.write_text(

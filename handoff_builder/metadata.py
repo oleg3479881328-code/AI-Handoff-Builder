@@ -15,7 +15,7 @@ from PIL import ExifTags, Image
 
 from .ffmpeg_tools import FFmpegError, run_command
 from .models import AssetRecord, BuilderConfig
-from .utils import find_executable
+from .utils import file_sha256, find_executable
 
 
 METADATA_SCHEMA_VERSION = "1.0"
@@ -115,6 +115,15 @@ class AssetMetadataBuilder:
                     "source_path": asset.source_path,
                     "relative_source_path": asset.relative_source_path,
                     "original_name": asset.original_name,
+                    "media_type": asset.media_type,
+                    "size_bytes": asset.size_bytes,
+                    "sha256": file_sha256(Path(asset.source_path)),
+                    "capture_time": asset.capture_time_iso,
+                    "analysis_preview_paths": {
+                        "analysis_copy": asset.analysis_copy,
+                        "proxy": asset.proxy,
+                        "storyboard": asset.storyboard,
+                    },
                 }
                 for asset in assets
             ],

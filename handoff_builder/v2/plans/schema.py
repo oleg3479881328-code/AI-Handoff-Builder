@@ -11,8 +11,17 @@ from ..errors import UnsupportedSchemaVersionError
 SCHEMA_ROOT = Path(__file__).resolve().parents[3] / "schemas"
 SCHEMA_TYPES = ("ai_edit_package", "edit_plan", "edit_patch", "render_report", "voiceover_spec")
 SUPPORTED_SCHEMA_VERSIONS = {
-    schema_type: {"1.0": SCHEMA_ROOT / schema_type / "1.0.json"}
-    for schema_type in SCHEMA_TYPES
+    "ai_edit_package": {
+        "1.0": SCHEMA_ROOT / "ai_edit_package" / "1.0.json",
+        "2.0": SCHEMA_ROOT / "ai_edit_package" / "2.0.json",
+    },
+    "edit_plan": {
+        "1.0": SCHEMA_ROOT / "edit_plan" / "1.0.json",
+        "2.0": SCHEMA_ROOT / "edit_plan" / "2.0.json",
+    },
+    "edit_patch": {"1.0": SCHEMA_ROOT / "edit_patch" / "1.0.json"},
+    "render_report": {"1.0": SCHEMA_ROOT / "render_report" / "1.0.json"},
+    "voiceover_spec": {"1.0": SCHEMA_ROOT / "voiceover_spec" / "1.0.json"},
 }
 
 
