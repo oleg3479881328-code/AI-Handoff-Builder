@@ -26,9 +26,10 @@ Current success for this stage means:
 ## Current Status
 
 - Mode: active execution
-- Phase: release candidate preserved; HyperFrames discovery branch initialized
+- Phase: release candidate preserved; HyperFrames Lab implementation and local Windows acceptance complete; draft integration review open
 - Active branch: `feat/hyperframes-lab`
-- Health: current FFmpeg, Voice Studio, metadata, and Light/Dark release-candidate baseline remains intact; HyperFrames is not yet locally validated
+- Draft PR: `#4` -> `codex/release-candidate-light-dark-ui`
+- Health: current FFmpeg, Voice Studio, metadata, and Light/Dark release-candidate baseline remains intact; HyperFrames Lab implementation, local acceptance, and coordinator code/safety review are complete; no private assets or generated outputs are tracked
 
 ## Done So Far
 
@@ -41,14 +42,18 @@ Current success for this stage means:
 - Created branch `feat/hyperframes-lab` from the release candidate.
 - Added the integration decision and a trusted 1080x1920 photo-composition prototype under `prototypes/hyperframes/`.
 - Created executable implementation handoff issue `#3`.
+- Completed the bounded HyperFrames Lab implementation on `feat/hyperframes-lab`.
+- Completed live local Windows acceptance for HyperFrames Lab through the real Tkinter UI and browser preview flow.
+- Completed coordinator code/safety review follow-ups, including project-aware preview routing, repository-relative tests, and remote asset rejection inside trusted compositions.
+- Opened draft PR `#4` from `feat/hyperframes-lab` into `codex/release-candidate-light-dark-ui`.
 
 ## Current Focus
 
-Validate the official HyperFrames CLI locally on Windows with the six owner café photographs, then add the smallest safe adapter and themed in-app `HyperFrames Lab` surface without weakening the current FFmpeg boundary.
+Keep the transfer-ready documentation aligned with the actual integrated state while the draft PR remains under final coordinator verification.
 
 ## Next Practical Step
 
-Executor runs issue `#3` on the owner Windows workspace: verify the official HyperFrames runtime, preview and render the checked-in trusted composition using the six private local photographs, then implement and test the bounded adapter inside the existing app.
+Final coordinator verification of draft PR `#4`, followed by an explicit owner decision before marking the PR ready or merging. No merge to `main` or `codex/release-candidate-light-dark-ui` has occurred.
 
 ## Key Decisions And Constraints
 
@@ -60,10 +65,11 @@ Executor runs issue `#3` on the owner Windows workspace: verify the official Hyp
 - No remote scripts, fonts, media, iframes, arbitrary URLs, raw command strings, or `shell=True`.
 - Do not modify originals on the owner machine.
 - Personal media and generated outputs must not be committed to the public repository.
+- GitHub currently has no configured CI/status checks for the draft PR head; recorded local regression evidence remains the validation source for this step.
 - Schema `1.0` must not be changed in place; future capability widening requires a new version.
 - GitHub is the execution source of truth for this project.
 - Existing Solution First applies before inventing renderer, preview, or authoring patterns.
-- No merge to `main` without owner authorization.
+- No merge to `main` or `codex/release-candidate-light-dark-ui` without owner authorization.
 
 ## Read Next
 
@@ -72,4 +78,5 @@ Executor runs issue `#3` on the owner Windows workspace: verify the official Hyp
 - `docs/HYPERFRAMES_INTEGRATION.md`
 - `prototypes/hyperframes/README.md`
 - Issue `#3`: `https://github.com/oleg3479881328-code/AI-Handoff-Builder/issues/3`
+- Draft PR `#4`: `https://github.com/oleg3479881328-code/AI-Handoff-Builder/pull/4`
 - Issue `#2`: `https://github.com/oleg3479881328-code/AI-Handoff-Builder/issues/2`

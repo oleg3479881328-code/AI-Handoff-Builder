@@ -7,7 +7,8 @@
 - Handoff completeness defect: repository issue `#2`
 - Current branch: `feat/hyperframes-lab`
 - Base branch: `codex/release-candidate-light-dark-ui`
-- Current phase: HyperFrames trusted prototype validated locally on Windows, bounded Python adapter implemented, minimal in-app HyperFrames Lab surface validated, and coordinator acceptance effectively satisfied on the local branch
+- Draft PR: `#4` -> `codex/release-candidate-light-dark-ui`
+- Current phase: HyperFrames trusted prototype validated locally on Windows, bounded Python adapter implemented, minimal in-app HyperFrames Lab surface validated, coordinator code/safety review complete, and draft PR `#4` open for final coordinator verification
 
 ## Accepted Baseline Preserved
 
@@ -109,6 +110,9 @@ Expected private source filenames:
 - Tkinter HyperFrames Lab controls: implemented minimally inside the existing app
 - FFmpeg renderer default: preserved
 - Preview screenshot: satisfied with a loaded Studio capture showing the active project composition and timeline
+- Draft PR state: open as draft into `codex/release-candidate-light-dark-ui`
+- GitHub status checks: none configured for PR head `37dbaf1ae1a015e35fcfcd4b5eb9e9b956250424`; local regression evidence remains the validation source
+- Private assets / generated outputs: still ignored and untracked
 
 ## Fresh HyperFrames Validation From 2026-07-25
 
@@ -213,9 +217,9 @@ Expected private source filenames:
 
 ## Immediate Next Actions
 
-1. Commit and push the current branch state if the owner wants publication now.
-2. Decide whether the prototype remains repository-only or should be widened into workspace-generated trusted compositions next.
-3. Keep FFmpeg as default and expand HyperFrames only behind the same trusted-template boundary.
+1. Complete final coordinator verification on draft PR `#4`.
+2. Wait for an explicit owner decision before marking the PR ready or merging.
+3. Keep FFmpeg as default and expand HyperFrames only behind the same trusted-template boundary if a later phase is authorized.
 
 ## Constraints Still In Force
 
@@ -227,4 +231,4 @@ Expected private source filenames:
 - No raw untrusted HTML/JavaScript execution.
 - No cloud rendering for HyperFrames.
 - No tracked private media or generated output.
-- No merge to `main`.
+- No merge to `main` or `codex/release-candidate-light-dark-ui`.

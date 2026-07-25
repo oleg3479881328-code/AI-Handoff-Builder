@@ -1,7 +1,7 @@
 # Latest Log
 
 Date: 2026-07-25
-Step: HyperFrames acceptance closeout on local Windows branch
+Step: HyperFrames documentation alignment for draft PR #4
 
 ## Completed
 
@@ -148,6 +148,8 @@ Step: HyperFrames acceptance closeout on local Windows branch
 - full Python regression suite: satisfied
 - remote media/CSS URL rejection in trusted compositions: satisfied
 - state files updated: satisfied
+- draft PR `#4` into `codex/release-candidate-light-dark-ui`: open and documented
+- GitHub CI/status checks on current PR head: none configured; local regression evidence remains the validation source
 
 ## Security Boundary Still In Force
 
@@ -164,5 +166,6 @@ Step: HyperFrames acceptance closeout on local Windows branch
 
 ## Next
 
-- Commit and push `feat/hyperframes-lab` when the owner wants publication.
-- Do not merge to `main`.
+- Final coordinator verification on draft PR `#4`.
+- Wait for an explicit owner decision before marking ready or merging.
+- Do not merge to `main` or `codex/release-candidate-light-dark-ui`.
