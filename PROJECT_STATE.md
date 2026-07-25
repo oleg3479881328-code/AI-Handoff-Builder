@@ -328,3 +328,61 @@ Expected private source filenames:
   - asset resolution proof:
     - `tmp_issue6_acceptance/workspace/renders/78d6ca7e6b67f69b1818/asset_resolution.json`
     - `resolved_asset_count=10`
+
+## Update: Issue #8 packaged release-candidate acceptance
+
+- Accepted release-candidate baseline verified on Saturday, July 25, 2026:
+  - branch: `codex/release-candidate-light-dark-ui`
+  - HEAD: `bd3867280c19b252489011c3c3b589c05c87c061`
+- Dedicated packaging-fix branch created per issue contract:
+  - `feat/issue-8-packaged-schema-fix`
+- Source validation on the accepted baseline after the packaging fix:
+  - `python -m pytest -q` -> `111 passed in 30.35s`
+  - `python -m compileall handoff_builder app.py` -> success
+  - `git diff --check` -> line-ending warning only for `build_exe.bat`, no content defects
+- Real packaged-build defect confirmed before any fix:
+  - frozen app contained `prototypes/hyperframes/`
+  - frozen app did **not** contain `_internal/schemas/`
+  - this broke the repository schema loader path for packaged `AI_EDIT_PACKAGE 2.0` workflows
+- Packaging fix implemented:
+  - `AI Handoff Builder.spec`
+    - now includes `('schemas', 'schemas')`
+  - `build_exe.bat`
+    - now includes `--add-data "schemas;schemas"`
+  - `tests/test_packaged_resources.py`
+    - guards both `prototypes/hyperframes` and `schemas` packaging entries
+- Post-fix packaged build evidence:
+  - build command:
+    - `cmd /c build_exe.bat`
+  - exe:
+    - `dist/AI Handoff Builder/AI Handoff Builder.exe`
+  - timestamp (UTC):
+    - `2026-07-25T19:47:29Z`
+  - size:
+    - `6233403` bytes
+  - SHA-256:
+    - `3737F885698D1F71AA9196474676B307E02AF66666D9CC6DA9B2BCCB298E2F97`
+  - packaged resources now confirmed present:
+    - `_internal/prototypes/hyperframes/`
+    - `_internal/schemas/ai_edit_package/1.0.json`
+    - `_internal/schemas/ai_edit_package/2.0.json`
+    - `_internal/schemas/edit_plan/1.0.json`
+    - `_internal/schemas/edit_plan/2.0.json`
+    - `_internal/schemas/edit_patch/1.0.json`
+    - `_internal/schemas/render_report/1.0.json`
+    - `_internal/schemas/voiceover_spec/1.0.json`
+- Packaged GUI acceptance progress:
+  - launched the rebuilt `AI Handoff Builder.exe`
+  - switched to `Local Edit Runner (v2)`
+  - created/opened the packaged workspace at:
+    - `C:\Users\oleg3\Desktop\AI Handoff Workspace`
+  - packaged UI status reached:
+    - `Workspace готов.`
+  - screenshot artifact:
+    - `tmp_issue8_open_workspace_probe/after-open.png`
+- Remaining blocker at handoff time:
+  - unattended automation of the standard Windows `Выберите AI_EDIT_PACKAGE.zip` file picker did not complete the import step yet
+  - the dialog accepts the target `AI_EDIT_PACKAGE.zip` path into the `File name` field, but the automated confirmation path has not yet produced:
+    - `workspace/ai_packages/*/ai_edit_package.json`
+    - `workspace/analysis/local_asset_registry.json`
+  - packaged owner-facing workspace open is therefore proven, but packaged end-to-end import/render acceptance is still pending one final dialog-confirmation step
