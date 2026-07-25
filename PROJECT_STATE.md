@@ -196,6 +196,20 @@ Expected private source filenames:
       - dimensions: `1080x1920`
       - frame rate: `30/1`
       - audio streams: `0`
+- Final coordinator code-review hardening on Saturday, July 25, 2026:
+  - removed the owner-machine absolute path from `tests/test_v2_hyperframes_lab.py`
+  - switched the `.gitignore` assertion to a repository-relative path derived from the test file location
+  - tightened the trusted HyperFrames HTML/CSS safety boundary in `handoff_builder/v2/hyperframes_lab.py`
+  - trusted compositions now reject any remote `http://` / `https://` reference, including:
+    - remote image assets
+    - remote video/audio assets
+    - remote `<source>` media references
+    - remote CSS `url(...)` references
+  - expanded focused boundary tests accordingly
+  - validation after the hardening pass:
+    - `python -m pytest -q tests/test_v2_hyperframes_lab.py` -> `13 passed in 0.76s`
+    - `python -m pytest -q` -> `100 passed in 32.73s`
+    - `python -m compileall handoff_builder app.py` -> success
 
 ## Immediate Next Actions
 

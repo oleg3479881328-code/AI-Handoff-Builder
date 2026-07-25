@@ -113,6 +113,21 @@ Step: HyperFrames acceptance closeout on local Windows branch
     - output: `prototypes/hyperframes/out/hyperframes_lab_render.mp4`
     - `ffprobe`: `1080x1920`, `30 FPS`, `12.000000 s`, `22252596` bytes, video-only
     - SHA-256: `D18B2EBF2F1CDAA46C0B700D351EC69670E06005E1D4B39A0CCB98554018E1C7`
+- Addressed the final coordinator code-review blockers on Saturday, July 25, 2026:
+  - removed the owner-machine absolute test path from `tests/test_v2_hyperframes_lab.py`
+  - switched the `.gitignore` assertion to a repository-relative path derived from the test file
+  - hardened the trusted HyperFrames HTML/CSS boundary in `handoff_builder/v2/hyperframes_lab.py`
+  - the validator now rejects any remote `http://` / `https://` reference inside trusted composition HTML/CSS, including remote:
+    - images
+    - video/audio media
+    - `<source>` tags
+    - CSS `url(...)` references
+  - expanded the focused test matrix for remote script, iframe, fetch, image, video, audio, source, and CSS URL cases
+  - validation after the hardening pass:
+    - `python -m pytest -q tests/test_v2_hyperframes_lab.py` -> `13 passed in 0.76s`
+    - `python -m pytest -q` -> `100 passed in 32.73s`
+    - `python -m compileall handoff_builder app.py` -> success
+    - `git diff --check` -> warnings only for LF/CRLF conversion, no content errors
 
 ## Acceptance Status
 
@@ -131,6 +146,7 @@ Step: HyperFrames acceptance closeout on local Windows branch
 - `shell=True` avoided: satisfied
 - FFmpeg default preserved: satisfied
 - full Python regression suite: satisfied
+- remote media/CSS URL rejection in trusted compositions: satisfied
 - state files updated: satisfied
 
 ## Security Boundary Still In Force

@@ -39,6 +39,11 @@ def test_rejects_project_path_escape(tmp_path: Path):
         '<html><body><script src="https://example.com/x.js"></script></body></html>',
         '<html><body><iframe src="https://example.com"></iframe></body></html>',
         '<html><body><script>fetch("https://example.com")</script></body></html>',
+        '<html><body><img src="https://example.com/a.jpg" alt=""></body></html>',
+        '<html><body><video src="https://example.com/a.mp4"></video></body></html>',
+        '<html><body><audio src="https://example.com/a.mp3"></audio></body></html>',
+        '<html><body><video><source src="https://example.com/a.mp4"></video></body></html>',
+        '<html><body><div style="background-image: url(https://example.com/a.jpg)"></div></body></html>',
     ],
 )
 def test_rejects_remote_or_network_patterns(tmp_path: Path, html: str):
@@ -90,6 +95,7 @@ def test_failed_render_does_not_report_success(tmp_path: Path, monkeypatch: pyte
 
 
 def test_gitignore_keeps_personal_hyperframes_material_untracked():
-    gitignore = Path("C:/Users/oleg3/Documents/AI Handoff Builder v1/.gitignore").read_text(encoding="utf-8")
+    repo_root = Path(__file__).resolve().parents[1]
+    gitignore = (repo_root / ".gitignore").read_text(encoding="utf-8")
     assert "prototypes/hyperframes/assets/" in gitignore
     assert "prototypes/hyperframes/out/" in gitignore

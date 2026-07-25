@@ -15,6 +15,7 @@ from .render.ffmpeg_backend import FFmpegBackend
 
 
 FORBIDDEN_HTML_PATTERNS: tuple[re.Pattern[str], ...] = (
+    re.compile(r"https?://", re.IGNORECASE),
     re.compile(r"<script[^>]+src\s*=\s*['\"]https?://", re.IGNORECASE),
     re.compile(r"<iframe\b", re.IGNORECASE),
     re.compile(r"\bfetch\s*\(", re.IGNORECASE),
