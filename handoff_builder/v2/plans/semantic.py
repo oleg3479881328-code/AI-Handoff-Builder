@@ -4,6 +4,9 @@ import json
 from dataclasses import dataclass
 from pathlib import Path
 
+from PIL import Image
+
+from ..assets import resolve_plan_assets_against_registry
 from ..errors import UnsafePackageError
 from ..packages.guards import ensure_allowed_package_path
 from ..plans.schema import validate_payload
@@ -39,6 +42,36 @@ class ValidatedPreviewPlan:
     assets: dict[str, ValidatedAsset]
     operations: tuple[ValidatedOperation, ...]
     planned_duration_ms: int
+
+
+@dataclass(frozen=True, slots=True)
+class ResolvedPhotoAsset:
+    asset_id: str
+    path: Path
+    width: int
+    height: int
+    sha256: str
+    size_bytes: int
+    original_name: str | None
+
+
+@dataclass(frozen=True, slots=True)
+class ValidatedPhotoSegment:
+    asset_id: str
+    duration_ms: int
+    overlay_text: str | None
+
+
+@dataclass(frozen=True, slots=True)
+class ValidatedLocalPhotoPlan:
+    payload: dict
+    assets: dict[str, ResolvedPhotoAsset]
+    segments: tuple[ValidatedPhotoSegment, ...]
+    planned_duration_ms: int
+    output_width: int
+    output_height: int
+    output_fps: int
+    resolution_report: dict
 
 
 def load_and_validate_preview_plan(
@@ -113,6 +146,83 @@ def load_and_validate_preview_plan(
         assets=assets,
         operations=tuple(operations),
         planned_duration_ms=planned_duration_ms,
+    )
+
+
+def load_and_validate_local_photo_plan(
+    plan_path: Path,
+    workspace: Path,
+) -> ValidatedLocalPhotoPlan:
+    payload = json.loads(plan_path.read_text(encoding="utf-8"))
+    validate_payload("edit_plan", str(payload["schema_version"]), payload)
+    _reject_forbidden_keys(payload)
+    if str(payload.get("schema_version")) != "2.0":
+        raise UnsafePackageError("Local photo plan validation expects edit_plan schema 2.0.")
+    if payload.get("mode") != "preview":
+        raise UnsafePackageError("Only preview mode is supported in AI edit package 2.0.")
+
+    registry_payload = json.loads(
+        (workspace.resolve() / "analysis" / "local_asset_registry.json").read_text(encoding="utf-8")
+    )
+    resolution_report = resolve_plan_assets_against_registry(list(payload["assets"]), registry_payload)
+    assets: dict[str, ResolvedPhotoAsset] = {}
+    for item in resolution_report["assets"]:
+        source_path = Path(str(item["source_path"]))
+        try:
+            with Image.open(source_path) as image:
+                width, height = image.size
+        except Exception as exc:
+            raise UnsafePackageError(f"Asset resolution failed: unreadable image for {item['asset_id']}: {exc}") from exc
+        assets[str(item["asset_id"])] = ResolvedPhotoAsset(
+            asset_id=str(item["asset_id"]),
+            path=source_path,
+            width=width,
+            height=height,
+            sha256=str(item["sha256"]),
+            size_bytes=int(item["size_bytes"]),
+            original_name=str(item["original_name"]) if item.get("original_name") else None,
+        )
+
+    overlays_by_asset_id: dict[str, str] = {}
+    for op in payload["operations"]:
+        if str(op["op"]) == "text_overlay":
+            overlays_by_asset_id[str(op["asset_id"])] = str(op["text"])
+
+    ordered_segments: list[ValidatedPhotoSegment] = []
+    for op in payload["operations"]:
+        op_name = str(op["op"])
+        asset_id = str(op["asset_id"])
+        if asset_id not in assets:
+            raise UnsafePackageError(f"Operation references unknown asset_id: {asset_id}")
+        if op_name == "text_overlay":
+            continue
+        if op_name != "image_hold":
+            raise UnsafePackageError(f"Unsupported operation type: {op_name}")
+        duration_ms = int(op["duration_ms"])
+        if duration_ms <= 0:
+            raise UnsafePackageError("image_hold duration_ms must be positive.")
+        ordered_segments.append(
+            ValidatedPhotoSegment(
+                asset_id=asset_id,
+                duration_ms=duration_ms,
+                overlay_text=overlays_by_asset_id.get(asset_id),
+            )
+        )
+
+    if not ordered_segments:
+        raise UnsafePackageError("Preview plan timeline is empty.")
+
+    planned_duration_ms = sum(segment.duration_ms for segment in ordered_segments)
+    output = payload["output"]
+    return ValidatedLocalPhotoPlan(
+        payload=payload,
+        assets=assets,
+        segments=tuple(ordered_segments),
+        planned_duration_ms=planned_duration_ms,
+        output_width=int(output["width"]),
+        output_height=int(output["height"]),
+        output_fps=int(output["fps"]),
+        resolution_report=resolution_report,
     )
 
 

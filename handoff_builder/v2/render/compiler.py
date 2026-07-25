@@ -1,10 +1,13 @@
 from __future__ import annotations
 
+import tempfile
 from dataclasses import dataclass
 from pathlib import Path
 
+from PIL import Image, ImageDraw, ImageFont
+
 from ..plans.schema import deterministic_plan_hash
-from ..plans.semantic import ValidatedPreviewPlan
+from ..plans.semantic import ValidatedLocalPhotoPlan, ValidatedPreviewPlan
 
 
 PREVIEW_WIDTH = 720
@@ -138,6 +141,110 @@ def compile_preview_render_plan(
     )
 
 
+def compile_local_photo_render_plan(
+    validated: ValidatedLocalPhotoPlan,
+    *,
+    ffmpeg_path: str,
+    output_path: Path,
+) -> CompiledRenderPlan:
+    output_path.parent.mkdir(parents=True, exist_ok=True)
+    staging_dir = Path(tempfile.mkdtemp(prefix="photo_plan_", dir=str(output_path.parent)))
+    frame_paths: list[Path] = []
+    segments: list[dict] = []
+    ffmpeg_args: list[str] = [ffmpeg_path, "-y"]
+    filter_parts: list[str] = []
+    concat_labels: list[str] = []
+
+    for index, segment in enumerate(validated.segments, start=1):
+        asset = validated.assets[segment.asset_id]
+        frame_path = staging_dir / f"frame_{index:03d}.png"
+        _render_segment_frame(
+            asset.path,
+            frame_path,
+            width=validated.output_width,
+            height=validated.output_height,
+            overlay_text=segment.overlay_text,
+        )
+        frame_paths.append(frame_path)
+        ffmpeg_args.extend(
+            [
+                "-loop",
+                "1",
+                "-t",
+                f"{segment.duration_ms / 1000:.3f}",
+                "-i",
+                str(frame_path),
+            ]
+        )
+        video_label = f"v{index - 1}"
+        filter_parts.append(
+            f"[{index - 1}:v]fps={validated.output_fps},scale={validated.output_width}:{validated.output_height},"
+            f"setsar=1,format=yuv420p[{video_label}]"
+        )
+        concat_labels.append(f"[{video_label}]")
+        segments.append(
+            {
+                "asset_id": segment.asset_id,
+                "path": str(asset.path),
+                "duration_ms": segment.duration_ms,
+                "overlay_text": segment.overlay_text,
+                "sha256": asset.sha256,
+            }
+        )
+    filter_parts.append("".join(concat_labels) + f"concat=n={len(validated.segments)}:v=1:a=0[vout]")
+    ffmpeg_args.extend(
+        [
+            "-filter_complex",
+            ";".join(filter_parts),
+            "-map",
+            "[vout]",
+            "-r",
+            str(validated.output_fps),
+            "-an",
+            "-c:v",
+            "libx264",
+            "-preset",
+            VIDEO_PRESET,
+            "-crf",
+            str(VIDEO_CRF),
+            "-pix_fmt",
+            "yuv420p",
+            "-movflags",
+            "+faststart",
+            str(output_path),
+        ]
+    )
+    render_plan = {
+        "schema_version": "2.0",
+        "mode": "preview",
+        "output": {
+            "width": validated.output_width,
+            "height": validated.output_height,
+            "fps": validated.output_fps,
+            "video_codec": "h264",
+            "audio_codec": None,
+            "preset": VIDEO_PRESET,
+            "crf": VIDEO_CRF,
+        },
+        "segments": segments,
+        "planned_duration_ms": validated.planned_duration_ms,
+    }
+    compiled_plan_hash = deterministic_plan_hash(render_plan)
+    command_metadata = {
+        "args": ffmpeg_args,
+        "mode": "preview",
+        "compiled_plan_hash": compiled_plan_hash,
+        "segment_count": len(validated.segments),
+        "staging_dir": str(staging_dir),
+    }
+    return CompiledRenderPlan(
+        render_plan=render_plan,
+        ffmpeg_args=ffmpeg_args,
+        command_metadata=command_metadata,
+        compiled_plan_hash=compiled_plan_hash,
+    )
+
+
 def _rotation_filter(rotation: int) -> str:
     normalized = rotation % 360
     if normalized == 90:
@@ -147,3 +254,47 @@ def _rotation_filter(rotation: int) -> str:
     if normalized == 270:
         return "transpose=cclock,"
     return ""
+
+
+def _render_segment_frame(
+    source_path: Path,
+    output_path: Path,
+    *,
+    width: int,
+    height: int,
+    overlay_text: str | None,
+) -> None:
+    with Image.open(source_path) as image:
+        image = image.convert("RGB")
+        scale = max(width / image.width, height / image.height)
+        resized = image.resize(
+            (max(1, round(image.width * scale)), max(1, round(image.height * scale))),
+            Image.Resampling.LANCZOS,
+        )
+        left = max(0, (resized.width - width) // 2)
+        top = max(0, (resized.height - height) // 2)
+        canvas = resized.crop((left, top, left + width, top + height))
+
+    if overlay_text:
+        draw = ImageDraw.Draw(canvas)
+        font = ImageFont.load_default()
+        text_bbox = draw.textbbox((0, 0), overlay_text, font=font)
+        text_width = text_bbox[2] - text_bbox[0]
+        text_height = text_bbox[3] - text_bbox[1]
+        padding_x = 32
+        padding_y = 16
+        box_width = text_width + padding_x * 2
+        box_height = text_height + padding_y * 2
+        box_left = max(24, (width - box_width) // 2)
+        box_top = max(24, height - box_height - 48)
+        box_right = min(width - 24, box_left + box_width)
+        box_bottom = min(height - 24, box_top + box_height)
+        draw.rounded_rectangle((box_left, box_top, box_right, box_bottom), radius=24, fill=(0, 0, 0))
+        draw.text(
+            (box_left + padding_x, box_top + padding_y),
+            overlay_text,
+            fill=(255, 255, 255),
+            font=font,
+        )
+    output_path.parent.mkdir(parents=True, exist_ok=True)
+    canvas.save(output_path, "PNG")

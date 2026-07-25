@@ -6,7 +6,7 @@ from pathlib import Path
 from ..domain.records import ImportedPackage, PackageFile
 from ..errors import ProjectMismatchError, UnsafePackageError
 from ..plans.schema import validate_payload
-from .guards import compute_sha256, safe_extract_package_zip, verify_package_checksums
+from .guards import compute_sha256, reject_media_payloads, safe_extract_package_zip, verify_package_checksums
 
 
 def _read_json(path: Path) -> dict:
@@ -41,6 +41,19 @@ def import_edit_package(
         )
 
     files = verify_package_checksums(package_root, list(manifest.get("package_files", [])))
+    if schema_version == "2.0":
+        reject_media_payloads(package_root)
+        files = verify_package_checksums(
+            package_root,
+            [
+                {
+                    "path": item["path"],
+                    "sha256": item["sha256"],
+                    "size_bytes": int((package_root / str(item["path"])).stat().st_size),
+                }
+                for item in manifest.get("plans", [])
+            ],
+        )
     package_sha256 = compute_sha256(zip_path)
     plan_ids = tuple(
         str(item["plan_id"]) for item in manifest.get("plans", [])

@@ -29,15 +29,20 @@ def inspect_preview_output(
     output_path: Path,
     *,
     expected_duration_ms: int,
+    expected_width: int = 720,
+    expected_height: int = 1280,
+    expected_fps: float = 30.0,
     first_frame_path: Path,
 ) -> QCResult:
     if not output_path.exists() or output_path.stat().st_size <= 0:
         raise UnsafePackageError("Rendered output is missing or empty.")
     metadata = backend.probe(output_path)
-    if metadata["width"] != 720 or metadata["height"] != 1280:
-        raise UnsafePackageError("Rendered preview does not have required 720x1280 resolution.")
-    if abs(float(metadata["fps"]) - 30.0) > FPS_TOLERANCE:
-        raise UnsafePackageError("Rendered preview is not approximately 30 fps.")
+    if metadata["width"] != expected_width or metadata["height"] != expected_height:
+        raise UnsafePackageError(
+            f"Rendered preview does not have required {expected_width}x{expected_height} resolution."
+        )
+    if abs(float(metadata["fps"]) - expected_fps) > FPS_TOLERANCE:
+        raise UnsafePackageError(f"Rendered preview is not approximately {expected_fps:g} fps.")
     expected_seconds = expected_duration_ms / 1000
     if abs(float(metadata["duration"]) - expected_seconds) > DURATION_TOLERANCE_SECONDS:
         raise UnsafePackageError("Rendered preview duration is outside the allowed tolerance.")
@@ -45,8 +50,8 @@ def inspect_preview_output(
     checks = [
         "output_exists",
         "output_decodable",
-        "resolution_720x1280",
-        "fps_approx_30",
+        f"resolution_{expected_width}x{expected_height}",
+        f"fps_approx_{int(expected_fps)}",
         "duration_within_tolerance",
         "first_frame_extracted",
     ]

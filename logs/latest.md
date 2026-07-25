@@ -194,3 +194,66 @@ Step: HyperFrames documentation alignment for draft PR #4
 - Validation for this UI/workflow step:
   - `python -m pytest -q tests/test_v2_coordinator_bridge.py` -> `3 passed in 0.13s`
   - `python -m py_compile app.py handoff_builder/v2/coordinator_bridge.py` -> success
+
+## Update: Issue #6 AI Edit Package 2.0 bridge
+
+- Created and switched to the dedicated issue branch:
+  - `feat/issue-6-ai-edit-package-2`
+  - base SHA: `de459744d4682a14290bb6d4ca7838cfc6475423`
+- Extended Prepare Handoff local registry output with:
+  - `media_type`
+  - `size_bytes`
+  - `sha256`
+  - `capture_time`
+  - `analysis_preview_paths`
+- Added schemas:
+  - `schemas/ai_edit_package/2.0.json`
+  - `schemas/edit_plan/2.0.json`
+- Added workspace asset-bridge helpers:
+  - `handoff_builder/v2/assets/local_registry.py`
+- Added import-time active registry bootstrap and validation:
+  - `workspace/analysis/local_asset_registry.json`
+  - sibling `local_asset_registry.json` fallback next to `AI_EDIT_PACKAGE.zip`
+  - hard failure on:
+    - missing asset
+    - ambiguous asset
+    - checksum mismatch
+    - unreadable source
+- Added plan-only package protection for `AI_EDIT_PACKAGE 2.0`:
+  - no media payloads allowed in the ZIP
+- Added a safe local photo compiler path for the first vertical slice:
+  - `image_hold`
+  - `text_overlay`
+  - local staged frames
+  - FFmpeg render with no audio
+- Added parameterized QC so the runner can validate:
+  - legacy `720x1280` preview outputs
+  - new `1080x1920` photo-plan outputs
+- Added focused regression coverage:
+  - `tests/test_v2_ai_edit_package_2.py`
+- Validation:
+  - `python -m pytest -q tests/test_v2_ai_edit_package_2.py` -> `6 passed`
+  - `python -m pytest -q tests/test_pipeline.py tests/test_v2_vertical_slice.py tests/test_v2_preview_worker.py tests/test_v2_ai_edit_package_2.py` -> passed
+  - `python -m pytest -q` -> `109 passed in 29.30s`
+  - `python -m compileall handoff_builder app.py` -> success
+  - `git diff --check` -> line-ending warnings only, no content errors
+- Real acceptance run completed on Saturday, July 25, 2026:
+  - local source registry:
+    - `C:\\Users\\oleg3\\Desktop\\WEDDING_PROJECT_20260724_093205\\local_asset_registry.json`
+  - selected real photo asset count:
+    - `10`
+  - lightweight package:
+    - `tmp_issue6_acceptance/AI_EDIT_PACKAGE.zip`
+    - entries:
+      - `ai_edit_package.json`
+      - `plans/plan-photos-issue6-10.json`
+  - local render output:
+    - `tmp_issue6_acceptance/workspace/renders/78d6ca7e6b67f69b1818/reel.mp4`
+    - `1080x1920`
+    - `10.0s`
+    - `30fps`
+    - `audio_present=0`
+    - SHA-256: `0515025A8C677B72A99830DEC555CF38C74C6EFEC2D8B727EBCFD9911079205B`
+  - asset resolution evidence:
+    - `tmp_issue6_acceptance/workspace/renders/78d6ca7e6b67f69b1818/asset_resolution.json`
+    - `resolved_asset_count=10`

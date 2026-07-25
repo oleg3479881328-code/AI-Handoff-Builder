@@ -8,9 +8,9 @@ from handoff_builder.ffmpeg_tools import FFmpegError
 
 from ..common import utc_now_iso
 from ..errors import InvalidQueueTransitionError, UnsafePackageError
-from ..plans.semantic import load_and_validate_preview_plan
+from ..plans.semantic import load_and_validate_local_photo_plan, load_and_validate_preview_plan
 from ..qc.inspect import inspect_preview_output
-from ..render.compiler import compile_preview_render_plan
+from ..render.compiler import compile_local_photo_render_plan, compile_preview_render_plan
 from ..render.ffmpeg_backend import FFmpegBackend
 from ..storage import connect_workspace_db
 from ..storage.repositories import SqliteRenderQueueRepository, WorkspaceRepository
@@ -111,12 +111,21 @@ def _process_job_row(
     first_frame_path = output_dir / "first_frame.jpg"
 
     try:
-        validated = load_and_validate_preview_plan(
-            Path(plan_row["plan_path"]),
-            Path(package_row["extracted_root"]),
-            backend,
-        )
-        compiled = compile_preview_render_plan(validated, ffmpeg_path=backend.ffmpeg, output_path=reel_path)
+        plan_payload = json.loads(Path(plan_row["plan_path"]).read_text(encoding="utf-8"))
+        plan_schema_version = str(plan_payload["schema_version"])
+        if plan_schema_version == "2.0":
+            validated = load_and_validate_local_photo_plan(
+                Path(plan_row["plan_path"]),
+                project_root,
+            )
+            compiled = compile_local_photo_render_plan(validated, ffmpeg_path=backend.ffmpeg, output_path=reel_path)
+        else:
+            validated = load_and_validate_preview_plan(
+                Path(plan_row["plan_path"]),
+                Path(package_row["extracted_root"]),
+                backend,
+            )
+            compiled = compile_preview_render_plan(validated, ffmpeg_path=backend.ffmpeg, output_path=reel_path)
         render_plan_path.write_text(json.dumps(compiled.render_plan, ensure_ascii=False, indent=2), encoding="utf-8")
         ffmpeg_command_path.write_text(
             json.dumps(compiled.command_metadata, ensure_ascii=False, indent=2),
@@ -139,6 +148,9 @@ def _process_job_row(
             backend,
             reel_path,
             expected_duration_ms=validated.planned_duration_ms,
+            expected_width=compiled.render_plan["output"]["width"],
+            expected_height=compiled.render_plan["output"]["height"],
+            expected_fps=float(compiled.render_plan["output"]["fps"]),
             first_frame_path=first_frame_path,
         )
         report = json.loads(report_path.read_text(encoding="utf-8"))
@@ -163,6 +175,8 @@ def _process_job_row(
                 "updated_at": utc_now_iso(),
             }
         )
+        if plan_schema_version == "2.0":
+            report["warnings"] = sorted(set(report.get("warnings", [])) | {"local_originals_resolved"})
         connection.execute(
             "UPDATE render_outputs SET renderer_status = ? WHERE render_job_id = ?",
             ("completed", render_job_id),
@@ -255,8 +269,19 @@ def _classify_error_code(exc: Exception) -> str:
         return "cancelled"
     if "Unsupported operation" in message or "Forbidden" in message:
         return "unsupported_operation"
-    if "Asset file does not exist" in message or "unknown asset_id" in message:
+    if (
+        "Asset file does not exist" in message
+        or "unknown asset_id" in message
+        or "Asset resolution failed: missing asset_id" in message
+        or "Asset resolution failed: source file missing" in message
+    ):
         return "missing_source"
+    if "Asset resolution failed: ambiguous asset_id" in message:
+        return "ambiguous_source"
+    if "Asset resolution failed: checksum mismatch" in message:
+        return "checksum_mismatch"
+    if "Asset resolution failed: unreadable" in message:
+        return "unreadable_source"
     if "duration" in message or "source_out_ms" in message:
         return "invalid_trim_range"
     if "FFmpeg preview render failed" in message:

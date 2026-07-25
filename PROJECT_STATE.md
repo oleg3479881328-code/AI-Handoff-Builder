@@ -259,3 +259,72 @@ Expected private source filenames:
 - No cloud rendering for HyperFrames.
 - No tracked private media or generated output.
 - No merge to `main` or `codex/release-candidate-light-dark-ui`.
+
+## Update: Issue #6 AI Edit Package 2.0 Bridge
+
+- New dedicated branch for this issue:
+  - `feat/issue-6-ai-edit-package-2`
+- Owner-approved working base SHA used for the issue branch:
+  - `de459744d4682a14290bb6d4ca7838cfc6475423`
+- Added `AI_EDIT_PACKAGE` schema `2.0`:
+  - plan-only ZIP
+  - required root manifest remains `ai_edit_package.json`
+  - no copied photo/video/audio payloads allowed
+- Added `edit_plan` schema `2.0` for the first photo vertical slice:
+  - stable `asset_id` references only
+  - allowlisted `image_hold`
+  - allowlisted `text_overlay`
+  - explicit output contract (`width`, `height`, `fps`, `audio`)
+- Expanded the local asset registry written by Prepare Handoff:
+  - `asset_id`
+  - absolute `source_path`
+  - `relative_source_path`
+  - `original_name`
+  - `media_type`
+  - `size_bytes`
+  - `sha256`
+  - `capture_time`
+  - `analysis_preview_paths`
+- Preserved the privacy boundary:
+  - `local_asset_registry.json` still stays outside `PROJECT_ANALYSIS_HANDOFF.zip`
+  - absolute local original paths are still excluded from the ChatGPT-facing archive
+- Added active local registry bridging for Local Edit Runner:
+  - workspace active registry path:
+    - `workspace/analysis/local_asset_registry.json`
+  - if missing there, import can bootstrap it from a trusted sibling `local_asset_registry.json` next to `AI_EDIT_PACKAGE.zip`
+- Added strict `asset_id` resolution and failure behavior:
+  - missing asset -> hard fail
+  - ambiguous asset -> hard fail
+  - checksum mismatch -> hard fail
+  - unreadable source -> hard fail
+  - no silent substitution
+- Added a new local photo render path for `edit_plan 2.0`:
+  - local originals resolved from the active registry
+  - staged overlay frames composed locally
+  - FFmpeg remains the production renderer
+  - output can now pass through parameterized QC instead of the old fixed `720x1280` preview-only check
+- Added focused regression coverage:
+  - `tests/test_v2_ai_edit_package_2.py`
+- Local validation after this step:
+  - `python -m pytest -q tests/test_pipeline.py tests/test_v2_vertical_slice.py tests/test_v2_preview_worker.py tests/test_v2_ai_edit_package_2.py` -> passed
+  - `python -m pytest -q` -> `109 passed in 29.30s`
+  - `python -m compileall handoff_builder app.py` -> success
+- Real acceptance proof completed on Saturday, July 25, 2026:
+  - source set:
+    - current local wedding-photo registry at `C:\\Users\\oleg3\\Desktop\\WEDDING_PROJECT_20260724_093205\\local_asset_registry.json`
+    - first 10 real local photographs selected from `zip_001_Photos-1-001_(4)`
+  - lightweight package proof:
+    - `tmp_issue6_acceptance/AI_EDIT_PACKAGE.zip`
+    - ZIP entries only:
+      - `ai_edit_package.json`
+      - `plans/plan-photos-issue6-10.json`
+  - render proof:
+    - `tmp_issue6_acceptance/workspace/renders/78d6ca7e6b67f69b1818/reel.mp4`
+    - duration: `10.0`
+    - dimensions: `1080x1920`
+    - FPS: `30.0`
+    - audio: `0`
+    - SHA-256: `0515025A8C677B72A99830DEC555CF38C74C6EFEC2D8B727EBCFD9911079205B`
+  - asset resolution proof:
+    - `tmp_issue6_acceptance/workspace/renders/78d6ca7e6b67f69b1818/asset_resolution.json`
+    - `resolved_asset_count=10`
