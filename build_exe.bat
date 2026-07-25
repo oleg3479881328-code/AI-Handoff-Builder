@@ -15,6 +15,7 @@ python -m pip install -r requirements-dev.txt
 pyinstaller --noconfirm --clean --windowed ^
   --name "AI Handoff Builder" ^
   --collect-all PIL ^
+  --add-data "prototypes\hyperframes;prototypes\hyperframes" ^
   app.py
 
 if not exist "dist\AI Handoff Builder\bin" mkdir "dist\AI Handoff Builder\bin"

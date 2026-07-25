@@ -8,7 +8,7 @@
 - Current branch: `feat/hyperframes-lab`
 - Base branch: `codex/release-candidate-light-dark-ui`
 - Draft PR: `#4` -> `codex/release-candidate-light-dark-ui`
-- Current phase: HyperFrames trusted prototype validated locally on Windows, bounded Python adapter implemented, minimal in-app HyperFrames Lab surface validated, coordinator code/safety review complete, and draft PR `#4` open for final coordinator verification
+- Current phase: HyperFrames trusted prototype validated locally on Windows, bounded Python adapter implemented, minimal in-app HyperFrames Lab surface validated, coordinator bridge and tabbed Voice Studio added, and draft PR `#4` open for final coordinator verification
 
 ## Accepted Baseline Preserved
 
@@ -76,6 +76,31 @@ The integration is bounded as follows:
   - `prototypes/hyperframes/README.md`
   - `app.py`
 
+## Fresh Coordinator Bridge And Voice Studio Update From 2026-07-25
+
+- Moved `Voice Studio` into the main application notebook as a first-class tab instead of a separate `Toplevel` window.
+- Kept the `Open Voice Studio` action in `Local Edit Runner (v2)` but changed it to switch the operator into the embedded `Voice Studio` tab and trigger a fresh runtime/job refresh there.
+- Added a bounded `Coordinator Bridge` block to `Local Edit Runner (v2)`:
+  - paste coordinator brief / scenario layout
+  - build a trusted local draft summary
+  - push the extracted voice script directly into `Voice Studio`
+  - save a local coordinator draft package into the active workspace
+  - reopen the saved draft folder from the UI
+- Added a new helper module:
+  - `handoff_builder/v2/coordinator_bridge.py`
+- The coordinator bridge currently supports:
+  - structured JSON briefs
+  - simple plain-text section briefs (`Title`, `Voice`, `Visual`, `Shots`, `Overlay`)
+  - trusted payload export with:
+    - `raw_html_allowed=false`
+    - `remote_urls_allowed=false`
+    - `render_target=local_windows_machine`
+- Added focused regression coverage:
+  - `tests/test_v2_coordinator_bridge.py`
+- Validation for this step:
+  - `python -m pytest -q tests/test_v2_coordinator_bridge.py` -> `3 passed in 0.13s`
+  - `python -m py_compile app.py handoff_builder/v2/coordinator_bridge.py` -> success
+
 ## Trusted Prototype
 
 The checked-in prototype is designed for:
@@ -111,6 +136,8 @@ Expected private source filenames:
 - FFmpeg renderer default: preserved
 - Preview screenshot: satisfied with a loaded Studio capture showing the active project composition and timeline
 - Draft PR state: open as draft into `codex/release-candidate-light-dark-ui`
+- Voice Studio surface: now embedded as a notebook tab in the main desktop app
+- Coordinator workflow gap: reduced by local brief -> draft -> voice-script bridge inside `Local Edit Runner (v2)`
 - GitHub status checks: none configured for PR head `37dbaf1ae1a015e35fcfcd4b5eb9e9b956250424`; local regression evidence remains the validation source
 - Private assets / generated outputs: still ignored and untracked
 

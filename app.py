@@ -4,6 +4,7 @@ import json
 import os
 import queue
 import subprocess
+import sys
 import threading
 import tkinter as tk
 import webbrowser
@@ -15,6 +16,7 @@ from PIL import Image, ImageTk
 from handoff_builder.models import BuildResult, BuilderConfig
 from handoff_builder.pipeline import HandoffBuilder
 from handoff_builder.theme import ThemePalette, ThemeSettingsStore, get_theme_palette
+from handoff_builder.v2.coordinator_bridge import CoordinatorDraft, build_coordinator_draft, draft_to_payload, draft_to_summary
 from handoff_builder.v2.gui_controller import V2RunnerController
 from handoff_builder.v2.hyperframes_lab import HyperFramesAdapter, HyperFramesLabError
 from handoff_builder.v2.services import (
@@ -33,6 +35,31 @@ if os.name == "nt":
     import winsound
 else:
     winsound = None
+
+
+def _app_runtime_root() -> Path:
+    if getattr(sys, "frozen", False):
+        return Path(sys.executable).resolve().parent
+    return Path(__file__).resolve().parent
+
+
+def _app_resource_root() -> Path:
+    if getattr(sys, "frozen", False):
+        meipass = getattr(sys, "_MEIPASS", None)
+        if meipass:
+            return Path(meipass).resolve()
+    return Path(__file__).resolve().parent
+
+
+def _default_hyperframes_project_root() -> Path:
+    candidates = [
+        _app_resource_root() / "prototypes" / "hyperframes",
+        _app_runtime_root() / "prototypes" / "hyperframes",
+    ]
+    for candidate in candidates:
+        if (candidate / "index.html").exists():
+            return candidate
+    return candidates[0]
 
 
 class App(tk.Tk):
@@ -76,14 +103,15 @@ class App(tk.Tk):
         self.v2_current_snapshot: dict | None = None
         self.v2_first_frame_image: ImageTk.PhotoImage | None = None
         self.v2_busy = False
-        self.voice_window: tk.Toplevel | None = None
+        self.main_notebook: ttk.Notebook | None = None
+        self.voice_tab_loaded_once = False
         self.voice_base_url = tk.StringVar(value="http://127.0.0.1:17493")
         self.voice_profile_key = tk.StringVar(value="olga-polo-en-v1")
         self.voice_language = tk.StringVar(value="en-US")
         self.voice_engine = tk.StringVar(value="qwen")
         self.voice_model_size = tk.StringVar(value="0.6B")
         self.voice_target_duration_ms = tk.StringVar(value="")
-        self.voice_status_text = tk.StringVar(value="Откройте Voice Studio и загрузите workspace.")
+        self.voice_status_text = tk.StringVar(value="Откройте вкладку Voice Studio и загрузите workspace.")
         self.voice_runtime_text = tk.StringVar(value="Runtime: not checked")
         self.voice_profile_text = tk.StringVar(value="Profile: not checked")
         self.voice_job_choice = tk.StringVar(value="")
@@ -97,12 +125,15 @@ class App(tk.Tk):
         self.voice_pacing = tk.IntVar(value=5)
         self.voice_emotion = tk.IntVar(value=5)
         self.voice_artifacts = tk.StringVar(value="minor")
-        self.hyperframes_project_path = tk.StringVar(value=str(Path(__file__).resolve().parent / "prototypes" / "hyperframes"))
+        self.hyperframes_project_path = tk.StringVar(value=str(_default_hyperframes_project_root()))
         self.hyperframes_status_text = tk.StringVar(value="HyperFrames Lab: trusted local prototype or workspace composition only.")
         self.hyperframes_runtime_text = tk.StringVar(value="Doctor: not checked")
         self.hyperframes_preview_url = tk.StringVar(value="")
         self.hyperframes_last_result: dict | None = None
         self.hyperframes_cancel_event: threading.Event | None = None
+        self.coordinator_status_text = tk.StringVar(value="Вставьте coordinator brief и соберите trusted local draft.")
+        self.coordinator_last_draft: CoordinatorDraft | None = None
+        self.coordinator_last_saved_dir: Path | None = None
 
         self._build_ui()
         self._apply_theme()
@@ -146,16 +177,28 @@ class App(tk.Tk):
             style="App.TRadiobutton",
         ).pack(side="left")
 
-        notebook = ttk.Notebook(outer, style="App.TNotebook")
-        notebook.pack(fill="both", expand=True)
+        self.main_notebook = ttk.Notebook(outer, style="App.TNotebook")
+        self.main_notebook.pack(fill="both", expand=True)
 
-        self.v1_tab = ttk.Frame(notebook, padding=14, style="App.TFrame")
-        self.v2_tab = ttk.Frame(notebook, padding=14, style="App.TFrame")
-        notebook.add(self.v1_tab, text="Prepare Handoff (v1)")
-        notebook.add(self.v2_tab, text="Local Edit Runner (v2)")
+        self.v1_tab = ttk.Frame(self.main_notebook, padding=14, style="App.TFrame")
+        self.v2_tab = ttk.Frame(self.main_notebook, padding=14, style="App.TFrame")
+        self.voice_tab = ttk.Frame(self.main_notebook, padding=14, style="App.TFrame")
+        self.main_notebook.add(self.v1_tab, text="Prepare Handoff (v1)")
+        self.main_notebook.add(self.v2_tab, text="Local Edit Runner (v2)")
+        self.main_notebook.add(self.voice_tab, text="Voice Studio")
+        self.main_notebook.bind("<<NotebookTabChanged>>", self._on_main_tab_changed)
 
         self._build_v1_tab()
         self._build_v2_tab()
+        self._build_voice_tab()
+
+    def _on_main_tab_changed(self, _event: object | None = None) -> None:
+        if self.main_notebook is None:
+            return
+        current_tab = self.main_notebook.nametowidget(self.main_notebook.select())
+        if current_tab is self.voice_tab and not self.voice_tab_loaded_once:
+            self.voice_tab_loaded_once = True
+            self._voice_start_refresh()
 
     def _build_v1_tab(self) -> None:
         outer = self.v1_tab
@@ -227,8 +270,7 @@ class App(tk.Tk):
     def _build_v2_tab(self) -> None:
         outer = self.v2_tab
         outer.columnconfigure(0, weight=1)
-        outer.rowconfigure(4, weight=1)
-        outer.rowconfigure(5, weight=1)
+        outer.rowconfigure(6, weight=1)
 
         workspace_frame = ttk.LabelFrame(outer, text="Workspace", padding=10)
         workspace_frame.grid(row=0, column=0, sticky="ew")
@@ -264,8 +306,44 @@ class App(tk.Tk):
 
         ttk.Label(outer, textvariable=self.v2_status_text).grid(row=2, column=0, sticky="w", pady=(8, 8))
 
+        coordinator_frame = ttk.LabelFrame(outer, text="Coordinator Bridge", padding=10)
+        coordinator_frame.grid(row=3, column=0, sticky="ew")
+        coordinator_frame.columnconfigure(0, weight=3)
+        coordinator_frame.columnconfigure(1, weight=2)
+        coordinator_frame.rowconfigure(1, weight=1)
+        ttk.Label(coordinator_frame, text="Coordinator Brief / Сценарный расклад").grid(row=0, column=0, sticky="w")
+        self.coordinator_brief_text = tk.Text(coordinator_frame, height=7, wrap="word")
+        self.coordinator_brief_text.grid(row=1, column=0, sticky="nsew", padx=(0, 12))
+        self._register_text_widget(self.coordinator_brief_text)
+        self.coordinator_brief_text.insert(
+            "1.0",
+            "Title: Warm Cafe Promise\n"
+            "Voice: Your wedding should feel warm, confident, and alive.\n"
+            "Visual: Gentle cafe light, polished portrait transitions, local-only render.\n"
+            "Shots:\n- Wide room opening\n- Medium smile at the table\n- Close portrait finish\n"
+            "Overlay:\n- HYPERFRAMES LAB\n- WARM AND ALIVE",
+        )
+
+        right_col = ttk.Frame(coordinator_frame, style="App.TFrame")
+        right_col.grid(row=1, column=1, sticky="nsew")
+        right_col.columnconfigure(0, weight=1)
+        ttk.Label(right_col, text="Trusted Local Draft Summary").grid(row=0, column=0, sticky="w")
+        self.coordinator_summary = tk.Text(right_col, height=7, wrap="word", state="disabled")
+        self.coordinator_summary.grid(row=1, column=0, sticky="nsew", pady=(6, 0))
+        self._register_text_widget(self.coordinator_summary)
+
+        button_row = ttk.Frame(coordinator_frame, style="App.TFrame")
+        button_row.grid(row=2, column=0, columnspan=2, sticky="ew", pady=(8, 0))
+        ttk.Button(button_row, text="Build Draft", command=self._coordinator_build_draft).pack(side="left")
+        ttk.Button(button_row, text="Apply Script to Voice Studio", command=self._coordinator_apply_voice_script).pack(side="left", padx=(8, 0))
+        ttk.Button(button_row, text="Save Draft File", command=self._coordinator_save_draft).pack(side="left", padx=(8, 0))
+        ttk.Button(button_row, text="Open Draft Folder", command=self._coordinator_open_draft_folder).pack(side="left", padx=(8, 0))
+        ttk.Label(coordinator_frame, textvariable=self.coordinator_status_text, wraplength=980, justify="left").grid(
+            row=3, column=0, columnspan=2, sticky="w", pady=(8, 0)
+        )
+
         hyperframes_frame = ttk.LabelFrame(outer, text="HyperFrames Lab", padding=10)
-        hyperframes_frame.grid(row=3, column=0, sticky="ew")
+        hyperframes_frame.grid(row=4, column=0, sticky="ew", pady=(10, 0))
         hyperframes_frame.columnconfigure(1, weight=1)
         ttk.Label(hyperframes_frame, text="Project dir:").grid(row=0, column=0, sticky="w")
         ttk.Entry(hyperframes_frame, textvariable=self.hyperframes_project_path).grid(row=0, column=1, sticky="ew", padx=(8, 8))
@@ -291,7 +369,7 @@ class App(tk.Tk):
         )
 
         summary_frame = ttk.LabelFrame(outer, text="Import AI Plan / Patch Summary", padding=10)
-        summary_frame.grid(row=4, column=0, sticky="nsew", pady=(10, 0))
+        summary_frame.grid(row=5, column=0, sticky="nsew", pady=(10, 0))
         summary_frame.columnconfigure(0, weight=1)
         summary_frame.rowconfigure(0, weight=1)
         self.v2_summary = tk.Text(summary_frame, height=10, wrap="word", state="disabled")
@@ -299,7 +377,7 @@ class App(tk.Tk):
         self._register_text_widget(self.v2_summary)
 
         lower = ttk.Panedwindow(outer, orient="horizontal")
-        lower.grid(row=5, column=0, sticky="nsew", pady=(10, 0))
+        lower.grid(row=6, column=0, sticky="nsew", pady=(10, 0))
 
         queue_frame = ttk.Frame(lower, padding=4)
         queue_frame.columnconfigure(0, weight=1)
@@ -377,6 +455,136 @@ class App(tk.Tk):
         self.v2_qc = tk.Text(qc_frame, height=14, wrap="word", state="disabled")
         self.v2_qc.grid(row=0, column=0, sticky="nsew")
         self._register_text_widget(self.v2_qc)
+
+    def _build_voice_tab(self) -> None:
+        outer = self.voice_tab
+        outer.columnconfigure(0, weight=1)
+        outer.rowconfigure(4, weight=1)
+
+        ttk.Label(outer, text="Voice Studio / Озвучка", style="Title.TLabel").grid(row=0, column=0, sticky="w")
+
+        top = ttk.Frame(outer)
+        top.grid(row=1, column=0, sticky="ew", pady=(10, 0))
+        top.columnconfigure(0, weight=1)
+        top.columnconfigure(1, weight=1)
+
+        runtime_frame = ttk.LabelFrame(top, text="Runtime / Profile", padding=10)
+        runtime_frame.grid(row=0, column=0, sticky="nsew", padx=(0, 8))
+        runtime_frame.columnconfigure(1, weight=1)
+        ttk.Label(runtime_frame, text="Base URL:").grid(row=0, column=0, sticky="w")
+        ttk.Entry(runtime_frame, textvariable=self.voice_base_url).grid(row=0, column=1, sticky="ew", padx=(8, 8))
+        ttk.Button(runtime_frame, text="Refresh Runtime", command=self._voice_start_refresh).grid(row=0, column=2)
+        ttk.Label(runtime_frame, textvariable=self.voice_runtime_text, wraplength=500, justify="left").grid(row=1, column=0, columnspan=3, sticky="w", pady=(8, 4))
+        ttk.Label(runtime_frame, textvariable=self.voice_profile_text, wraplength=500, justify="left").grid(row=2, column=0, columnspan=3, sticky="w")
+
+        job_frame = ttk.LabelFrame(top, text="Generate 3 Olga Takes", padding=10)
+        job_frame.grid(row=0, column=1, sticky="nsew")
+        job_frame.columnconfigure(1, weight=1)
+        ttk.Label(job_frame, text="Profile Key:").grid(row=0, column=0, sticky="w")
+        ttk.Entry(job_frame, textvariable=self.voice_profile_key).grid(row=0, column=1, sticky="ew", padx=(8, 0))
+        ttk.Label(job_frame, text="Language:").grid(row=1, column=0, sticky="w", pady=(8, 0))
+        ttk.Entry(job_frame, textvariable=self.voice_language).grid(row=1, column=1, sticky="ew", padx=(8, 0), pady=(8, 0))
+        ttk.Label(job_frame, text="Engine:").grid(row=2, column=0, sticky="w", pady=(8, 0))
+        ttk.Entry(job_frame, textvariable=self.voice_engine).grid(row=2, column=1, sticky="ew", padx=(8, 0), pady=(8, 0))
+        ttk.Label(job_frame, text="Model Size:").grid(row=3, column=0, sticky="w", pady=(8, 0))
+        ttk.Entry(job_frame, textvariable=self.voice_model_size).grid(row=3, column=1, sticky="ew", padx=(8, 0), pady=(8, 0))
+        ttk.Label(job_frame, text="Target Duration ms:").grid(row=4, column=0, sticky="w", pady=(8, 0))
+        ttk.Entry(job_frame, textvariable=self.voice_target_duration_ms).grid(row=4, column=1, sticky="ew", padx=(8, 0), pady=(8, 0))
+        ttk.Button(job_frame, text="Generate 3 Takes", command=self._voice_start_generate).grid(row=5, column=1, sticky="e", pady=(10, 0))
+
+        script_frame = ttk.LabelFrame(outer, text="Script / Текст озвучки", padding=10)
+        script_frame.grid(row=2, column=0, sticky="ew", pady=(10, 0))
+        script_frame.columnconfigure(0, weight=1)
+        self.voice_script_text = tk.Text(script_frame, height=5, wrap="word")
+        self.voice_script_text.grid(row=0, column=0, sticky="ew")
+        self._register_text_widget(self.voice_script_text)
+        self.voice_script_text.insert(
+            "1.0",
+            "Your wedding should feel warm, confident, and alive, like every promise, every laugh, and every dance is still glowing in the room.",
+        )
+        ttk.Label(outer, textvariable=self.voice_status_text).grid(row=3, column=0, sticky="nw", pady=(8, 6))
+
+        body = ttk.Panedwindow(outer, orient="horizontal")
+        body.grid(row=4, column=0, sticky="nsew")
+
+        left = ttk.Frame(body, padding=4)
+        center = ttk.Frame(body, padding=4)
+        right = ttk.Frame(body, padding=4)
+        for frame in (left, center, right):
+            frame.columnconfigure(0, weight=1)
+            frame.rowconfigure(1, weight=1)
+        body.add(left, weight=2)
+        body.add(center, weight=3)
+        body.add(right, weight=3)
+
+        ttk.Label(left, text="Voice Jobs", style="SectionTitle.TLabel").grid(row=0, column=0, sticky="w")
+        self.voice_job_combo = ttk.Combobox(left, textvariable=self.voice_job_choice, state="readonly")
+        self.voice_job_combo.grid(row=1, column=0, sticky="ew", pady=(6, 0))
+        self.voice_job_combo.bind("<<ComboboxSelected>>", self._voice_on_job_selected)
+        ttk.Button(left, text="Refresh Jobs", command=self._voice_start_refresh).grid(row=2, column=0, sticky="w", pady=(8, 0))
+
+        ttk.Label(center, text="Takes / Прослушивание", style="SectionTitle.TLabel").grid(row=0, column=0, sticky="w")
+        self.voice_takes = ttk.Treeview(
+            center,
+            columns=("idx", "status", "duration", "sha"),
+            show="headings",
+            height=12,
+        )
+        self.voice_takes.heading("idx", text="#")
+        self.voice_takes.heading("status", text="Status")
+        self.voice_takes.heading("duration", text="Duration ms")
+        self.voice_takes.heading("sha", text="SHA-256")
+        self.voice_takes.column("idx", width=45, anchor="center")
+        self.voice_takes.column("status", width=180, anchor="w")
+        self.voice_takes.column("duration", width=100, anchor="center")
+        self.voice_takes.column("sha", width=210, anchor="w")
+        self.voice_takes.grid(row=1, column=0, sticky="nsew", pady=(6, 0))
+        self.voice_takes.bind("<<TreeviewSelect>>", self._voice_on_take_selected)
+
+        play_actions = ttk.Frame(center)
+        play_actions.grid(row=2, column=0, sticky="ew", pady=(8, 0))
+        ttk.Button(play_actions, text="Play Selected", command=self._voice_play_selected_take).pack(side="left")
+        ttk.Button(play_actions, text="Stop", command=self._voice_stop_playback).pack(side="left", padx=(8, 0))
+        ttk.Button(play_actions, text="Open WAV", command=self._voice_open_selected_take).pack(side="left", padx=(8, 0))
+        ttk.Button(play_actions, text="Align", command=self._voice_start_align_selected).pack(side="left", padx=(16, 0))
+
+        ttk.Label(right, text="QC / Review / Approve", style="SectionTitle.TLabel").grid(row=0, column=0, sticky="w")
+        review_top = ttk.Frame(right)
+        review_top.grid(row=1, column=0, sticky="ew", pady=(6, 6))
+        for col in range(4):
+            review_top.columnconfigure(col, weight=1)
+        ttk.Label(review_top, text="Similarity").grid(row=0, column=0, sticky="w")
+        ttk.Spinbox(review_top, from_=1, to=5, textvariable=self.voice_similarity, width=5).grid(row=0, column=1, sticky="w")
+        ttk.Label(review_top, text="Naturalness").grid(row=0, column=2, sticky="w")
+        ttk.Spinbox(review_top, from_=1, to=5, textvariable=self.voice_naturalness, width=5).grid(row=0, column=3, sticky="w")
+        ttk.Label(review_top, text="Pronunciation").grid(row=1, column=0, sticky="w", pady=(6, 0))
+        ttk.Spinbox(review_top, from_=1, to=5, textvariable=self.voice_pronunciation, width=5).grid(row=1, column=1, sticky="w", pady=(6, 0))
+        ttk.Label(review_top, text="Pacing").grid(row=1, column=2, sticky="w", pady=(6, 0))
+        ttk.Spinbox(review_top, from_=1, to=5, textvariable=self.voice_pacing, width=5).grid(row=1, column=3, sticky="w", pady=(6, 0))
+        ttk.Label(review_top, text="Emotion").grid(row=2, column=0, sticky="w", pady=(6, 0))
+        ttk.Spinbox(review_top, from_=1, to=5, textvariable=self.voice_emotion, width=5).grid(row=2, column=1, sticky="w", pady=(6, 0))
+        ttk.Label(review_top, text="Artifacts").grid(row=2, column=2, sticky="w", pady=(6, 0))
+        ttk.Combobox(review_top, textvariable=self.voice_artifacts, values=("none", "minor", "major"), state="readonly", width=10).grid(row=2, column=3, sticky="w", pady=(6, 0))
+
+        notes_frame = ttk.LabelFrame(right, text="Review Notes", padding=8)
+        notes_frame.grid(row=2, column=0, sticky="ew")
+        notes_frame.columnconfigure(0, weight=1)
+        self.voice_notes = tk.Text(notes_frame, height=4, wrap="word")
+        self.voice_notes.grid(row=0, column=0, sticky="ew")
+        self._register_text_widget(self.voice_notes)
+
+        action_row = ttk.Frame(right)
+        action_row.grid(row=3, column=0, sticky="ew", pady=(8, 8))
+        ttk.Button(action_row, text="Approve Selected Take", command=self._voice_start_approve_selected, style="Accent.TButton").pack(side="left")
+
+        qc_frame = ttk.LabelFrame(right, text="Take Details", padding=8)
+        qc_frame.grid(row=4, column=0, sticky="nsew")
+        qc_frame.columnconfigure(0, weight=1)
+        qc_frame.rowconfigure(0, weight=1)
+        right.rowconfigure(4, weight=1)
+        self.voice_qc = tk.Text(qc_frame, height=18, wrap="word", state="disabled")
+        self.voice_qc.grid(row=0, column=0, sticky="nsew")
+        self._register_text_widget(self.voice_qc)
 
     def _register_text_widget(self, widget: tk.Text) -> None:
         self.theme_text_widgets.append(widget)
@@ -736,7 +944,7 @@ class App(tk.Tk):
                 config,
                 progress=lambda value, message: self.events.put(("progress", (value, message))),
                 log=lambda message: self.events.put(("log", message)),
-                project_root=Path(__file__).resolve().parent,
+                project_root=_app_resource_root(),
             )
             self.active_builder = builder
             result = builder.build(selected_sources)
@@ -957,9 +1165,9 @@ class App(tk.Tk):
 
     def _hyperframes_adapter(self, *, workspace_root: Path | None = None) -> HyperFramesAdapter:
         return HyperFramesAdapter(
-            trusted_prototype_root=Path(__file__).resolve().parent / "prototypes" / "hyperframes",
+            trusted_prototype_root=_default_hyperframes_project_root(),
             workspace_root=workspace_root,
-            project_root=Path(__file__).resolve().parent,
+            project_root=_app_resource_root(),
             cancel_event=self.hyperframes_cancel_event,
         )
 
@@ -1218,158 +1426,62 @@ class App(tk.Tk):
             self.v2_first_frame_image = None
 
     def _v2_open_voice_studio(self) -> None:
-        if self.voice_window is not None and self.voice_window.winfo_exists():
-            self.voice_window.deiconify()
-            self.voice_window.lift()
-            self.voice_window.focus_force()
+        if self.main_notebook is None:
             return
-
-        window = tk.Toplevel(self)
-        window.title("Voice Studio / Озвучка")
-        window.geometry("1260x880")
-        window.minsize(1080, 760)
-        window.protocol("WM_DELETE_WINDOW", self._voice_close_window)
-        self.voice_window = window
-        self._register_window(window)
-        self._apply_theme()
-
-        outer = ttk.Frame(window, padding=12, style="App.TFrame")
-        outer.pack(fill="both", expand=True)
-        outer.columnconfigure(0, weight=1)
-        outer.rowconfigure(4, weight=1)
-
-        ttk.Label(outer, text="Voice Studio / Озвучка", style="Title.TLabel").grid(row=0, column=0, sticky="w")
-
-        top = ttk.Frame(outer)
-        top.grid(row=1, column=0, sticky="ew", pady=(10, 0))
-        top.columnconfigure(0, weight=1)
-        top.columnconfigure(1, weight=1)
-
-        runtime_frame = ttk.LabelFrame(top, text="Runtime / Profile", padding=10)
-        runtime_frame.grid(row=0, column=0, sticky="nsew", padx=(0, 8))
-        runtime_frame.columnconfigure(1, weight=1)
-        ttk.Label(runtime_frame, text="Base URL:").grid(row=0, column=0, sticky="w")
-        ttk.Entry(runtime_frame, textvariable=self.voice_base_url).grid(row=0, column=1, sticky="ew", padx=(8, 8))
-        ttk.Button(runtime_frame, text="Refresh Runtime", command=self._voice_start_refresh).grid(row=0, column=2)
-        ttk.Label(runtime_frame, textvariable=self.voice_runtime_text, wraplength=500, justify="left").grid(row=1, column=0, columnspan=3, sticky="w", pady=(8, 4))
-        ttk.Label(runtime_frame, textvariable=self.voice_profile_text, wraplength=500, justify="left").grid(row=2, column=0, columnspan=3, sticky="w")
-
-        job_frame = ttk.LabelFrame(top, text="Generate 3 Olga Takes", padding=10)
-        job_frame.grid(row=0, column=1, sticky="nsew")
-        job_frame.columnconfigure(1, weight=1)
-        ttk.Label(job_frame, text="Profile Key:").grid(row=0, column=0, sticky="w")
-        ttk.Entry(job_frame, textvariable=self.voice_profile_key).grid(row=0, column=1, sticky="ew", padx=(8, 0))
-        ttk.Label(job_frame, text="Language:").grid(row=1, column=0, sticky="w", pady=(8, 0))
-        ttk.Entry(job_frame, textvariable=self.voice_language).grid(row=1, column=1, sticky="ew", padx=(8, 0), pady=(8, 0))
-        ttk.Label(job_frame, text="Engine:").grid(row=2, column=0, sticky="w", pady=(8, 0))
-        ttk.Entry(job_frame, textvariable=self.voice_engine).grid(row=2, column=1, sticky="ew", padx=(8, 0), pady=(8, 0))
-        ttk.Label(job_frame, text="Model Size:").grid(row=3, column=0, sticky="w", pady=(8, 0))
-        ttk.Entry(job_frame, textvariable=self.voice_model_size).grid(row=3, column=1, sticky="ew", padx=(8, 0), pady=(8, 0))
-        ttk.Label(job_frame, text="Target Duration ms:").grid(row=4, column=0, sticky="w", pady=(8, 0))
-        ttk.Entry(job_frame, textvariable=self.voice_target_duration_ms).grid(row=4, column=1, sticky="ew", padx=(8, 0), pady=(8, 0))
-        ttk.Button(job_frame, text="Generate 3 Takes", command=self._voice_start_generate).grid(row=5, column=1, sticky="e", pady=(10, 0))
-
-        script_frame = ttk.LabelFrame(outer, text="Script / Текст озвучки", padding=10)
-        script_frame.grid(row=2, column=0, sticky="ew", pady=(10, 0))
-        script_frame.columnconfigure(0, weight=1)
-        self.voice_script_text = tk.Text(script_frame, height=5, wrap="word")
-        self.voice_script_text.grid(row=0, column=0, sticky="ew")
-        self._register_text_widget(self.voice_script_text)
-        self.voice_script_text.insert(
-            "1.0",
-            "Your wedding should feel warm, confident, and alive, like every promise, every laugh, and every dance is still glowing in the room.",
-        )
-        ttk.Label(outer, textvariable=self.voice_status_text).grid(row=3, column=0, sticky="nw", pady=(8, 6))
-
-        body = ttk.Panedwindow(outer, orient="horizontal")
-        body.grid(row=4, column=0, sticky="nsew")
-
-        left = ttk.Frame(body, padding=4)
-        center = ttk.Frame(body, padding=4)
-        right = ttk.Frame(body, padding=4)
-        for frame in (left, center, right):
-            frame.columnconfigure(0, weight=1)
-            frame.rowconfigure(1, weight=1)
-        body.add(left, weight=2)
-        body.add(center, weight=3)
-        body.add(right, weight=3)
-
-        ttk.Label(left, text="Voice Jobs", style="SectionTitle.TLabel").grid(row=0, column=0, sticky="w")
-        self.voice_job_combo = ttk.Combobox(left, textvariable=self.voice_job_choice, state="readonly")
-        self.voice_job_combo.grid(row=1, column=0, sticky="ew", pady=(6, 0))
-        self.voice_job_combo.bind("<<ComboboxSelected>>", self._voice_on_job_selected)
-        ttk.Button(left, text="Refresh Jobs", command=self._voice_start_refresh).grid(row=2, column=0, sticky="w", pady=(8, 0))
-
-        ttk.Label(center, text="Takes / Прослушивание", style="SectionTitle.TLabel").grid(row=0, column=0, sticky="w")
-        self.voice_takes = ttk.Treeview(
-            center,
-            columns=("idx", "status", "duration", "sha"),
-            show="headings",
-            height=12,
-        )
-        self.voice_takes.heading("idx", text="#")
-        self.voice_takes.heading("status", text="Status")
-        self.voice_takes.heading("duration", text="Duration ms")
-        self.voice_takes.heading("sha", text="SHA-256")
-        self.voice_takes.column("idx", width=45, anchor="center")
-        self.voice_takes.column("status", width=180, anchor="w")
-        self.voice_takes.column("duration", width=100, anchor="center")
-        self.voice_takes.column("sha", width=210, anchor="w")
-        self.voice_takes.grid(row=1, column=0, sticky="nsew", pady=(6, 0))
-        self.voice_takes.bind("<<TreeviewSelect>>", self._voice_on_take_selected)
-
-        play_actions = ttk.Frame(center)
-        play_actions.grid(row=2, column=0, sticky="ew", pady=(8, 0))
-        ttk.Button(play_actions, text="Play Selected", command=self._voice_play_selected_take).pack(side="left")
-        ttk.Button(play_actions, text="Stop", command=self._voice_stop_playback).pack(side="left", padx=(8, 0))
-        ttk.Button(play_actions, text="Open WAV", command=self._voice_open_selected_take).pack(side="left", padx=(8, 0))
-        ttk.Button(play_actions, text="Align", command=self._voice_start_align_selected).pack(side="left", padx=(16, 0))
-
-        ttk.Label(right, text="QC / Review / Approve", style="SectionTitle.TLabel").grid(row=0, column=0, sticky="w")
-        review_top = ttk.Frame(right)
-        review_top.grid(row=1, column=0, sticky="ew", pady=(6, 6))
-        for col in range(4):
-            review_top.columnconfigure(col, weight=1)
-        ttk.Label(review_top, text="Similarity").grid(row=0, column=0, sticky="w")
-        ttk.Spinbox(review_top, from_=1, to=5, textvariable=self.voice_similarity, width=5).grid(row=0, column=1, sticky="w")
-        ttk.Label(review_top, text="Naturalness").grid(row=0, column=2, sticky="w")
-        ttk.Spinbox(review_top, from_=1, to=5, textvariable=self.voice_naturalness, width=5).grid(row=0, column=3, sticky="w")
-        ttk.Label(review_top, text="Pronunciation").grid(row=1, column=0, sticky="w", pady=(6, 0))
-        ttk.Spinbox(review_top, from_=1, to=5, textvariable=self.voice_pronunciation, width=5).grid(row=1, column=1, sticky="w", pady=(6, 0))
-        ttk.Label(review_top, text="Pacing").grid(row=1, column=2, sticky="w", pady=(6, 0))
-        ttk.Spinbox(review_top, from_=1, to=5, textvariable=self.voice_pacing, width=5).grid(row=1, column=3, sticky="w", pady=(6, 0))
-        ttk.Label(review_top, text="Emotion").grid(row=2, column=0, sticky="w", pady=(6, 0))
-        ttk.Spinbox(review_top, from_=1, to=5, textvariable=self.voice_emotion, width=5).grid(row=2, column=1, sticky="w", pady=(6, 0))
-        ttk.Label(review_top, text="Artifacts").grid(row=2, column=2, sticky="w", pady=(6, 0))
-        ttk.Combobox(review_top, textvariable=self.voice_artifacts, values=("none", "minor", "major"), state="readonly", width=10).grid(row=2, column=3, sticky="w", pady=(6, 0))
-
-        notes_frame = ttk.LabelFrame(right, text="Review Notes", padding=8)
-        notes_frame.grid(row=2, column=0, sticky="ew")
-        notes_frame.columnconfigure(0, weight=1)
-        self.voice_notes = tk.Text(notes_frame, height=4, wrap="word")
-        self.voice_notes.grid(row=0, column=0, sticky="ew")
-        self._register_text_widget(self.voice_notes)
-
-        action_row = ttk.Frame(right)
-        action_row.grid(row=3, column=0, sticky="ew", pady=(8, 8))
-        ttk.Button(action_row, text="Approve Selected Take", command=self._voice_start_approve_selected, style="Accent.TButton").pack(side="left")
-
-        qc_frame = ttk.LabelFrame(right, text="Take Details", padding=8)
-        qc_frame.grid(row=4, column=0, sticky="nsew")
-        qc_frame.columnconfigure(0, weight=1)
-        qc_frame.rowconfigure(0, weight=1)
-        right.rowconfigure(4, weight=1)
-        self.voice_qc = tk.Text(qc_frame, height=18, wrap="word", state="disabled")
-        self.voice_qc.grid(row=0, column=0, sticky="nsew")
-        self._register_text_widget(self.voice_qc)
-
+        self.main_notebook.select(self.voice_tab)
+        self.voice_tab_loaded_once = True
+        self.voice_status_text.set("Voice Studio открыта во вкладке main app.")
         self._voice_start_refresh()
 
-    def _voice_close_window(self) -> None:
-        self._voice_stop_playback()
-        if self.voice_window is not None:
-            self.voice_window.destroy()
-        self.voice_window = None
+    def _coordinator_build_draft(self) -> CoordinatorDraft | None:
+        raw_text = self.coordinator_brief_text.get("1.0", "end").strip()
+        if not raw_text:
+            self._show_warning("Нет brief", "Вставьте coordinator brief.")
+            return None
+        try:
+            draft = build_coordinator_draft(raw_text)
+        except Exception as exc:
+            self.coordinator_status_text.set(f"Coordinator draft error: {exc}")
+            self._show_error("Coordinator Bridge", str(exc))
+            return None
+
+        self.coordinator_last_draft = draft
+        self._write_text(self.coordinator_summary, draft_to_summary(draft))
+        self.coordinator_status_text.set(
+            "Trusted local draft собран. Можно перенести текст в Voice Studio или сохранить draft в workspace."
+        )
+        return draft
+
+    def _coordinator_apply_voice_script(self) -> None:
+        draft = self.coordinator_last_draft or self._coordinator_build_draft()
+        if draft is None:
+            return
+        self.voice_script_text.delete("1.0", "end")
+        self.voice_script_text.insert("1.0", draft.voice_script)
+        self.voice_status_text.set(f"Voice script загружен из coordinator draft: {draft.title}")
+        self._v2_open_voice_studio()
+
+    def _coordinator_save_draft(self) -> None:
+        draft = self.coordinator_last_draft or self._coordinator_build_draft()
+        if draft is None:
+            return
+        workspace = self._voice_workspace()
+        draft_dir = workspace / "coordinator_bridge"
+        draft_dir.mkdir(parents=True, exist_ok=True)
+
+        payload_path = draft_dir / "coordinator_draft.json"
+        summary_path = draft_dir / "coordinator_draft_summary.txt"
+        payload_path.write_text(json.dumps(draft_to_payload(draft), ensure_ascii=False, indent=2), encoding="utf-8")
+        summary_path.write_text(draft_to_summary(draft), encoding="utf-8")
+
+        self.coordinator_last_saved_dir = draft_dir
+        self.coordinator_status_text.set(f"Draft сохранён: {draft_dir}")
+
+    def _coordinator_open_draft_folder(self) -> None:
+        if self.coordinator_last_saved_dir is None or not self.coordinator_last_saved_dir.exists():
+            self._show_warning("Нет draft folder", "Сначала сохраните coordinator draft.")
+            return
+        self._open_path(self.coordinator_last_saved_dir)
 
     def _voice_workspace(self) -> Path:
         if self.v2_controller.workspace:
