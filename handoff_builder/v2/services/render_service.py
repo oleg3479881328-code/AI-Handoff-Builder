@@ -113,7 +113,7 @@ def _process_job_row(
     try:
         plan_payload = json.loads(Path(plan_row["plan_path"]).read_text(encoding="utf-8"))
         plan_schema_version = str(plan_payload["schema_version"])
-        if plan_schema_version == "2.0":
+        if plan_schema_version in {"2.0", "2.1"}:
             validated = load_and_validate_local_photo_plan(
                 Path(plan_row["plan_path"]),
                 project_root,
@@ -175,7 +175,7 @@ def _process_job_row(
                 "updated_at": utc_now_iso(),
             }
         )
-        if plan_schema_version == "2.0":
+        if plan_schema_version in {"2.0", "2.1"}:
             report["warnings"] = sorted(set(report.get("warnings", [])) | {"local_originals_resolved"})
         connection.execute(
             "UPDATE render_outputs SET renderer_status = ? WHERE render_job_id = ?",
@@ -280,6 +280,8 @@ def _classify_error_code(exc: Exception) -> str:
         return "ambiguous_source"
     if "Asset resolution failed: checksum mismatch" in message:
         return "checksum_mismatch"
+    if "Asset resolution failed: size mismatch" in message:
+        return "size_mismatch"
     if "Asset resolution failed: unreadable" in message:
         return "unreadable_source"
     if "duration" in message or "source_out_ms" in message:

@@ -81,12 +81,17 @@ def test_schema_loads():
     schema = load_schema("ai_edit_package", "1.0")
     assert schema["title"] == "AI Edit Package"
     assert schema["properties"]["schema_version"]["const"] == "1.0"
+    schema_21 = load_schema("edit_plan", "2.1")
+    assert schema_21["properties"]["schema_version"]["const"] == "2.1"
 
 
 def test_supported_schema_dispatch():
     path = schema_dispatch("edit_plan", "1.0")
     assert path.name == "1.0.json"
     assert path.exists()
+    path_21 = schema_dispatch("ai_edit_package", "2.1")
+    assert path_21.name == "2.1.json"
+    assert path_21.exists()
 
 
 def test_unsupported_version_rejection():

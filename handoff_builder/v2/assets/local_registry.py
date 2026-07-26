@@ -37,7 +37,12 @@ def persist_active_local_registry(workspace: Path, payload: dict) -> Path:
     return target
 
 
-def resolve_plan_assets_against_registry(plan_assets: list[dict], registry_payload: dict) -> dict:
+def resolve_plan_assets_against_registry(
+    plan_assets: list[dict],
+    registry_payload: dict,
+    *,
+    require_declared_integrity: bool = True,
+) -> dict:
     registry_assets = registry_payload.get("assets")
     if not isinstance(registry_assets, list):
         raise UnsafePackageError("local_asset_registry.json must contain an assets array.")
@@ -66,7 +71,11 @@ def resolve_plan_assets_against_registry(plan_assets: list[dict], registry_paylo
         if not source_path.is_file():
             raise UnsafePackageError(f"Asset resolution failed: unreadable source path for {asset_id}")
 
-        expected_sha256 = str(plan_asset.get("sha256") or registry_asset.get("sha256") or "")
+        expected_sha256 = str(
+            (plan_asset.get("sha256") if require_declared_integrity else registry_asset.get("sha256"))
+            or registry_asset.get("sha256")
+            or ""
+        )
         if not expected_sha256:
             raise UnsafePackageError(f"Asset resolution failed: missing sha256 for {asset_id}")
         actual_sha256 = file_sha256(source_path)
@@ -75,7 +84,11 @@ def resolve_plan_assets_against_registry(plan_assets: list[dict], registry_paylo
                 f"Asset resolution failed: checksum mismatch for {asset_id}: {actual_sha256} != {expected_sha256}"
             )
 
-        expected_size = int(plan_asset.get("size_bytes") or registry_asset.get("size_bytes") or 0)
+        expected_size = int(
+            (plan_asset.get("size_bytes") if require_declared_integrity else registry_asset.get("size_bytes"))
+            or registry_asset.get("size_bytes")
+            or 0
+        )
         actual_size = source_path.stat().st_size
         if expected_size and actual_size != expected_size:
             raise UnsafePackageError(

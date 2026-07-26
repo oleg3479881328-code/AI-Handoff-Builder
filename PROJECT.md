@@ -26,10 +26,10 @@ Current success for this stage means:
 ## Current Status
 
 - Mode: active execution
-- Phase: release candidate preserved; HyperFrames Lab implementation and local Windows acceptance complete; draft integration review open
-- Active branch: `feat/hyperframes-lab`
-- Draft PR: `#4` -> `codex/release-candidate-light-dark-ui`
-- Health: current FFmpeg, Voice Studio, metadata, and Light/Dark release-candidate baseline remains intact; HyperFrames Lab implementation, local acceptance, and coordinator code/safety review are complete; no private assets or generated outputs are tracked
+- Phase: release-candidate baseline preserved; `AI_EDIT_PACKAGE` / `edit_plan` schema `2.1` handoff-derived workflow implemented and validated locally, including packaged `.exe` acceptance
+- Active branch: `feat/issue-10-handoff-derived-package`
+- Draft PR: pending publication from `feat/issue-10-handoff-derived-package` into `codex/release-candidate-light-dark-ui`
+- Health: current FFmpeg, Voice Studio, metadata, Light/Dark release-candidate baseline, packaged schema resources, and HyperFrames follow-up remain intact; schema `2.0` stays unchanged; new `2.1` local-photo workflow now resolves originals from the active workspace registry with hard integrity checks; no private media or generated outputs are tracked
 
 ## Done So Far
 
@@ -46,14 +46,28 @@ Current success for this stage means:
 - Completed live local Windows acceptance for HyperFrames Lab through the real Tkinter UI and browser preview flow.
 - Completed coordinator code/safety review follow-ups, including project-aware preview routing, repository-relative tests, and remote asset rejection inside trusted compositions.
 - Opened draft PR `#4` from `feat/hyperframes-lab` into `codex/release-candidate-light-dark-ui`.
+- Added schema `2.1` for:
+  - `schemas/ai_edit_package/2.1.json`
+  - `schemas/edit_plan/2.1.json`
+- Preserved `2.0` unchanged while allowing ChatGPT-facing photo plans to contain only handoff-available asset fields.
+- Moved original-file integrity back to the active local workspace registry during `2.1` import:
+  - resolve by `asset_id`
+  - read registry `sha256`, `size_bytes`, and `source_path`
+  - hard-fail on missing, ambiguous, unreadable, size-mismatched, or checksum-mismatched originals
+- Extended the local-photo import/render path, schema dispatch, and packaged schema loading so the same `2.1` workflow works in source and in the rebuilt Windows `.exe`.
+- Completed real acceptance on the uploaded `WEDDING_PROJECT_ANALYSIS_HANDOFF.zip`:
+  - generated handoff-derived plan-only ZIP with no media and no local path access
+  - resolved 8 local originals from the active registry
+  - rendered `1080x1920`, `30 fps`, `7.766667 s`, `audio=0`
+  - confirmed the rebuilt packaged `.exe` contains schema resources through `2.1` and completed the same `2.1` import/render flow against a matching `WEDDING_PROJECT` workspace
 
 ## Current Focus
 
-Keep the transfer-ready documentation aligned with the actual integrated state while the draft PR remains under final coordinator verification.
+Publish the completed Issue `#10` implementation on a dedicated draft PR with exact local and packaged acceptance evidence.
 
 ## Next Practical Step
 
-Final coordinator verification of draft PR `#4`, followed by an explicit owner decision before marking the PR ready or merging. No merge to `main` or `codex/release-candidate-light-dark-ui` has occurred.
+Push `feat/issue-10-handoff-derived-package`, open one draft PR into `codex/release-candidate-light-dark-ui`, and post the execution report to Issue `#10`. No merge to `main` or `codex/release-candidate-light-dark-ui` is authorized.
 
 ## Key Decisions And Constraints
 
@@ -75,8 +89,6 @@ Final coordinator verification of draft PR `#4`, followed by an explicit owner d
 
 - `PROJECT_STATE.md`
 - `logs/latest.md`
-- `docs/HYPERFRAMES_INTEGRATION.md`
-- `prototypes/hyperframes/README.md`
-- Issue `#3`: `https://github.com/oleg3479881328-code/AI-Handoff-Builder/issues/3`
-- Draft PR `#4`: `https://github.com/oleg3479881328-code/AI-Handoff-Builder/pull/4`
+- Issue `#10`: `https://github.com/oleg3479881328-code/AI-Handoff-Builder/issues/10`
+- Issue `#8`: `https://github.com/oleg3479881328-code/AI-Handoff-Builder/issues/8`
 - Issue `#2`: `https://github.com/oleg3479881328-code/AI-Handoff-Builder/issues/2`

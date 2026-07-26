@@ -215,7 +215,7 @@ def compile_local_photo_render_plan(
         ]
     )
     render_plan = {
-        "schema_version": "2.0",
+        "schema_version": str(validated.payload.get("schema_version") or "2.0"),
         "mode": "preview",
         "output": {
             "width": validated.output_width,
