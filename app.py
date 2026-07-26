@@ -19,6 +19,12 @@ from handoff_builder.theme import ThemePalette, ThemeSettingsStore, get_theme_pa
 from handoff_builder.v2.coordinator_bridge import CoordinatorDraft, build_coordinator_draft, draft_to_payload, draft_to_summary
 from handoff_builder.v2.gui_controller import V2RunnerController
 from handoff_builder.v2.hyperframes_lab import HyperFramesAdapter, HyperFramesLabError
+from handoff_builder.v2.hyperframes_preview import (
+    build_preview_project,
+    preview_project_dir,
+    previewable_plan,
+    resolve_active_preview_plan_id,
+)
 from handoff_builder.v2.services.import_service import resolve_workspace_for_package
 from handoff_builder.v2.services import (
     list_voice_jobs,
@@ -102,6 +108,9 @@ class App(tk.Tk):
         self.v2_qc_text = ""
         self.v2_current_details: dict | None = None
         self.v2_current_snapshot: dict | None = None
+        self.v2_active_preview_plan_id: str | None = None
+        self.v2_active_preview_project_path: Path | None = None
+        self.v2_diagnostics_visible = False
         self.v2_first_frame_image: ImageTk.PhotoImage | None = None
         self.v2_busy = False
         self.main_notebook: ttk.Notebook | None = None
@@ -269,7 +278,28 @@ class App(tk.Tk):
         self._register_text_widget(self.log)
 
     def _build_v2_tab(self) -> None:
-        outer = self.v2_tab
+        self.v2_tab.columnconfigure(0, weight=1)
+        self.v2_tab.rowconfigure(0, weight=1)
+        self.v2_scroll_canvas = tk.Canvas(
+            self.v2_tab,
+            highlightthickness=0,
+            borderwidth=0,
+            relief="flat",
+        )
+        self.v2_scrollbar = ttk.Scrollbar(self.v2_tab, orient="vertical", command=self.v2_scroll_canvas.yview)
+        self.v2_scroll_canvas.configure(yscrollcommand=self.v2_scrollbar.set)
+        self.v2_scroll_canvas.grid(row=0, column=0, sticky="nsew")
+        self.v2_scrollbar.grid(row=0, column=1, sticky="ns")
+        self.v2_scroll_content = ttk.Frame(self.v2_scroll_canvas, style="App.TFrame")
+        self.v2_scroll_window_id = self.v2_scroll_canvas.create_window((0, 0), window=self.v2_scroll_content, anchor="nw")
+        self.v2_scroll_content.bind("<Configure>", self._on_v2_scroll_content_configure)
+        self.v2_scroll_canvas.bind("<Configure>", self._on_v2_scroll_canvas_configure)
+        self.v2_scroll_canvas.bind("<Enter>", self._v2_bind_mousewheel)
+        self.v2_scroll_canvas.bind("<Leave>", self._v2_unbind_mousewheel)
+        self.v2_scroll_content.bind("<Enter>", self._v2_bind_mousewheel)
+        self.v2_scroll_content.bind("<Leave>", self._v2_unbind_mousewheel)
+
+        outer = self.v2_scroll_content
         outer.columnconfigure(0, weight=1)
         outer.rowconfigure(6, weight=1)
 
@@ -372,10 +402,27 @@ class App(tk.Tk):
         summary_frame = ttk.LabelFrame(outer, text="Import AI Plan / Patch Summary", padding=10)
         summary_frame.grid(row=5, column=0, sticky="nsew", pady=(10, 0))
         summary_frame.columnconfigure(0, weight=1)
-        summary_frame.rowconfigure(0, weight=1)
-        self.v2_summary = tk.Text(summary_frame, height=10, wrap="word", state="disabled")
-        self.v2_summary.grid(row=0, column=0, sticky="nsew")
+        summary_actions = ttk.Frame(summary_frame, style="Surface.TFrame")
+        summary_actions.grid(row=0, column=0, sticky="ew")
+        summary_actions.columnconfigure(0, weight=1)
+        ttk.Label(summary_actions, text="Короткая сводка для рабочего пути").grid(row=0, column=0, sticky="w")
+        self.v2_summary_toggle_button = ttk.Button(
+            summary_actions,
+            text="Показать JSON",
+            command=self._toggle_v2_diagnostics,
+            style="Secondary.TButton",
+        )
+        self.v2_summary_toggle_button.grid(row=0, column=1, sticky="e")
+        self.v2_summary = tk.Text(summary_frame, height=7, wrap="word", state="disabled")
+        self.v2_summary.grid(row=1, column=0, sticky="nsew", pady=(8, 0))
         self._register_text_widget(self.v2_summary)
+        self.v2_summary_json_frame = ttk.Frame(summary_frame, style="Surface.TFrame")
+        self.v2_summary_json_frame.grid(row=2, column=0, sticky="nsew", pady=(8, 0))
+        self.v2_summary_json_frame.columnconfigure(0, weight=1)
+        self.v2_summary_json = tk.Text(self.v2_summary_json_frame, height=10, wrap="word", state="disabled")
+        self.v2_summary_json.grid(row=0, column=0, sticky="nsew")
+        self._register_text_widget(self.v2_summary_json)
+        self.v2_summary_json_frame.grid_remove()
 
         lower = ttk.Panedwindow(outer, orient="horizontal")
         lower.grid(row=6, column=0, sticky="nsew", pady=(10, 0))
@@ -792,6 +839,11 @@ class App(tk.Tk):
                 )
             except tk.TclError:
                 continue
+        if hasattr(self, "v2_scroll_canvas"):
+            try:
+                self.v2_scroll_canvas.configure(bg=palette.app_bg)
+            except tk.TclError:
+                pass
         for widget in list(self.theme_listboxes):
             try:
                 widget.configure(
@@ -1143,7 +1195,10 @@ class App(tk.Tk):
         except Exception as exc:
             self.v2_status_text.set(f"Не удалось загрузить plan details: {exc}")
             return
-        self._v2_write_text(self.v2_summary, self._format_plan_only_summary(plan))
+        self.v2_active_preview_plan_id = plan_id
+        self._write_text(self.v2_summary, self._format_plan_only_summary(plan))
+        self._write_text(self.v2_summary_json, self._format_plan_json(plan["payload"]))
+        self._refresh_hyperframes_preview_target()
 
     def _v2_selected_job_id(self) -> str | None:
         selected = self.v2_queue.selection()
@@ -1228,6 +1283,81 @@ class App(tk.Tk):
         if self.v2_current_details:
             self._open_path(Path(self.v2_current_details["ffmpeg_command_path"]))
 
+    def _on_v2_scroll_content_configure(self, _event: object | None = None) -> None:
+        self.v2_scroll_canvas.configure(scrollregion=self.v2_scroll_canvas.bbox("all"))
+
+    def _on_v2_scroll_canvas_configure(self, event: tk.Event) -> None:
+        self.v2_scroll_canvas.itemconfigure(self.v2_scroll_window_id, width=event.width)
+
+    def _v2_bind_mousewheel(self, _event: object | None = None) -> None:
+        self.bind_all("<MouseWheel>", self._on_v2_mousewheel, add="+")
+        self.bind_all("<Button-4>", self._on_v2_mousewheel, add="+")
+        self.bind_all("<Button-5>", self._on_v2_mousewheel, add="+")
+
+    def _v2_unbind_mousewheel(self, _event: object | None = None) -> None:
+        self.unbind_all("<MouseWheel>")
+        self.unbind_all("<Button-4>")
+        self.unbind_all("<Button-5>")
+
+    def _on_v2_mousewheel(self, event: tk.Event) -> None:
+        if getattr(event, "num", None) == 4:
+            delta = -1
+        elif getattr(event, "num", None) == 5:
+            delta = 1
+        else:
+            raw_delta = int(getattr(event, "delta", 0))
+            delta = -1 * max(1, abs(raw_delta) // 120) if raw_delta > 0 else max(1, abs(raw_delta) // 120)
+        self.v2_scroll_canvas.yview_scroll(delta, "units")
+
+    def _toggle_v2_diagnostics(self) -> None:
+        self._set_v2_diagnostics_visible(not self.v2_diagnostics_visible)
+
+    def _set_v2_diagnostics_visible(self, visible: bool) -> None:
+        self.v2_diagnostics_visible = visible
+        if visible:
+            self.v2_summary_json_frame.grid()
+            self.v2_summary_toggle_button.configure(text="Скрыть JSON")
+        else:
+            self.v2_summary_json_frame.grid_remove()
+            self.v2_summary_toggle_button.configure(text="Показать JSON")
+
+    def _widget_y_in_v2_content(self, widget: tk.Misc) -> int:
+        y = 0
+        current: tk.Misc | None = widget
+        while current is not None and current is not self.v2_scroll_content:
+            y += int(current.winfo_y())
+            current = current.master
+        return y
+
+    def _v2_scroll_to_widget(self, widget: tk.Misc) -> None:
+        self.update_idletasks()
+        content_height = max(1, int(self.v2_scroll_content.winfo_height()))
+        visible_height = max(1, int(self.v2_scroll_canvas.winfo_height()))
+        target_y = max(0, self._widget_y_in_v2_content(widget) - 12)
+        max_y = max(0, content_height - visible_height)
+        target_y = min(target_y, max_y)
+        self.v2_scroll_canvas.yview_moveto(0 if max_y == 0 else target_y / max_y)
+
+    def _v2_select_job_and_focus(self, render_job_id: str | None) -> None:
+        if not render_job_id:
+            return
+        if not self.v2_queue.exists(render_job_id):
+            return
+        self.v2_queue.selection_set(render_job_id)
+        self.v2_queue.focus(render_job_id)
+        self.v2_queue.see(render_job_id)
+        self._v2_scroll_to_widget(self.v2_queue)
+
+    def _v2_select_plan_for_preview(self, plan_id: str | None) -> None:
+        if not plan_id:
+            return
+        if not self.v2_plans.exists(plan_id):
+            return
+        self.v2_plans.selection_set(plan_id)
+        self.v2_plans.focus(plan_id)
+        self.v2_plans.see(plan_id)
+        self.v2_active_preview_plan_id = plan_id
+
     def _hyperframes_choose_project(self) -> None:
         value = filedialog.askdirectory(title="Выберите trusted HyperFrames project folder")
         if value:
@@ -1277,27 +1407,87 @@ class App(tk.Tk):
             return
         self._open_path(Path(output_path).parent)
 
+    def _workspace_for_preview(self) -> Path | None:
+        if self.v2_controller.workspace is not None:
+            return self.v2_controller.workspace
+        candidate = Path(self.v2_workspace_path.get()).expanduser()
+        return candidate if candidate.exists() else None
+
+    def _resolve_active_preview_plan(self, workspace_root: Path) -> tuple[str | None, dict | None]:
+        snapshot = self.v2_current_snapshot
+        plan_id = resolve_active_preview_plan_id(snapshot, self.v2_active_preview_plan_id)
+        if not plan_id:
+            return None, None
+        plan = show_plan(workspace_root, plan_id)
+        return plan_id, plan
+
+    def _refresh_hyperframes_preview_target(self) -> None:
+        workspace_root = self._workspace_for_preview()
+        if workspace_root is None or self.v2_current_snapshot is None:
+            self.v2_active_preview_project_path = None
+            return
+        try:
+            plan_id, plan = self._resolve_active_preview_plan(workspace_root)
+        except Exception as exc:
+            self.v2_active_preview_project_path = None
+            self.hyperframes_status_text.set(f"HyperFrames preview target unavailable: {exc}")
+            return
+        if not plan_id or not plan or not previewable_plan(plan):
+            self.v2_active_preview_project_path = None
+            self.hyperframes_status_text.set("Open Preview ждёт активный импортированный photo plan 2.x.")
+            return
+        self.v2_active_preview_plan_id = plan_id
+        preview_dir = preview_project_dir(workspace_root, plan)
+        self.v2_active_preview_project_path = preview_dir
+        self.hyperframes_project_path.set(str(preview_dir))
+        self.hyperframes_status_text.set(
+            f"Open Preview target: {plan_id} | v{plan['metadata']['plan_version']} | {plan['metadata']['plan_hash'][:12]}"
+        )
+
     def _hyperframes_start(self, action: str) -> None:
         self.hyperframes_cancel_event = threading.Event()
         project_dir = Path(self.hyperframes_project_path.get()).expanduser()
-        workspace_root = self.v2_controller.workspace
-        if workspace_root is None:
-            candidate = Path(self.v2_workspace_path.get()).expanduser()
-            workspace_root = candidate if candidate.exists() else None
+        workspace_root = self._workspace_for_preview()
+        preview_plan_id: str | None = None
+        if action == "preview" and workspace_root is not None and self.v2_current_snapshot is not None:
+            try:
+                preview_plan_id, plan = self._resolve_active_preview_plan(workspace_root)
+            except Exception as exc:
+                self.hyperframes_status_text.set(f"HyperFrames preview target unavailable: {exc}")
+                return
+            if not preview_plan_id or not plan or not previewable_plan(plan):
+                self.hyperframes_status_text.set("Open Preview доступен только для активного imported photo plan 2.x.")
+                return
+            project_dir = preview_project_dir(workspace_root, plan)
+            self.hyperframes_project_path.set(str(project_dir))
         labels = {
             "doctor": "HyperFrames doctor...",
             "preview": "Запуск локального HyperFrames preview...",
             "render": "HyperFrames render MP4...",
         }
         self._hyperframes_set_busy(True, labels.get(action, "HyperFrames..."))
-        threading.Thread(target=self._hyperframes_worker, args=(action, project_dir, workspace_root), daemon=True).start()
+        threading.Thread(
+            target=self._hyperframes_worker,
+            args=(action, project_dir, workspace_root, preview_plan_id),
+            daemon=True,
+        ).start()
 
-    def _hyperframes_worker(self, action: str, project_dir: Path, workspace_root: Path | None) -> None:
+    def _hyperframes_worker(
+        self,
+        action: str,
+        project_dir: Path,
+        workspace_root: Path | None,
+        preview_plan_id: str | None,
+    ) -> None:
         try:
             adapter = self._hyperframes_adapter(workspace_root=workspace_root)
             if action == "doctor":
                 result = adapter.doctor()
             elif action == "preview":
+                if workspace_root is not None and preview_plan_id is not None:
+                    plan = show_plan(workspace_root, preview_plan_id)
+                    preview_info = build_preview_project(workspace_root, plan)
+                    project_dir = preview_info.project_dir
                 result = adapter.open_preview(project_dir)
             elif action == "render":
                 result = adapter.render(project_dir)
@@ -1416,10 +1606,11 @@ class App(tk.Tk):
                 f"Plan Hash: {meta['plan_hash']}",
                 f"Assets: {len(payload.get('assets', []))}",
                 f"Operations: {len(payload.get('operations', []))}",
-                "",
-                json.dumps(payload, ensure_ascii=False, indent=2),
             ]
         )
+
+    def _format_plan_json(self, payload: dict) -> str:
+        return json.dumps(payload, ensure_ascii=False, indent=2)
 
     def _update_v2_snapshot(self, snapshot: dict) -> None:
         self.v2_current_snapshot = snapshot
@@ -1444,10 +1635,20 @@ class App(tk.Tk):
                 values=(plan["plan_version"], plan["parent_plan_id"] or "-", plan["plan_hash"]),
             )
 
+        latest_job = snapshot.get("latest_job") or {}
+        latest_plan = snapshot.get("latest_plan") or {}
+        self._v2_select_job_and_focus(str(latest_job.get("render_job_id") or ""))
+        selected_plan_id = resolve_active_preview_plan_id(snapshot, self.v2_active_preview_plan_id)
+        self._v2_select_plan_for_preview(selected_plan_id)
         latest_details = snapshot.get("latest_details")
         if latest_details:
             self.v2_current_details = latest_details
             self._v2_update_results(latest_details)
+        if latest_plan and self.v2_controller.workspace:
+            plan = show_plan(self.v2_controller.workspace, str(latest_plan["edit_plan_id"]))
+            self._write_text(self.v2_summary, self._format_plan_only_summary(plan))
+            self._write_text(self.v2_summary_json, self._format_plan_json(plan["payload"]))
+        self._refresh_hyperframes_preview_target()
 
     def _v2_update_results(self, details: dict) -> None:
         self.v2_current_details = details
@@ -1463,6 +1664,7 @@ class App(tk.Tk):
                 f"Output Dir: {details['output_directory']}"
             )
         )
+        self._v2_scroll_to_widget(self.v2_result_meta)
 
         outputs = report.get("outputs") or []
         first_output = outputs[0] if outputs else {}
@@ -1481,8 +1683,9 @@ class App(tk.Tk):
         ]
         self._write_text(self.v2_qc, "\n".join(qc_lines))
 
-        first_frame_path = Path(details["first_frame_path"])
-        if first_frame_path.exists():
+        first_frame_value = details.get("first_frame_path")
+        first_frame_path = Path(first_frame_value) if first_frame_value else None
+        if first_frame_path is not None and first_frame_path.exists():
             try:
                 image = Image.open(first_frame_path)
                 image.thumbnail((340, 340))
@@ -1907,15 +2110,11 @@ class App(tk.Tk):
                 elif kind in {"workspace_ready", "workspace_refreshed"}:
                     self._v2_set_busy(False, "Workspace готов.")
                     self._update_v2_snapshot(payload)
-                    latest_plan = payload.get("latest_plan")
-                    if latest_plan and self.v2_controller.workspace:
-                        self._write_text(
-                            self.v2_summary,
-                            self._format_plan_only_summary(show_plan(self.v2_controller.workspace, latest_plan["edit_plan_id"])),
-                        )
                 elif kind == "package_imported":
                     self._v2_set_busy(False, "Пакет импортирован и preview job поставлен в очередь.")
                     self._write_text(self.v2_summary, self._format_import_summary(payload))
+                    self._write_text(self.v2_summary_json, self._format_plan_json(payload.get("plan_payload") or {}))
+                    self._set_v2_diagnostics_visible(False)
                     self.v2_current_details = payload.get("job_details")
                     if self.v2_current_details:
                         self._v2_update_results(self.v2_current_details)
@@ -1923,6 +2122,8 @@ class App(tk.Tk):
                 elif kind == "patch_applied":
                     self._v2_set_busy(False, "Patch применён, создан новый immutable plan и pending render job.")
                     self._write_text(self.v2_summary, self._format_import_summary(payload))
+                    self._write_text(self.v2_summary_json, self._format_plan_json(payload.get("plan_payload") or {}))
+                    self._set_v2_diagnostics_visible(False)
                     self.v2_current_details = payload.get("job_details")
                     if self.v2_current_details:
                         self._v2_update_results(self.v2_current_details)

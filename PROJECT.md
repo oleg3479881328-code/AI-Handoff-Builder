@@ -27,9 +27,9 @@ Current success for this stage means:
 
 - Mode: active execution
 - Phase: release-candidate baseline preserved; `AI_EDIT_PACKAGE` / `edit_plan` schema `2.1` handoff-derived workflow implemented and validated locally, including packaged `.exe` acceptance
-- Active branch: `feat/issue-14-auto-project-root`
-- Draft PR: pending publication from `feat/issue-14-auto-project-root` into `codex/release-candidate-light-dark-ui`
-- Health: current FFmpeg, Voice Studio, metadata, Light/Dark release-candidate baseline, packaged schema resources, HyperFrames follow-up, and schema `2.1` handoff-derived workflow remain intact; the new Issue `#14` owner-flow now binds a project to the original source ZIP parent folder, keeps compact local project subfolders there, remembers package identity locally across restarts, and removes mandatory manual workspace creation from the normal path; no private media or generated outputs are tracked
+- Active branch: `feat/issue-16-preview-scroll-fix`
+- Draft PR: pending publication from `feat/issue-16-preview-scroll-fix` into `feat/issue-14-auto-project-root`
+- Health: current FFmpeg, Voice Studio, metadata, Light/Dark release-candidate baseline, packaged schema resources, HyperFrames follow-up, schema `2.1` handoff-derived workflow, and Issue `#14` owner-flow remain intact; the new Issue `#16` fixes keep `Local Edit Runner (v2)` vertically scrollable, collapse diagnostic JSON out of the main operator path, and bind `Open Preview` to the current active imported plan instead of stale global prototype state; no private media or generated outputs are tracked
 
 ## Done So Far
 
@@ -63,11 +63,11 @@ Current success for this stage means:
 
 ## Current Focus
 
-Publish the completed Issue `#14` owner-flow implementation on a dedicated draft PR with exact local and packaged acceptance evidence.
+Publish the completed Issue `#16` scroll + current-preview-target implementation on a dedicated draft PR with exact local and packaged acceptance evidence.
 
 ## Next Practical Step
 
-Push `feat/issue-14-auto-project-root`, open one draft PR into `codex/release-candidate-light-dark-ui`, and post the execution report to Issue `#14`. No merge to `main` or `codex/release-candidate-light-dark-ui` is authorized.
+Push `feat/issue-16-preview-scroll-fix`, open one draft PR into `feat/issue-14-auto-project-root`, and post the execution report to Issue `#16`. No merge to `main`, `feat/issue-14-auto-project-root`, or `codex/release-candidate-light-dark-ui` is authorized.
 
 ## Key Decisions And Constraints
 
