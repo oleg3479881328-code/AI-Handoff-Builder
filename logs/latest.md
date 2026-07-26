@@ -420,3 +420,62 @@ Step: Issue #10 handoff-derived package bridge and packaged `.exe` acceptance
     - asset resolution:
       - `tmp_issue10_acceptance_tuned/workspace/renders/8bc66f8c13d8c14ae583/asset_resolution.json`
       - `resolved_asset_count=8`
+
+## Update: Issue #14 auto project-root workflow
+
+- Created and switched to the dedicated branch:
+  - `feat/issue-14-auto-project-root`
+- Reworked the normal owner flow so a single selected source ZIP now defines:
+  - `project_root = parent(selected_source_zip)`
+  - `project_id = basename(project_root)`
+- Moved the project-local handoff/runtime surface into compact subfolders under that project root:
+  - `handoffs/`
+  - `incoming_ai_packages/`
+  - `ai_packages/`
+  - `analysis/`
+  - `renders/`
+  - `logs/`
+  - existing `cache/`, `patches/`, `voice/`, and related runtime folders remain intact
+- Changed Prepare Handoff owner flow behavior:
+  - initializes/reopens the project-root workspace automatically
+  - writes `ANALYSIS_HANDOFF.zip` into `project_root/handoffs/`
+  - writes the active local asset registry into `project_root/analysis/local_asset_registry.json`
+  - records local handoff identity into `project_root/analysis/handoff_index.json`
+  - records durable app-level identity mapping into:
+    - `%LOCALAPPDATA%\\AI Handoff Builder\\project_registry.json`
+  - avoids silent overwrite of an existing outgoing handoff ZIP by allocating a new unique filename instead
+- Changed Local Edit Runner import behavior:
+  - `AI_EDIT_PACKAGE.zip` no longer requires a manually opened workspace on the normal path
+  - import now reads package identity first:
+    - `project_id`
+    - `handoff_id`
+    - `handoff_sha256`
+  - if a saved mapping exists, import auto-opens the correct project root and continues
+  - if the saved mapping is missing, the UI now asks once for:
+    - original project folder
+    - or original source ZIP
+  - fallback is verified against the local handoff identity before the new mapping is saved
+- Kept portable-package safety/compatibility intact:
+  - schema `2.0` unchanged
+  - Issue `#10` schema `2.1` workflow unchanged
+  - no original-file local paths added into portable AI-facing ZIP payloads
+  - no original media modified, moved, or deleted
+- Added regression coverage:
+  - `tests/test_pipeline.py`
+    - `test_owner_flow_single_source_zip_uses_project_root_workspace`
+  - `tests/test_v2_gui_controller.py`
+    - `test_gui_controller_import_resolves_saved_project_mapping_without_manual_open`
+    - `test_gui_controller_import_can_restore_link_from_project_folder_fallback`
+- Validation on Sunday, July 26, 2026:
+  - targeted new tests:
+    - `python -m pytest -q tests/test_pipeline.py::test_owner_flow_single_source_zip_uses_project_root_workspace tests/test_v2_gui_controller.py::test_gui_controller_import_resolves_saved_project_mapping_without_manual_open tests/test_v2_gui_controller.py::test_gui_controller_import_can_restore_link_from_project_folder_fallback`
+    - result: `3 passed in 4.39s`
+  - affected-surface regression:
+    - `python -m pytest -q tests/test_pipeline.py tests/test_v2_ai_edit_package_2.py tests/test_v2_gui_controller.py`
+    - result: `38 passed in 16.69s`
+  - full suite:
+    - `python -m pytest -q`
+    - result: `119 passed in 39.32s`
+  - compile validation:
+    - `python -m py_compile app.py handoff_builder\\pipeline.py handoff_builder\\v2\\gui_controller.py handoff_builder\\v2\\services\\import_service.py handoff_builder\\v2\\project_registry.py` -> success
+    - `python -m compileall handoff_builder app.py` -> success

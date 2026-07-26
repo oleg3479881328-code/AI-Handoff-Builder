@@ -86,6 +86,13 @@ def _make_video_placeholder(path: Path) -> None:
     path.write_bytes(b"not-a-real-video-but-good-enough-for-fakes")
 
 
+def _make_source_zip(zip_path: Path, files: list[Path]) -> None:
+    zip_path.parent.mkdir(parents=True, exist_ok=True)
+    with zipfile.ZipFile(zip_path, "w", compression=zipfile.ZIP_DEFLATED) as archive:
+        for file_path in files:
+            archive.write(file_path, file_path.name)
+
+
 def test_short_video_single_scene():
     tools = FFmpegTools.__new__(FFmpegTools)
     tools.detect_scene_cuts = lambda source, threshold, duration: []  # type: ignore[attr-defined]
@@ -447,6 +454,41 @@ def test_portable_package_excludes_absolute_source_paths_and_keeps_local_registr
         names = set(archive.namelist())
         assert "local_asset_registry.json" not in names
         assert "metadata/metadata_warnings.json" in names
+
+
+def test_owner_flow_single_source_zip_uses_project_root_workspace(tmp_path: Path, monkeypatch):
+    monkeypatch.setenv("LOCALAPPDATA", str(tmp_path / "appdata"))
+    source_dir = tmp_path / "source"
+    photo = source_dir / "IMG-20240716-WA0001.jpg"
+    _make_photo(photo)
+    project_root = tmp_path / "WEDDING_PROJECT"
+    source_zip = project_root / "WEDDING_PROJECT_source.zip"
+    _make_source_zip(source_zip, [photo])
+
+    builder = HandoffBuilder(
+        BuilderConfig(
+            project_name="WEDDING_PROJECT",
+            output_dir=tmp_path / "out",
+            workspace_root=project_root,
+            source_zip_path=source_zip,
+            include_video_proxies=False,
+        ),
+        project_root=tmp_path,
+    )
+    builder.ffmpeg = FakeFFmpegTools()
+
+    result = builder.build([source_zip])
+
+    assert result.project_root == project_root.resolve()
+    assert result.archive_path.parent == (project_root / "handoffs").resolve()
+    assert result.local_asset_registry_path == (project_root / "analysis" / "local_asset_registry.json").resolve()
+    assert (project_root / "incoming_ai_packages").exists()
+    manifest = json.loads((result.package_root / "handoff_manifest.json").read_text(encoding="utf-8"))
+    assert manifest["project_id"] == "WEDDING_PROJECT"
+    assert manifest["handoff_id"] == result.handoff_id
+    handoff_index = json.loads((project_root / "analysis" / "handoff_index.json").read_text(encoding="utf-8"))
+    assert handoff_index["handoffs"][0]["handoff_id"] == result.handoff_id
+    assert handoff_index["handoffs"][0]["handoff_sha256"] == result.handoff_sha256
 
 
 def test_exiftool_uses_parent_cwd_for_unicode_zip_roots(tmp_path: Path, monkeypatch):

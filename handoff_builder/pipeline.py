@@ -14,6 +14,7 @@ from .ffmpeg_tools import FFmpegTools
 from .metadata import AssetMetadataBuilder, METADATA_SCHEMA_VERSION
 from .models import AssetRecord, BuildResult, BuilderConfig, SceneRecord
 from .utils import (
+    file_sha256,
     human_bytes,
     iter_media,
     json_dump,
@@ -23,6 +24,9 @@ from .utils import (
     slugify,
     stable_asset_id,
 )
+from .v2.common import stable_v2_id
+from .v2.project_registry import ProjectRegistryStore, record_local_handoff
+from .v2.workspace import init_project_workspace
 
 
 ProgressCallback = Callable[[float, str], None]
@@ -86,6 +90,15 @@ class HandoffBuilder:
                 self.log(f"Skipped missing input: {item}")
 
         return prepared, source_root
+
+    def _next_available_file(self, path: Path) -> Path:
+        if not path.exists():
+            return path
+        for index in range(2, 1000):
+            candidate = path.with_name(f"{path.stem}_{index}{path.suffix}")
+            if not candidate.exists():
+                return candidate
+        raise FileExistsError(f"Could not allocate a unique output path for {path.name}")
 
     def _process_photo(self, source: Path, asset: AssetRecord, package_root: Path) -> None:
         self._ensure_not_canceled()
@@ -208,7 +221,17 @@ class HandoffBuilder:
         self.cancel_event.clear()
         timestamp = dt.datetime.now().strftime("%Y%m%d_%H%M%S")
         project_slug = slugify(self.config.project_name)
-        job_root = self.config.output_dir.resolve() / f"{project_slug}_{timestamp}"
+        handoff_id = stable_v2_id(self.config.project_name, timestamp, length=20)
+        project_root: Path | None = None
+        if self.config.workspace_root is not None:
+            project_root = init_project_workspace(self.config.workspace_root, self.config.project_name)
+            job_root = project_root / "analysis" / "handoffs" / handoff_id
+            archive_dir = project_root / "handoffs"
+            local_asset_registry_path = project_root / "analysis" / "local_asset_registry.json"
+        else:
+            job_root = self.config.output_dir.resolve() / f"{project_slug}_{timestamp}"
+            archive_dir = self.config.output_dir.resolve()
+            local_asset_registry_path = job_root / "local_asset_registry.json"
         package_root = job_root / "package"
         package_root.mkdir(parents=True, exist_ok=False)
 
@@ -359,7 +382,6 @@ class HandoffBuilder:
         scenes = self._stable_scene_order(scenes)
 
         metadata_dir = package_root / "metadata"
-        local_asset_registry_path = job_root / "local_asset_registry.json"
         json_dump(local_asset_registry_path, metadata_result.local_asset_registry)
         json_dump(
             metadata_dir / "asset_metadata_raw.json",
@@ -403,6 +425,8 @@ class HandoffBuilder:
 
         validation = {
             "schema_version": "1.0",
+            "project_id": self.config.project_name,
+            "handoff_id": handoff_id,
             "project_name": self.config.project_name,
             "source_asset_count": len(assets),
             "source_video_count": len(source_videos),
@@ -464,6 +488,8 @@ class HandoffBuilder:
 
         manifest = {
             "schema_version": "1.0",
+            "project_id": self.config.project_name,
+            "handoff_id": handoff_id,
             "project_name": self.config.project_name,
             "created_at": dt.datetime.now(dt.timezone.utc).isoformat(),
             "settings": {
@@ -538,9 +564,7 @@ FILES
 """
         (package_root / "README.txt").write_text(readme, encoding="utf-8")
 
-        archive_path = self.config.output_dir.resolve() / f"{project_slug}_ANALYSIS_HANDOFF.zip"
-        if archive_path.exists():
-            archive_path.unlink()
+        archive_path = self._next_available_file(archive_dir / f"{project_slug}_ANALYSIS_HANDOFF.zip")
         self.progress(0.98, "Creating final ZIP...")
         with zipfile.ZipFile(
             archive_path,
@@ -554,6 +578,24 @@ FILES
                     archive.write(file_path, file_path.relative_to(package_root).as_posix())
 
         self.progress(1.0, f"Done: {archive_path.name}")
+        archive_sha256 = file_sha256(archive_path)
+        if project_root is not None:
+            record_local_handoff(
+                project_root=project_root,
+                project_id=self.config.project_name,
+                handoff_id=handoff_id,
+                handoff_sha256=archive_sha256,
+                source_zip_path=self.config.source_zip_path,
+                archive_path=archive_path,
+            )
+            ProjectRegistryStore().register_project(
+                project_root=project_root,
+                project_id=self.config.project_name,
+                handoff_id=handoff_id,
+                handoff_sha256=archive_sha256,
+                source_zip_path=self.config.source_zip_path,
+                archive_path=archive_path,
+            )
         self.log(
             f"Created {archive_path} ({human_bytes(archive_path.stat().st_size)}), "
             f"coverage_ok={validation['coverage_ok']}"
@@ -567,6 +609,9 @@ FILES
             failed_sources=[asset.source_path for asset in failed if asset.source_path],
             metadata_warnings_path=metadata_dir / "metadata_warnings.json",
             local_asset_registry_path=local_asset_registry_path,
+            project_root=project_root,
+            handoff_id=handoff_id,
+            handoff_sha256=archive_sha256,
             canceled=False,
         )
 

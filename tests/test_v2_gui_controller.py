@@ -10,6 +10,8 @@ import pytest
 
 from handoff_builder.v2.gui_controller import V2RunnerController
 from handoff_builder.v2.packages.guards import compute_sha256
+from handoff_builder.v2.project_registry import ProjectRegistryStore, record_local_handoff
+from handoff_builder.v2.workspace import init_project_workspace
 
 
 def _ffmpeg_available() -> bool:
@@ -171,3 +173,54 @@ def test_gui_controller_state_transitions_without_display(tmp_path: Path):
     assert controller.state == "patch_applied"
     patch_summary = event[1]
     assert patch_summary["plan_version"] == 2
+
+
+def test_gui_controller_import_resolves_saved_project_mapping_without_manual_open(tmp_path: Path, monkeypatch):
+    monkeypatch.setenv("LOCALAPPDATA", str(tmp_path / "appdata"))
+    events: queue.Queue[tuple[str, object]] = queue.Queue()
+    controller = V2RunnerController(events)
+    workspace = init_project_workspace(tmp_path / "WEDDING_PROJECT", "proj-1")
+    package_zip = tmp_path / "AI_EDIT_PACKAGE.zip"
+    _write_package(package_zip)
+    record_local_handoff(
+        project_root=workspace,
+        project_id="proj-1",
+        handoff_id="handoff-1",
+        handoff_sha256="a" * 64,
+        archive_path=workspace / "handoffs" / "proj-1_ANALYSIS_HANDOFF.zip",
+    )
+    ProjectRegistryStore().register_project(
+        project_root=workspace,
+        project_id="proj-1",
+        handoff_id="handoff-1",
+        handoff_sha256="a" * 64,
+    )
+
+    controller.start_import_package(package_zip)
+    event, _seen = _wait_for_event(events, "package_imported")
+
+    assert controller.workspace == workspace.resolve()
+    assert controller.project_id == "proj-1"
+    assert event[1]["project_id"] == "proj-1"
+
+
+def test_gui_controller_import_can_restore_link_from_project_folder_fallback(tmp_path: Path, monkeypatch):
+    monkeypatch.setenv("LOCALAPPDATA", str(tmp_path / "appdata"))
+    events: queue.Queue[tuple[str, object]] = queue.Queue()
+    controller = V2RunnerController(events)
+    workspace = init_project_workspace(tmp_path / "WEDDING_PROJECT", "proj-1")
+    package_zip = tmp_path / "AI_EDIT_PACKAGE.zip"
+    _write_package(package_zip)
+    record_local_handoff(
+        project_root=workspace,
+        project_id="proj-1",
+        handoff_id="handoff-1",
+        handoff_sha256="a" * 64,
+        archive_path=workspace / "handoffs" / "proj-1_ANALYSIS_HANDOFF.zip",
+    )
+
+    controller.start_import_package(package_zip, fallback_path=workspace)
+    event, _seen = _wait_for_event(events, "package_imported")
+
+    assert controller.workspace == workspace.resolve()
+    assert event[1]["project_id"] == "proj-1"

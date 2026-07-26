@@ -6,10 +6,10 @@
 - HyperFrames contract: repository issue `#3`
 - One-file handoff workflow fix: repository issue `#10`
 - Handoff completeness defect: repository issue `#2`
-- Current branch: `feat/issue-10-handoff-derived-package`
+- Current branch: `feat/issue-14-auto-project-root`
 - Base branch: `codex/release-candidate-light-dark-ui`
 - Draft PR: pending publication from `feat/issue-10-handoff-derived-package` -> `codex/release-candidate-light-dark-ui`
-- Current phase: schema `2.1` one-file handoff bridge implemented, validated in source, rebuilt into the packaged Windows app, and proven through a real packaged import/render flow against a matching `WEDDING_PROJECT` workspace
+- Current phase: owner-root auto-project workflow from Issue `#14` implemented and regression-validated in source; the next step is packaged `.exe` acceptance and draft-PR publication
 
 ## Accepted Baseline Preserved
 
@@ -260,6 +260,56 @@ Expected private source filenames:
 - No cloud rendering for HyperFrames.
 - No tracked private media or generated output.
 - No merge to `main` or `codex/release-candidate-light-dark-ui`.
+
+## Update: Issue #14 auto project-root workflow
+
+- Dedicated issue branch:
+  - `feat/issue-14-auto-project-root`
+- Owner-flow changes implemented:
+  - selecting a single source ZIP now derives:
+    - `project_root = parent(selected_source_zip)`
+    - `project_id = basename(project_root)`
+  - the app initializes compact local subfolders directly inside that project root:
+    - `handoffs`
+    - `incoming_ai_packages`
+    - `ai_packages`
+    - `analysis`
+    - `renders`
+    - `logs`
+    - existing voice/cache/patch folders remain intact for back-compat
+  - `ANALYSIS_HANDOFF.zip` now lands in:
+    - `project_root/handoffs/`
+  - the active local asset registry now lands in:
+    - `project_root/analysis/local_asset_registry.json`
+  - a local handoff identity index now lands in:
+    - `project_root/analysis/handoff_index.json`
+  - a persistent app-level project registry now remembers:
+    - `project_id`
+    - `handoff_id`
+    - `handoff_sha256`
+    - `project_root`
+- Import workflow changes implemented:
+  - `AI_EDIT_PACKAGE.zip` import can now resolve the saved project automatically without pre-opening a workspace
+  - if the saved mapping is missing, the UI now asks once for:
+    - the original project folder
+    - or the original source ZIP
+  - the fallback path is verified against the stored local handoff identity before saving the new mapping
+- Safety/compatibility preserved:
+  - no schema `2.0` mutation
+  - Issue `#10` schema `2.1` contract preserved
+  - no local absolute paths added to portable ZIP payloads
+  - no silent overwrite of outgoing handoff ZIPs
+  - no modification of originals
+- New regression coverage:
+  - `tests/test_pipeline.py`
+    - owner-root single-source ZIP workflow
+  - `tests/test_v2_gui_controller.py`
+    - auto-resolve import from saved mapping
+    - emergency fallback import from original project folder
+- Validation after implementation:
+  - `python -m pytest -q tests/test_pipeline.py tests/test_v2_ai_edit_package_2.py tests/test_v2_gui_controller.py` -> `38 passed in 16.69s`
+  - `python -m pytest -q` -> `119 passed in 39.32s`
+  - `python -m compileall handoff_builder app.py` -> success
 
 ## Update: Issue #6 AI Edit Package 2.0 Bridge
 
