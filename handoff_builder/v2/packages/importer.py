@@ -41,7 +41,7 @@ def import_edit_package(
         )
 
     files = verify_package_checksums(package_root, list(manifest.get("package_files", [])))
-    if schema_version == "2.0":
+    if schema_version in {"2.0", "2.1"}:
         reject_media_payloads(package_root)
         files = verify_package_checksums(
             package_root,

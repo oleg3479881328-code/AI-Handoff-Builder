@@ -29,12 +29,13 @@ def _write_plan_only_package(
     assets: list[dict],
     operations: list[dict],
     *,
+    schema_version: str = "2.0",
     project_id: str = "proj-1",
     handoff_id: str = "handoff-1",
     include_media_payload: bool = False,
 ) -> None:
     plan = {
-        "schema_version": "2.0",
+        "schema_version": schema_version,
         "project_id": project_id,
         "handoff_id": handoff_id,
         "handoff_sha256": "a" * 64,
@@ -51,7 +52,7 @@ def _write_plan_only_package(
     plan_sha = file_sha256(plan_path)
     plan_path.unlink()
     manifest = {
-        "schema_version": "2.0",
+        "schema_version": schema_version,
         "project_id": project_id,
         "handoff_id": handoff_id,
         "handoff_sha256": "a" * 64,
@@ -94,6 +95,18 @@ def _asset_entry(source_path: Path, *, asset_id: str) -> tuple[dict, dict]:
     )
 
 
+def _asset_entry_handoff_only(source_path: Path, *, asset_id: str) -> tuple[dict, dict]:
+    _asset_20, registry_row = _asset_entry(source_path, asset_id=asset_id)
+    return (
+        {
+            "asset_id": asset_id,
+            "media_type": "photo",
+            "original_name": source_path.name,
+        },
+        registry_row,
+    )
+
+
 def test_import_package_2_uses_neighbor_registry_and_writes_resolution_report(tmp_path: Path):
     workspace = init_project_workspace(tmp_path / "work", "proj-1")
     photo = tmp_path / "originals" / "photo-1.jpg"
@@ -119,6 +132,34 @@ def test_import_package_2_uses_neighbor_registry_and_writes_resolution_report(tm
     payload = json.loads(resolution_report.read_text(encoding="utf-8"))
     assert payload["resolved_asset_count"] == 1
     assert payload["assets"][0]["asset_id"] == "asset-1"
+
+
+def test_import_package_21_uses_active_workspace_registry_without_sidecar(tmp_path: Path):
+    workspace = init_project_workspace(tmp_path / "work", "proj-1")
+    photo = tmp_path / "originals" / "photo-1.jpg"
+    _make_photo(photo, color="green")
+    asset, registry_row = _asset_entry_handoff_only(photo, asset_id="asset-1")
+    package_zip = tmp_path / "AI_EDIT_PACKAGE.zip"
+    _write_plan_only_package(
+        package_zip,
+        [asset],
+        [
+            {"op": "image_hold", "asset_id": "asset-1", "duration_ms": 1000},
+            {"op": "text_overlay", "asset_id": "asset-1", "text": "Фото 1", "position": "bottom_center"},
+        ],
+        schema_version="2.1",
+    )
+    _write_registry(workspace / "analysis" / "local_asset_registry.json", [registry_row])
+
+    result = import_package_into_workspace(package_zip, workspace)
+
+    resolution_report = workspace / "renders" / result.render_job_id / "asset_resolution.json"
+    assert resolution_report.exists()
+    payload = json.loads(resolution_report.read_text(encoding="utf-8"))
+    assert payload["resolved_asset_count"] == 1
+    assert payload["assets"][0]["asset_id"] == "asset-1"
+    assert payload["assets"][0]["sha256"] == registry_row["sha256"]
+    assert payload["assets"][0]["size_bytes"] == registry_row["size_bytes"]
 
 
 def test_import_package_2_rejects_missing_registry(tmp_path: Path):
@@ -178,6 +219,61 @@ def test_import_package_2_rejects_media_payloads(tmp_path: Path):
         import_package_into_workspace(package_zip, workspace)
 
 
+def test_import_package_21_rejects_missing_active_registry(tmp_path: Path):
+    workspace = init_project_workspace(tmp_path / "work", "proj-1")
+    photo = tmp_path / "originals" / "photo-1.jpg"
+    _make_photo(photo, color="red")
+    asset, _registry_row = _asset_entry_handoff_only(photo, asset_id="asset-1")
+    package_zip = tmp_path / "AI_EDIT_PACKAGE.zip"
+    _write_plan_only_package(
+        package_zip,
+        [asset],
+        [{"op": "image_hold", "asset_id": "asset-1", "duration_ms": 1000}],
+        schema_version="2.1",
+    )
+
+    with pytest.raises(UnsafePackageError, match="Active local_asset_registry.json is missing"):
+        import_package_into_workspace(package_zip, workspace)
+
+
+def test_import_package_21_rejects_checksum_mismatch_from_registry(tmp_path: Path):
+    workspace = init_project_workspace(tmp_path / "work", "proj-1")
+    photo = tmp_path / "originals" / "photo-1.jpg"
+    _make_photo(photo, color="purple")
+    asset, registry_row = _asset_entry_handoff_only(photo, asset_id="asset-1")
+    registry_row["sha256"] = "b" * 64
+    package_zip = tmp_path / "AI_EDIT_PACKAGE.zip"
+    _write_plan_only_package(
+        package_zip,
+        [asset],
+        [{"op": "image_hold", "asset_id": "asset-1", "duration_ms": 1000}],
+        schema_version="2.1",
+    )
+    _write_registry(workspace / "analysis" / "local_asset_registry.json", [registry_row])
+
+    with pytest.raises(UnsafePackageError, match="checksum mismatch"):
+        import_package_into_workspace(package_zip, workspace)
+
+
+def test_import_package_21_rejects_size_mismatch_from_registry(tmp_path: Path):
+    workspace = init_project_workspace(tmp_path / "work", "proj-1")
+    photo = tmp_path / "originals" / "photo-1.jpg"
+    _make_photo(photo, color="orange")
+    asset, registry_row = _asset_entry_handoff_only(photo, asset_id="asset-1")
+    registry_row["size_bytes"] = registry_row["size_bytes"] + 1
+    package_zip = tmp_path / "AI_EDIT_PACKAGE.zip"
+    _write_plan_only_package(
+        package_zip,
+        [asset],
+        [{"op": "image_hold", "asset_id": "asset-1", "duration_ms": 1000}],
+        schema_version="2.1",
+    )
+    _write_registry(workspace / "analysis" / "local_asset_registry.json", [registry_row])
+
+    with pytest.raises(UnsafePackageError, match="size mismatch"):
+        import_package_into_workspace(package_zip, workspace)
+
+
 @pytest.mark.skipif(not _ffmpeg_available(), reason="FFmpeg not available")
 def test_render_job_2_photo_slideshow(tmp_path: Path):
     workspace = init_project_workspace(tmp_path / "work", "proj-1")
@@ -205,6 +301,41 @@ def test_render_job_2_photo_slideshow(tmp_path: Path):
 
     report = json.loads((Path(rendered["output_directory"]) / "render_report.json").read_text(encoding="utf-8"))
     assert rendered["status"] == "completed"
+    assert report["outputs"][0]["width"] == 1080
+    assert report["outputs"][0]["height"] == 1920
+    assert report["outputs"][0]["audio_present"] == 0
+
+
+@pytest.mark.skipif(not _ffmpeg_available(), reason="FFmpeg not available")
+def test_render_job_21_photo_slideshow(tmp_path: Path):
+    workspace = init_project_workspace(tmp_path / "work", "proj-1")
+    photo1 = tmp_path / "originals" / "photo-1.jpg"
+    photo2 = tmp_path / "originals" / "photo-2.jpg"
+    _make_photo(photo1, color="red")
+    _make_photo(photo2, color="blue")
+    asset1, registry1 = _asset_entry_handoff_only(photo1, asset_id="asset-1")
+    asset2, registry2 = _asset_entry_handoff_only(photo2, asset_id="asset-2")
+    package_zip = tmp_path / "AI_EDIT_PACKAGE.zip"
+    _write_plan_only_package(
+        package_zip,
+        [asset1, asset2],
+        [
+            {"op": "image_hold", "asset_id": "asset-1", "duration_ms": 1000},
+            {"op": "text_overlay", "asset_id": "asset-1", "text": "Фото 1", "position": "bottom_center"},
+            {"op": "image_hold", "asset_id": "asset-2", "duration_ms": 1000},
+            {"op": "text_overlay", "asset_id": "asset-2", "text": "Фото 2", "position": "bottom_center"},
+        ],
+        schema_version="2.1",
+    )
+    _write_registry(workspace / "analysis" / "local_asset_registry.json", [registry1, registry2])
+
+    result = import_package_into_workspace(package_zip, workspace)
+    rendered = render_job(workspace, result.render_job_id)
+
+    report = json.loads((Path(rendered["output_directory"]) / "render_report.json").read_text(encoding="utf-8"))
+    resolution = json.loads((Path(rendered["output_directory"]) / "asset_resolution.json").read_text(encoding="utf-8"))
+    assert rendered["status"] == "completed"
+    assert resolution["resolved_asset_count"] == 2
     assert report["outputs"][0]["width"] == 1080
     assert report["outputs"][0]["height"] == 1920
     assert report["outputs"][0]["audio_present"] == 0

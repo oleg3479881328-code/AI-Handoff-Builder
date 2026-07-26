@@ -1,7 +1,7 @@
 # Latest Log
 
-Date: 2026-07-25
-Step: HyperFrames documentation alignment for draft PR #4
+Date: 2026-07-26
+Step: Issue #10 handoff-derived package bridge and packaged `.exe` acceptance
 
 ## Completed
 
@@ -257,3 +257,166 @@ Step: HyperFrames documentation alignment for draft PR #4
   - asset resolution evidence:
     - `tmp_issue6_acceptance/workspace/renders/78d6ca7e6b67f69b1818/asset_resolution.json`
     - `resolved_asset_count=10`
+
+## Update: Issue #8 packaged release-candidate acceptance
+
+- Synced to the accepted release-candidate baseline:
+  - branch: `codex/release-candidate-light-dark-ui`
+  - exact HEAD: `bd3867280c19b252489011c3c3b589c05c87c061`
+- Verified source health before packaging work:
+  - `python -m pytest -q` -> `109 passed` on the accepted baseline
+  - `python -m compileall handoff_builder app.py` -> success
+  - `git diff --check` -> clean
+- Confirmed the real packaged defect that blocks Issue #8 acceptance:
+  - current frozen app shipped `prototypes/hyperframes/`
+  - current frozen app missed `_internal/schemas/`
+  - packaged `AI_EDIT_PACKAGE 2.0` import could not rely on the repository schema loader path without this fix
+- Implemented the dedicated packaging-only fix on branch:
+  - `feat/issue-8-packaged-schema-fix`
+  - changes:
+    - `AI Handoff Builder.spec`
+    - `build_exe.bat`
+    - `tests/test_packaged_resources.py`
+- Post-fix validation:
+  - `python -m pytest -q tests/test_packaged_resources.py tests/test_v2_ai_edit_package_2.py -q` -> passed
+  - `python -m pytest -q` -> `111 passed in 30.35s`
+  - `python -m compileall handoff_builder app.py` -> success
+  - `git diff --check` -> line-ending warning only for `build_exe.bat`
+- Rebuilt the portable packaged app:
+  - command:
+    - `cmd /c build_exe.bat`
+  - artifact:
+    - `dist/AI Handoff Builder/AI Handoff Builder.exe`
+  - last write UTC:
+    - `2026-07-25T19:47:29Z`
+  - size:
+    - `6233403` bytes
+  - SHA-256:
+    - `3737F885698D1F71AA9196474676B307E02AF66666D9CC6DA9B2BCCB298E2F97`
+- Confirmed packaged resources after rebuild:
+  - `_internal/prototypes/hyperframes/`
+  - `_internal/schemas/ai_edit_package/1.0.json`
+  - `_internal/schemas/ai_edit_package/2.0.json`
+  - `_internal/schemas/edit_plan/1.0.json`
+  - `_internal/schemas/edit_plan/2.0.json`
+  - `_internal/schemas/edit_patch/1.0.json`
+  - `_internal/schemas/render_report/1.0.json`
+  - `_internal/schemas/voiceover_spec/1.0.json`
+- Packaged GUI evidence gathered:
+  - startup screenshot:
+    - `tmp_issue8_startup.png`
+  - `Local Edit Runner (v2)` packaged tab screenshot:
+    - `tmp_issue8_v2tab.png`
+  - packaged workspace-open proof:
+    - `tmp_issue8_open_workspace_probe/after-open.png`
+  - UI status in the packaged app:
+    - `Workspace готов.`
+- Remaining blocker:
+  - the standard Windows `Выберите AI_EDIT_PACKAGE.zip` picker still needs one final working unattended confirmation path
+  - automation now reliably:
+    - opens the packaged dialog
+    - populates the `File name` field with the real `AI_EDIT_PACKAGE.zip` path
+  - but the automated confirm step has not yet produced imported workspace markers
+  - therefore the packaging/resource defect is fixed and proven, while the last packaged import/render acceptance step remains open
+
+## Update: Issue #10 handoff-derived package bridge
+
+- Created and switched to the dedicated branch:
+  - `feat/issue-10-handoff-derived-package`
+- Preserved `2.0` unchanged and added:
+  - `schemas/ai_edit_package/2.1.json`
+  - `schemas/edit_plan/2.1.json`
+- Updated the runtime so `2.1` photo packages:
+  - accept only handoff-available asset fields from ChatGPT
+  - resolve originals strictly from the active workspace registry
+  - hard-fail on missing, ambiguous, unreadable, size-mismatched, or checksum-mismatched originals
+  - never fall back to a sidecar registry for `2.1`
+- Updated:
+  - `handoff_builder/v2/assets/local_registry.py`
+  - `handoff_builder/v2/packages/importer.py`
+  - `handoff_builder/v2/plans/schema.py`
+  - `handoff_builder/v2/plans/semantic.py`
+  - `handoff_builder/v2/render/compiler.py`
+  - `handoff_builder/v2/services/import_service.py`
+  - `handoff_builder/v2/services/render_service.py`
+  - `tests/test_v2_ai_edit_package_2.py`
+  - `tests/test_v2_architecture.py`
+- Validation after the code changes:
+  - `python -m pytest -q tests/test_v2_architecture.py tests/test_v2_ai_edit_package_2.py` -> `21 passed in 6.79s`
+  - `python -m pytest -q` -> `116 passed in 40.82s`
+  - `python -m compileall handoff_builder app.py` -> success
+- Confirmed the uploaded handoff input:
+  - `C:\Users\oleg3\Desktop\WEDDING_PROJECT_ANALYSIS_HANDOFF.zip`
+- Generated a valid handoff-derived plan-only package from handoff contents only:
+  - `tmp_issue10_acceptance_tuned/AI_EDIT_PACKAGE.zip`
+  - entries:
+    - `ai_edit_package.json`
+    - `plans/plan-wedding-8.json`
+  - package checks:
+    - no media payloads
+    - no local `source_path`
+    - no local registry file
+    - no registry-reference words
+- Source acceptance on the matching `WEDDING_PROJECT` workspace:
+  - workspace:
+    - `tmp_issue10_acceptance_tuned/workspace`
+  - completed render:
+    - `tmp_issue10_acceptance_tuned/workspace/renders/4b29d9e5e82e7d559313/reel.mp4`
+    - SHA-256: `60c1e8c84dd905a04f74de66a6eb1f3320e784ce57a6ef8554d579fa90e99592`
+    - `1080x1920`
+    - `30.0 fps`
+    - `7.766667 s`
+    - `audio_present=0`
+  - asset resolution:
+    - `tmp_issue10_acceptance_tuned/workspace/renders/4b29d9e5e82e7d559313/asset_resolution.json`
+    - `resolved_asset_count=8`
+- Rebuilt the packaged app after the `2.1` changes:
+  - command:
+    - `cmd /c build_exe.bat`
+  - artifact:
+    - `dist/AI Handoff Builder/AI Handoff Builder.exe`
+  - last write UTC:
+    - `2026-07-26T00:17:02Z`
+  - size:
+    - `6233896` bytes
+  - SHA-256:
+    - `DFC1E0647A33C3740B4F1F59D3BB7C0CAE41E766C9AAFB838C7C09C39CCBCCBB`
+  - packaged schema resources confirmed present:
+    - `_internal/schemas/ai_edit_package/2.1.json`
+    - `_internal/schemas/edit_plan/2.1.json`
+- Packaged GUI acceptance sequence:
+  - packaged UI first proved a correct safety failure on the wrong workspace:
+    - screenshot:
+      - `tmp_issue10_packaged_evidence/11-after-import-third-pass.png`
+    - error:
+      - `Package project mismatch: WEDDING_PROJECT != proj-photos-issue6`
+  - created a second handoff-derived acceptance ZIP with the same 8-photo contract and a distinct `plan_id`:
+    - `tmp_issue10_acceptance_tuned/AI_EDIT_PACKAGE_packaged.zip`
+    - `plan_id=plan-wedding-8-packaged`
+  - opened the matching existing `WEDDING_PROJECT` workspace in the packaged app:
+    - screenshot:
+      - `tmp_issue10_packaged_evidence/13-matching-workspace-opened.png`
+  - imported the new `2.1` package in the packaged app:
+    - screenshot:
+      - `tmp_issue10_packaged_evidence/14-after-successful-import.png`
+    - workspace rows now include:
+      - `package_id=59f161063888f781`
+      - `edit_plan_id=plan-wedding-8-packaged`
+      - `render_job_id=8bc66f8c13d8c14ae583`
+  - completed the packaged render:
+    - screenshot:
+      - `tmp_issue10_packaged_evidence/16-final-packaged-ui.png`
+    - render row:
+      - `status=completed`
+      - `started_at=2026-07-26T00:29:07Z`
+      - `finished_at=2026-07-26T00:29:13Z`
+    - output:
+      - `tmp_issue10_acceptance_tuned/workspace/renders/8bc66f8c13d8c14ae583/reel.mp4`
+      - SHA-256: `60c1e8c84dd905a04f74de66a6eb1f3320e784ce57a6ef8554d579fa90e99592`
+      - `1080x1920`
+      - `30.0 fps`
+      - `7.766667 s`
+      - `audio_present=0`
+    - asset resolution:
+      - `tmp_issue10_acceptance_tuned/workspace/renders/8bc66f8c13d8c14ae583/asset_resolution.json`
+      - `resolved_asset_count=8`

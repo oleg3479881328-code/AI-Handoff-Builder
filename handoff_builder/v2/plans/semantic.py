@@ -74,6 +74,9 @@ class ValidatedLocalPhotoPlan:
     resolution_report: dict
 
 
+LOCAL_PHOTO_SCHEMA_VERSIONS = {"2.0", "2.1"}
+
+
 def load_and_validate_preview_plan(
     plan_path: Path,
     package_root: Path,
@@ -156,15 +159,20 @@ def load_and_validate_local_photo_plan(
     payload = json.loads(plan_path.read_text(encoding="utf-8"))
     validate_payload("edit_plan", str(payload["schema_version"]), payload)
     _reject_forbidden_keys(payload)
-    if str(payload.get("schema_version")) != "2.0":
-        raise UnsafePackageError("Local photo plan validation expects edit_plan schema 2.0.")
+    schema_version = str(payload.get("schema_version"))
+    if schema_version not in LOCAL_PHOTO_SCHEMA_VERSIONS:
+        raise UnsafePackageError("Local photo plan validation expects edit_plan schema 2.0 or 2.1.")
     if payload.get("mode") != "preview":
-        raise UnsafePackageError("Only preview mode is supported in AI edit package 2.0.")
+        raise UnsafePackageError("Only preview mode is supported in AI edit package 2.x.")
 
     registry_payload = json.loads(
         (workspace.resolve() / "analysis" / "local_asset_registry.json").read_text(encoding="utf-8")
     )
-    resolution_report = resolve_plan_assets_against_registry(list(payload["assets"]), registry_payload)
+    resolution_report = resolve_plan_assets_against_registry(
+        list(payload["assets"]),
+        registry_payload,
+        require_declared_integrity=schema_version == "2.0",
+    )
     assets: dict[str, ResolvedPhotoAsset] = {}
     for item in resolution_report["assets"]:
         source_path = Path(str(item["source_path"]))
