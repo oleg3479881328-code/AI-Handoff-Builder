@@ -1,7 +1,7 @@
 # Latest Log
 
 Date: 2026-07-26
-Step: Issue #10 handoff-derived package bridge and packaged `.exe` acceptance
+Step: Issue #16 Local Edit Runner scroll + current Preview target
 
 ## Completed
 
@@ -420,6 +420,58 @@ Step: Issue #10 handoff-derived package bridge and packaged `.exe` acceptance
     - asset resolution:
       - `tmp_issue10_acceptance_tuned/workspace/renders/8bc66f8c13d8c14ae583/asset_resolution.json`
       - `resolved_asset_count=8`
+
+## Update: Issue #16 Local Edit Runner scroll + current Preview target
+
+- Created and switched to the dedicated branch:
+  - `feat/issue-16-preview-scroll-fix`
+- Reproduced the two blocking owner-reported defects from Issue `#16`:
+  - the lower `Local Edit Runner (v2)` surface could be pushed below the window by large inline JSON with no vertical scroll path
+  - `Open Preview` still used stale global HyperFrames project state instead of the current imported plan identity
+- Fixed the v2 tab layout in `app.py`:
+  - wrapped the full content area in a vertically scrollable canvas with a real scrollbar
+  - bound mouse wheel / touchpad scrolling onto the active v2 shell
+  - preserved themed sizing while keeping Jobs, Results, and HyperFrames controls reachable at smaller window heights
+  - auto-focused the latest render job/results into view after snapshot updates so `Run Next Pending` no longer leaves the operator searching below hidden content
+  - moved verbose JSON out of the main path into a collapsible diagnostics block hidden by default
+- Fixed preview identity routing:
+  - added active preview-plan tracking inside the app state
+  - latest imported plan becomes the preview target by default unless the operator explicitly selects another plan
+  - blocked silent fallback to a previous global project when the current plan is not previewable
+- Added a new trusted local preview builder:
+  - `handoff_builder/v2/hyperframes_preview.py`
+  - emits workspace-local HyperFrames preview projects keyed by current plan identity
+  - copies only resolved local assets for the active plan into the generated preview project
+  - writes trusted preview metadata files:
+    - `preview_identity.json`
+    - `preview_segments.json`
+- Added focused regression tests:
+  - `tests/test_v2_hyperframes_preview.py`
+    - `Marusia -> Samarkand -> restart -> explicit switch`
+    - no old overlay/state leakage into the rebuilt preview
+  - `tests/test_app_v2_ui.py`
+    - scroll shell presence
+    - diagnostics collapse behavior
+    - auto-focus to latest job/results
+- Validation:
+  - `python -m py_compile app.py handoff_builder\\v2\\hyperframes_preview.py` -> success
+  - `python -m pytest -q tests/test_v2_hyperframes_preview.py` -> `3 passed in 1.22s`
+  - `python -m pytest -q tests/test_v2_hyperframes_preview.py tests/test_app_v2_ui.py` -> `5 passed in 1.82s`
+  - `python -m pytest -q tests/test_v2_ai_edit_package_2.py tests/test_v2_gui_controller.py tests/test_v2_hyperframes_lab.py tests/test_v2_hyperframes_preview.py tests/test_app_v2_ui.py` -> `31 passed, 1 skipped in 10.49s`
+  - `python -m pytest -q` -> `124 passed in 42.33s`
+  - `python -m compileall handoff_builder app.py` -> success
+
+## Acceptance Status
+
+- v2 full-height scrolling path: satisfied in source
+- Jobs accessibility at smaller window heights: satisfied in source
+- visible post-run job/result focus: satisfied in source
+- current-plan Preview identity binding: satisfied in source
+- stale Marusia fallback after Samarkand import: prevented in source
+- restart-like current Preview selection behavior: satisfied in source
+- focused regression tests for both defects: satisfied
+- full Python regression suite: satisfied
+- packaged `.exe` rebuild and GitHub publication: pending in this run
 
 ## Update: Issue #14 auto project-root workflow
 

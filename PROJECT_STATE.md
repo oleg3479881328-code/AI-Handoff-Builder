@@ -6,10 +6,10 @@
 - HyperFrames contract: repository issue `#3`
 - One-file handoff workflow fix: repository issue `#10`
 - Handoff completeness defect: repository issue `#2`
-- Current branch: `feat/issue-14-auto-project-root`
-- Base branch: `codex/release-candidate-light-dark-ui`
-- Draft PR: pending publication from `feat/issue-10-handoff-derived-package` -> `codex/release-candidate-light-dark-ui`
-- Current phase: owner-root auto-project workflow from Issue `#14` implemented and regression-validated in source; the next step is packaged `.exe` acceptance and draft-PR publication
+- Current branch: `feat/issue-16-preview-scroll-fix`
+- Base branch: `feat/issue-14-auto-project-root`
+- Draft PR: pending publication from `feat/issue-16-preview-scroll-fix` -> `feat/issue-14-auto-project-root`
+- Current phase: Issue `#16` scroll + current-preview-target fixes implemented and regression-validated in source; the next step is packaged `.exe` acceptance and draft-PR publication
 
 ## Accepted Baseline Preserved
 
@@ -241,6 +241,64 @@ Expected private source filenames:
   - validation after the hardening pass:
     - `python -m pytest -q tests/test_v2_hyperframes_lab.py` -> `13 passed in 0.76s`
     - `python -m pytest -q` -> `100 passed in 32.73s`
+    - `python -m compileall handoff_builder app.py` -> success
+
+## Update: Issue #16 Local Edit Runner scroll + current Preview target
+
+- Created and switched to the dedicated branch:
+  - `feat/issue-16-preview-scroll-fix`
+- Preserved the accepted owner-flow base from Issue `#14` and kept schema compatibility intact:
+  - schema `2.0` unchanged
+  - schema `2.1` unchanged
+  - no fallback to stale preview state
+- Fixed the `Local Edit Runner (v2)` operator path in `app.py`:
+  - wrapped the full v2 content in a vertically scrollable canvas/shell
+  - enabled wheel, touchpad, and scrollbar navigation
+  - kept lower sections reachable at normal and smaller window sizes
+  - auto-focused the latest render job/results after refreshes and `Run Next Pending`
+  - moved the large plan JSON into a collapsed diagnostics block instead of the main operator path
+- Fixed the stale `Open Preview` routing defect by binding Preview to the active imported plan identity instead of the old global HyperFrames project path:
+  - explicit active preview plan tracking now lives in the app state
+  - latest imported plan is used by default unless the operator explicitly selects another plan
+  - no silent fallback to a previous project is allowed when the current plan is not previewable
+- Added a new trusted preview compiler:
+  - `handoff_builder/v2/hyperframes_preview.py`
+  - creates workspace-local HyperFrames preview projects keyed by:
+    - `project_id`
+    - `plan_version`
+    - `plan_id`
+    - `plan_hash`
+  - copies only the resolved local assets needed for the active plan
+  - emits trusted local preview files:
+    - `index.html`
+    - `meta.json`
+    - `hyperframes.json`
+    - `package.json`
+    - `preview_identity.json`
+    - `preview_segments.json`
+- Added focused regression coverage:
+  - `tests/test_v2_hyperframes_preview.py`
+    - verifies `Marusia -> Samarkand -> restart -> explicit switch` preview identity behavior
+    - verifies the rebuilt preview contains only the current plan overlays/content
+  - `tests/test_app_v2_ui.py`
+    - verifies the scroll shell exists
+    - verifies diagnostics JSON is collapsible and hidden by default
+    - verifies latest job/results are auto-focused into view
+- Validation on Sunday, July 26, 2026:
+  - focused preview tests:
+    - `python -m pytest -q tests/test_v2_hyperframes_preview.py`
+    - result: `3 passed in 1.22s`
+  - focused UI + preview tests:
+    - `python -m pytest -q tests/test_v2_hyperframes_preview.py tests/test_app_v2_ui.py`
+    - result: `5 passed in 1.82s`
+  - affected-surface regression:
+    - `python -m pytest -q tests/test_v2_ai_edit_package_2.py tests/test_v2_gui_controller.py tests/test_v2_hyperframes_lab.py tests/test_v2_hyperframes_preview.py tests/test_app_v2_ui.py`
+    - result: `31 passed, 1 skipped in 10.49s`
+  - full suite:
+    - `python -m pytest -q`
+    - result: `124 passed in 42.33s`
+  - compile validation:
+    - `python -m py_compile app.py handoff_builder\\v2\\hyperframes_preview.py` -> success
     - `python -m compileall handoff_builder app.py` -> success
 
 ## Immediate Next Actions
