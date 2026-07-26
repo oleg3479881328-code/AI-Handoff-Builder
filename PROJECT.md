@@ -27,9 +27,9 @@ Current success for this stage means:
 
 - Mode: active execution
 - Phase: release-candidate baseline preserved; `AI_EDIT_PACKAGE` / `edit_plan` schema `2.1` handoff-derived workflow implemented and validated locally, including packaged `.exe` acceptance
-- Active branch: `feat/issue-10-handoff-derived-package`
-- Draft PR: pending publication from `feat/issue-10-handoff-derived-package` into `codex/release-candidate-light-dark-ui`
-- Health: current FFmpeg, Voice Studio, metadata, Light/Dark release-candidate baseline, packaged schema resources, and HyperFrames follow-up remain intact; schema `2.0` stays unchanged; new `2.1` local-photo workflow now resolves originals from the active workspace registry with hard integrity checks; no private media or generated outputs are tracked
+- Active branch: `feat/issue-14-auto-project-root`
+- Draft PR: pending publication from `feat/issue-14-auto-project-root` into `codex/release-candidate-light-dark-ui`
+- Health: current FFmpeg, Voice Studio, metadata, Light/Dark release-candidate baseline, packaged schema resources, HyperFrames follow-up, and schema `2.1` handoff-derived workflow remain intact; the new Issue `#14` owner-flow now binds a project to the original source ZIP parent folder, keeps compact local project subfolders there, remembers package identity locally across restarts, and removes mandatory manual workspace creation from the normal path; no private media or generated outputs are tracked
 
 ## Done So Far
 
@@ -63,11 +63,11 @@ Current success for this stage means:
 
 ## Current Focus
 
-Publish the completed Issue `#10` implementation on a dedicated draft PR with exact local and packaged acceptance evidence.
+Publish the completed Issue `#14` owner-flow implementation on a dedicated draft PR with exact local and packaged acceptance evidence.
 
 ## Next Practical Step
 
-Push `feat/issue-10-handoff-derived-package`, open one draft PR into `codex/release-candidate-light-dark-ui`, and post the execution report to Issue `#10`. No merge to `main` or `codex/release-candidate-light-dark-ui` is authorized.
+Push `feat/issue-14-auto-project-root`, open one draft PR into `codex/release-candidate-light-dark-ui`, and post the execution report to Issue `#14`. No merge to `main` or `codex/release-candidate-light-dark-ui` is authorized.
 
 ## Key Decisions And Constraints
 

@@ -23,6 +23,7 @@ def init_project_workspace(workspace_dir: Path, project_id: str) -> Path:
         project_root.mkdir(parents=True, exist_ok=True)
     for relative in (
         "handoffs",
+        "incoming_ai_packages",
         "ai_packages",
         "patches",
         "renders",

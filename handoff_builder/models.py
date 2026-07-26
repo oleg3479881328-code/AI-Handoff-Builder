@@ -9,6 +9,8 @@ from typing import Any
 class BuilderConfig:
     project_name: str
     output_dir: Path
+    workspace_root: Path | None = None
+    source_zip_path: Path | None = None
     include_video_proxies: bool = True
     gps_export_mode: str = "rounded"
     worker_count: int = 2
@@ -100,4 +102,7 @@ class BuildResult:
     failed_sources: list[str]
     metadata_warnings_path: Path | None = None
     local_asset_registry_path: Path | None = None
+    project_root: Path | None = None
+    handoff_id: str | None = None
+    handoff_sha256: str | None = None
     canceled: bool = False

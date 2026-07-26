@@ -9,6 +9,12 @@ from ..common import stable_v2_id
 from ..domain.enums import QueueItemStatus
 from ..domain.records import ImportResult, RenderQueueItem
 from ..errors import UnsafePackageError
+from ..project_registry import (
+    ProjectRegistryStore,
+    read_package_identity,
+    resolve_workspace_from_hint,
+    verify_project_identity,
+)
 from ..packages.guards import compute_sha256
 from ..packages.importer import import_edit_package
 from ..plans.schema import deterministic_plan_hash, validate_payload
@@ -16,6 +22,50 @@ from ..render.report_stub import build_render_report_stub, write_render_report_s
 from ..storage import apply_migrations, connect_workspace_db
 from ..storage.repositories import SqliteRenderQueueRepository, WorkspaceRepository
 from ..workspace import load_project_config
+
+
+def resolve_workspace_for_package(
+    package_zip: Path,
+    *,
+    fallback_path: Path | None = None,
+    registry_store: ProjectRegistryStore | None = None,
+) -> Path:
+    identity = read_package_identity(package_zip)
+    store = registry_store or ProjectRegistryStore()
+    resolved = store.resolve_project_root(
+        project_id=identity["project_id"],
+        handoff_id=identity["handoff_id"],
+        handoff_sha256=identity["handoff_sha256"],
+    )
+    if resolved is not None:
+        try:
+            return verify_project_identity(
+                resolved,
+                project_id=identity["project_id"],
+                handoff_id=identity["handoff_id"],
+                handoff_sha256=identity["handoff_sha256"],
+            )
+        except Exception:
+            resolved = None
+    if fallback_path is None:
+        raise UnsafePackageError(
+            "No saved project mapping for this AI_EDIT_PACKAGE. Choose the original project folder or source ZIP once to restore the link."
+        )
+    project_root = resolve_workspace_from_hint(fallback_path)
+    verified = verify_project_identity(
+        project_root,
+        project_id=identity["project_id"],
+        handoff_id=identity["handoff_id"],
+        handoff_sha256=identity["handoff_sha256"],
+    )
+    store.register_project(
+        project_root=verified,
+        project_id=identity["project_id"],
+        handoff_id=identity["handoff_id"],
+        handoff_sha256=identity["handoff_sha256"],
+        source_zip_path=fallback_path if fallback_path.is_file() else None,
+    )
+    return verified
 
 
 def import_package_into_workspace(package_zip: Path, workspace: Path) -> ImportResult:
@@ -50,8 +100,13 @@ def import_package_into_workspace(package_zip: Path, workspace: Path) -> ImportR
 
         package_id = stable_v2_id(project_id, package_sha256, length=20)
         package_root = project_root / "ai_packages" / package_id
+        incoming_copy = project_root / "incoming_ai_packages" / f"{package_id}_{package_zip.name}"
+        if incoming_copy.exists():
+            raise UnsafePackageError(f"Incoming AI package already staged at {incoming_copy}")
+        incoming_copy.parent.mkdir(parents=True, exist_ok=True)
+        shutil.copy2(package_zip, incoming_copy)
         imported = import_edit_package(
-            package_zip,
+            incoming_copy,
             project_root / "ai_packages",
             expected_project_id=project_id,
             package_root=package_root,

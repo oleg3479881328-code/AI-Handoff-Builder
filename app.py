@@ -19,6 +19,7 @@ from handoff_builder.theme import ThemePalette, ThemeSettingsStore, get_theme_pa
 from handoff_builder.v2.coordinator_bridge import CoordinatorDraft, build_coordinator_draft, draft_to_payload, draft_to_summary
 from handoff_builder.v2.gui_controller import V2RunnerController
 from handoff_builder.v2.hyperframes_lab import HyperFramesAdapter, HyperFramesLabError
+from handoff_builder.v2.services.import_service import resolve_workspace_for_package
 from handoff_builder.v2.services import (
     list_voice_jobs,
     show_plan,
@@ -96,7 +97,7 @@ class App(tk.Tk):
         self.v2_controller = V2RunnerController(self.events)
         self.v2_workspace_path = tk.StringVar(value=str(Path.home() / "Desktop" / "AI Handoff Workspace"))
         self.v2_project_id = tk.StringVar(value="proj-1")
-        self.v2_status_text = tk.StringVar(value="Откройте или создайте v2 workspace.")
+        self.v2_status_text = tk.StringVar(value="Выберите AI_EDIT_PACKAGE.zip или откройте workspace вручную.")
         self.v2_summary_text = ""
         self.v2_qc_text = ""
         self.v2_current_details: dict | None = None
@@ -913,7 +914,7 @@ class App(tk.Tk):
             else:
                 self._show_warning("Нет материалов", "Добавьте ZIP, папку или файлы.")
             return
-        if not self.project_name.get().strip():
+        if self._owner_project_root_from_sources(selected_sources) is None and not self.project_name.get().strip():
             self._show_warning("Нет названия", "Введите название проекта.")
             return
         output = Path(self.output_dir.get()).expanduser()
@@ -933,9 +934,15 @@ class App(tk.Tk):
 
     def _run_builder(self, selected_sources: list[Path]) -> None:
         try:
+            owner_project_root = self._owner_project_root_from_sources(selected_sources)
+            project_name = owner_project_root.name if owner_project_root is not None else self.project_name.get().strip()
             config = BuilderConfig(
-                project_name=self.project_name.get().strip(),
+                project_name=project_name,
                 output_dir=Path(self.output_dir.get()).expanduser(),
+                workspace_root=owner_project_root,
+                source_zip_path=selected_sources[0].resolve()
+                if owner_project_root is not None and len(selected_sources) == 1 and selected_sources[0].suffix.lower() == ".zip"
+                else None,
                 include_video_proxies=self.include_proxies.get(),
                 gps_export_mode=self.gps_export_mode.get(),
                 worker_count=max(1, min(2, int(self.worker_count.get()))),
@@ -1047,16 +1054,24 @@ class App(tk.Tk):
         self.v2_controller.start_open_workspace(workspace, create=False)
 
     def _v2_import_package(self) -> None:
-        if not self.v2_controller.workspace:
-            self._show_warning("Нет workspace", "Сначала откройте или создайте v2 workspace.")
-            return
         value = filedialog.askopenfilename(
             title="Выберите AI_EDIT_PACKAGE.zip",
             filetypes=[("AI Edit Package", "*.zip"), ("All files", "*.*")],
         )
         if value:
+            package_zip = Path(value)
+            fallback_path: Path | None = None
+            if self.v2_controller.workspace is None:
+                try:
+                    resolved_workspace = resolve_workspace_for_package(package_zip)
+                    self.v2_workspace_path.set(str(resolved_workspace))
+                    self.v2_project_id.set(resolved_workspace.name)
+                except Exception:
+                    fallback_path = self._ask_emergency_project_hint()
+                    if fallback_path is None:
+                        return
             self._v2_set_busy(True, "Импорт AI_EDIT_PACKAGE.zip...")
-            self.v2_controller.start_import_package(Path(value))
+            self.v2_controller.start_import_package(package_zip, fallback_path=fallback_path)
 
     def _v2_import_patch(self) -> None:
         if not self.v2_controller.workspace:
@@ -1141,6 +1156,61 @@ class App(tk.Tk):
     def _v2_open_workspace_dir(self) -> None:
         if self.v2_controller.workspace:
             self._open_path(self.v2_controller.workspace)
+
+    def _owner_project_root_from_sources(self, selected_sources: list[Path]) -> Path | None:
+        if len(selected_sources) != 1:
+            return None
+        candidate = selected_sources[0].resolve()
+        if candidate.is_file() and candidate.suffix.lower() == ".zip":
+            return candidate.parent
+        return None
+
+    def _ask_emergency_project_hint(self) -> Path | None:
+        prompt = tk.Toplevel(self)
+        prompt.title("Восстановить project link")
+        prompt.geometry("540x220")
+        prompt.transient(self)
+        prompt.grab_set()
+        self._register_window(prompt)
+        self._apply_theme()
+
+        chosen: dict[str, Path | None] = {"path": None}
+        body = ttk.Frame(prompt, padding=16, style="App.TFrame")
+        body.pack(fill="both", expand=True)
+        ttk.Label(
+            body,
+            text=(
+                "Сохранённая привязка проекта не найдена. "
+                "Укажите original project folder или original source ZIP один раз, "
+                "и связь с этим AI_EDIT_PACKAGE будет восстановлена."
+            ),
+            wraplength=490,
+            justify="left",
+        ).pack(anchor="w")
+
+        actions = ttk.Frame(body, style="App.TFrame")
+        actions.pack(fill="x", pady=(18, 0))
+
+        def choose_folder() -> None:
+            value = filedialog.askdirectory(title="Выберите original project folder")
+            if value:
+                chosen["path"] = Path(value)
+            prompt.destroy()
+
+        def choose_zip() -> None:
+            value = filedialog.askopenfilename(
+                title="Выберите original source ZIP",
+                filetypes=[("ZIP files", "*.zip"), ("All files", "*.*")],
+            )
+            if value:
+                chosen["path"] = Path(value)
+            prompt.destroy()
+
+        ttk.Button(actions, text="Project Folder", command=choose_folder).pack(side="left")
+        ttk.Button(actions, text="Source ZIP", command=choose_zip).pack(side="left", padx=(8, 0))
+        ttk.Button(actions, text="Отмена", command=prompt.destroy, style="Secondary.TButton").pack(side="right")
+        self.wait_window(prompt)
+        return chosen["path"]
 
     def _v2_open_output_dir(self) -> None:
         if self.v2_current_details:
@@ -1798,6 +1868,10 @@ class App(tk.Tk):
                     assert isinstance(result, BuildResult)
                     self.last_result = result
                     self.last_output = result.archive_path
+                    if result.project_root is not None:
+                        self.v2_workspace_path.set(str(result.project_root))
+                        self.v2_project_id.set(result.project_root.name)
+                        self.v2_status_text.set("Project root подготовлен. Позже можно сразу выбрать AI_EDIT_PACKAGE.zip.")
                     self.last_failed_sources = [Path(value) for value in result.failed_sources if value]
                     self.start_button.configure(state="normal")
                     self.cancel_button.configure(state="disabled")

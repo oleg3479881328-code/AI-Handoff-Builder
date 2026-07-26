@@ -17,6 +17,7 @@ from .services import (
     show_plan,
     show_render_job,
 )
+from .services.import_service import resolve_workspace_for_package
 from .workspace import init_project_workspace, load_project_config
 
 
@@ -35,8 +36,8 @@ class V2RunnerController:
     def start_open_workspace(self, workspace: Path, *, project_id: str | None = None, create: bool = False) -> None:
         self._start_worker("workspace_opening", self._open_workspace, workspace, project_id, create)
 
-    def start_import_package(self, package_zip: Path) -> None:
-        self._start_worker("package_validating", self._import_package, package_zip)
+    def start_import_package(self, package_zip: Path, *, fallback_path: Path | None = None) -> None:
+        self._start_worker("package_validating", self._import_package, package_zip, fallback_path)
 
     def start_render_next(self) -> None:
         self._start_worker("render_running", self._render_next)
@@ -94,8 +95,13 @@ class V2RunnerController:
         snapshot = self._collect_workspace_snapshot(project_root)
         return "workspace_ready", snapshot
 
-    def _import_package(self, package_zip: Path) -> tuple[str, object]:
-        workspace = self._require_workspace()
+    def _import_package(self, package_zip: Path, fallback_path: Path | None) -> tuple[str, object]:
+        workspace = self.workspace
+        if workspace is None:
+            workspace = resolve_workspace_for_package(package_zip, fallback_path=fallback_path)
+            config = load_project_config(workspace)
+            self.workspace = workspace
+            self.project_id = str(config["project_id"])
         result = import_package_into_workspace(package_zip, workspace)
         summary = self._summarize_import(result.edit_plan_id, result.render_job_id)
         self.state = "render_pending"
