@@ -75,6 +75,175 @@ class ValidatedLocalPhotoPlan:
 
 
 LOCAL_PHOTO_SCHEMA_VERSIONS = {"2.0", "2.1"}
+MIXED_MEDIA_SCHEMA_VERSIONS = {"3.0"}
+
+
+@dataclass(frozen=True, slots=True)
+class ValidatedMixedMediaAsset:
+    asset_id: str
+    path: Path
+    media_type: str
+    duration_ms: int
+    width: int
+    height: int
+    rotation: int
+    has_audio: bool
+
+
+@dataclass(frozen=True, slots=True)
+class ValidatedMixedMediaOperation:
+    asset_id: str
+    op: str
+    duration_ms: int
+    source_in_ms: int | None
+    source_out_ms: int | None
+    mute_original_audio: bool
+
+
+@dataclass(frozen=True, slots=True)
+class ValidatedMixedMediaPlan:
+    payload: dict
+    assets: dict[str, ValidatedMixedMediaAsset]
+    operations: tuple[ValidatedMixedMediaOperation, ...]
+    planned_duration_ms: int
+    output_width: int
+    output_height: int
+    output_fps: int
+    audio_track: dict | None
+    audio_gain: float
+
+
+def load_and_validate_mixed_media_plan(
+    plan_path: Path,
+    workspace: Path,
+    package_root: Path,
+    backend: FFmpegBackend,
+    manifest: dict,
+) -> ValidatedMixedMediaPlan:
+    payload = json.loads(plan_path.read_text(encoding="utf-8"))
+    validate_payload("edit_plan", str(payload["schema_version"]), payload)
+    _reject_forbidden_keys(payload)
+    if payload.get("mode") != "preview":
+        raise UnsafePackageError("Only preview mode is supported in edit plan 3.0.")
+
+    registry_payload = json.loads(
+        (workspace.resolve() / "analysis" / "local_asset_registry.json").read_text(encoding="utf-8")
+    )
+    resolution_report = resolve_plan_assets_against_registry(
+        list(payload["assets"]),
+        registry_payload,
+        require_declared_integrity=False,
+    )
+
+    assets: dict[str, ValidatedMixedMediaAsset] = {}
+    for item in resolution_report["assets"]:
+        asset_id = str(item["asset_id"])
+        source_path = Path(str(item["source_path"]))
+        media_type = str(item["media_type"])
+        if media_type == "video":
+            meta = backend.probe(source_path)
+            if meta["codec"] is None:
+                raise UnsafePackageError(f"Asset is not a decodable video file: {asset_id}")
+            assets[asset_id] = ValidatedMixedMediaAsset(
+                asset_id=asset_id,
+                path=source_path,
+                media_type=media_type,
+                duration_ms=round(float(meta["duration"]) * 1000),
+                width=int(meta["width"]),
+                height=int(meta["height"]),
+                rotation=int(meta["rotation"]),
+                has_audio=bool(meta["has_audio"]),
+            )
+        elif media_type == "photo":
+            try:
+                with Image.open(source_path) as image:
+                    width, height = image.size
+            except Exception as exc:
+                raise UnsafePackageError(f"Asset resolution failed: unreadable image for {asset_id}: {exc}") from exc
+            assets[asset_id] = ValidatedMixedMediaAsset(
+                asset_id=asset_id,
+                path=source_path,
+                media_type=media_type,
+                duration_ms=0,
+                width=width,
+                height=height,
+                rotation=0,
+                has_audio=False,
+            )
+        else:
+            raise UnsafePackageError(f"Unsupported media_type in mixed media plan: {media_type}")
+
+    if not payload["operations"]:
+        raise UnsafePackageError("Mixed media plan timeline is empty.")
+
+    operations: list[ValidatedMixedMediaOperation] = []
+    for op in payload["operations"]:
+        op_name = str(op["op"])
+        asset_id = str(op["asset_id"])
+        if asset_id not in assets:
+            raise UnsafePackageError(f"Operation references unknown asset_id: {asset_id}")
+        asset = assets[asset_id]
+
+        if op_name == "image_hold":
+            if asset.media_type != "photo":
+                raise UnsafePackageError(f"image_hold operation requires a photo asset, got {asset.media_type}: {asset_id}")
+            duration_ms = int(op["duration_ms"])
+            if duration_ms <= 0:
+                raise UnsafePackageError("image_hold duration_ms must be positive.")
+            operations.append(ValidatedMixedMediaOperation(
+                asset_id=asset_id,
+                op=op_name,
+                duration_ms=duration_ms,
+                source_in_ms=None,
+                source_out_ms=None,
+                mute_original_audio=False,
+            ))
+        elif op_name == "video_segment":
+            if asset.media_type != "video":
+                raise UnsafePackageError(f"video_segment operation requires a video asset, got {asset.media_type}: {asset_id}")
+            source_in_ms = int(op["source_in_ms"])
+            source_out_ms = int(op["source_out_ms"])
+            if source_in_ms < 0 or source_out_ms < 0:
+                raise UnsafePackageError("Negative source trim values are not allowed.")
+            if source_out_ms <= source_in_ms:
+                raise UnsafePackageError("source_out_ms must be greater than source_in_ms.")
+            if source_out_ms > asset.duration_ms + SOURCE_OUT_TOLERANCE_MS:
+                raise UnsafePackageError(
+                    f"Requested trim exceeds source duration for {asset_id}: {source_out_ms} > {asset.duration_ms}"
+                )
+            clamped_out = min(source_out_ms, asset.duration_ms)
+            duration_ms = clamped_out - source_in_ms
+            mute = bool(op.get("mute_original_audio", False))
+            operations.append(ValidatedMixedMediaOperation(
+                asset_id=asset_id,
+                op=op_name,
+                duration_ms=duration_ms,
+                source_in_ms=source_in_ms,
+                source_out_ms=clamped_out,
+                mute_original_audio=mute,
+            ))
+        else:
+            raise UnsafePackageError(f"Unsupported operation type in mixed media plan: {op_name}")
+
+    planned_duration_ms = sum(op.duration_ms for op in operations)
+    if planned_duration_ms <= 0:
+        raise UnsafePackageError("Planned duration must be positive.")
+
+    output = payload["output"]
+    audio_track = manifest.get("audio_track")
+    audio_gain = float(audio_track["gain"]) if audio_track else 1.0
+
+    return ValidatedMixedMediaPlan(
+        payload=payload,
+        assets=assets,
+        operations=tuple(operations),
+        planned_duration_ms=planned_duration_ms,
+        output_width=int(output["width"]),
+        output_height=int(output["height"]),
+        output_fps=int(output["fps"]),
+        audio_track=audio_track,
+        audio_gain=audio_gain,
+    )
 
 
 def load_and_validate_preview_plan(

@@ -7,7 +7,7 @@ from pathlib import Path
 from PIL import Image, ImageDraw, ImageFont
 
 from ..plans.schema import deterministic_plan_hash
-from ..plans.semantic import ValidatedLocalPhotoPlan, ValidatedPreviewPlan
+from ..plans.semantic import ValidatedLocalPhotoPlan, ValidatedMixedMediaPlan, ValidatedPreviewPlan
 
 
 PREVIEW_WIDTH = 720
@@ -298,3 +298,139 @@ def _render_segment_frame(
         )
     output_path.parent.mkdir(parents=True, exist_ok=True)
     canvas.save(output_path, "PNG")
+
+
+def compile_mixed_media_render_plan(
+    validated: ValidatedMixedMediaPlan,
+    *,
+    ffmpeg_path: str,
+    output_path: Path,
+    package_root: Path | None = None,
+) -> CompiledRenderPlan:
+    output_path.parent.mkdir(parents=True, exist_ok=True)
+    staging_dir = Path(tempfile.mkdtemp(prefix="mixed_media_", dir=str(output_path.parent)))
+    ffmpeg_args: list[str] = [ffmpeg_path, "-y"]
+    filter_parts: list[str] = []
+    concat_labels: list[str] = []
+    segments: list[dict] = []
+    input_index = 0
+
+    for op in validated.operations:
+        asset = validated.assets[op.asset_id]
+        if op.op == "image_hold":
+            frame_path = staging_dir / f"frame_{input_index:03d}.png"
+            _render_segment_frame(
+                asset.path,
+                frame_path,
+                width=validated.output_width,
+                height=validated.output_height,
+                overlay_text=None,
+            )
+            ffmpeg_args.extend(["-loop", "1", "-t", f"{op.duration_ms / 1000:.3f}", "-i", str(frame_path)])
+            video_label = f"v{input_index}"
+            filter_parts.append(
+                f"[{input_index}:v]fps={validated.output_fps},"
+                f"scale={validated.output_width}:{validated.output_height},"
+                f"setsar=1,format=yuv420p[{video_label}]"
+            )
+            concat_labels.append(f"[{video_label}]")
+            segments.append({
+                "asset_id": op.asset_id,
+                "op": "image_hold",
+                "path": str(asset.path),
+                "duration_ms": op.duration_ms,
+            })
+            input_index += 1
+        elif op.op == "video_segment":
+            ffmpeg_args.extend([
+                "-ss", f"{op.source_in_ms / 1000:.3f}",
+                "-to", f"{op.source_out_ms / 1000:.3f}",
+                "-noautorotate",
+                "-i", str(asset.path),
+            ])
+            video_label = f"v{input_index}"
+            rot = _rotation_filter(asset.rotation)
+            filter_parts.append(
+                f"[{input_index}:v]{rot}fps={validated.output_fps},"
+                f"scale={validated.output_width}:{validated.output_height}:force_original_aspect_ratio=increase,"
+                f"crop={validated.output_width}:{validated.output_height},setsar=1,format=yuv420p[{video_label}]"
+            )
+            concat_labels.append(f"[{video_label}]")
+            segments.append({
+                "asset_id": op.asset_id,
+                "op": "video_segment",
+                "path": str(asset.path),
+                "source_in_ms": op.source_in_ms,
+                "source_out_ms": op.source_out_ms,
+                "duration_ms": op.duration_ms,
+                "mute_original_audio": op.mute_original_audio,
+            })
+            input_index += 1
+
+    # Video concat
+    filter_parts.append("".join(concat_labels) + f"concat=n={len(validated.operations)}:v=1:a=0[vout]")
+    ffmpeg_args.extend(["-filter_complex", ";".join(filter_parts), "-map", "[vout]"])
+
+    # Audio track from package
+    audio_track = validated.audio_track
+    if audio_track and package_root:
+        audio_rel = str(audio_track["path"])
+        audio_file = (package_root / audio_rel).resolve()
+        if audio_file.exists():
+            gain = validated.audio_gain
+            ffmpeg_args.extend(["-i", str(audio_file)])
+            audio_input_idx = input_index
+            if gain < 1.0:
+                ffmpeg_args.extend([
+                    "-filter_complex",
+                    f"[{audio_input_idx}:a]volume={gain}[aout]",
+                    "-map", "[aout]",
+                ])
+            else:
+                ffmpeg_args.extend(["-map", f"{audio_input_idx}:a"])
+            ffmpeg_args.extend(["-c:a", "aac", "-b:a", AUDIO_BITRATE, "-shortest"])
+
+    ffmpeg_args.extend([
+        "-r", str(validated.output_fps),
+        "-c:v", "libx264",
+        "-preset", VIDEO_PRESET,
+        "-crf", str(VIDEO_CRF),
+        "-pix_fmt", "yuv420p",
+        "-movflags", "+faststart",
+        str(output_path),
+    ])
+
+    render_plan = {
+        "schema_version": "3.0",
+        "mode": "preview",
+        "output": {
+            "width": validated.output_width,
+            "height": validated.output_height,
+            "fps": validated.output_fps,
+            "video_codec": "h264",
+            "audio_codec": "aac" if audio_track else None,
+            "preset": VIDEO_PRESET,
+            "crf": VIDEO_CRF,
+        },
+        "segments": segments,
+        "planned_duration_ms": validated.planned_duration_ms,
+        "audio_track": {
+            "path": str(audio_track["path"]) if audio_track else None,
+            "gain": validated.audio_gain,
+        } if audio_track else None,
+    }
+    compiled_plan_hash = deterministic_plan_hash(render_plan)
+    command_metadata = {
+        "args": ffmpeg_args,
+        "mode": "preview",
+        "compiled_plan_hash": compiled_plan_hash,
+        "segment_count": len(validated.operations),
+        "staging_dir": str(staging_dir),
+        "audio_present": audio_track is not None,
+    }
+    return CompiledRenderPlan(
+        render_plan=render_plan,
+        ffmpeg_args=ffmpeg_args,
+        command_metadata=command_metadata,
+        compiled_plan_hash=compiled_plan_hash,
+    )

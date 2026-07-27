@@ -1,0 +1,106 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://github.com/oleg3479881328-code/AI-Handoff-Builder/schemas/edit_plan/3.0.json",
+  "title": "Edit Plan (Mixed Media)",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schema_version",
+    "project_id",
+    "handoff_id",
+    "handoff_sha256",
+    "plan_id",
+    "created_at",
+    "assets",
+    "mode",
+    "output",
+    "operations",
+    "media_type"
+  ],
+  "properties": {
+    "schema_version": { "const": "3.0" },
+    "project_id": { "type": "string", "minLength": 1 },
+    "handoff_id": { "type": "string", "minLength": 1 },
+    "handoff_sha256": { "type": "string", "pattern": "^[a-f0-9]{64}$" },
+    "plan_id": { "type": "string", "minLength": 1 },
+    "plan_version": { "type": "integer", "minimum": 1 },
+    "parent_plan_id": { "type": "string", "minLength": 1 },
+    "base_plan_hash": { "type": "string", "pattern": "^[a-f0-9]{64}$" },
+    "patch_id": { "type": "string", "minLength": 1 },
+    "created_at": { "type": "string", "format": "date-time" },
+    "mode": {
+      "type": "string",
+      "enum": ["preview"]
+    },
+    "media_type": {
+      "type": "array",
+      "minItems": 2,
+      "items": {
+        "type": "string",
+        "enum": ["photo", "video"]
+      },
+      "uniqueItems": true
+    },
+    "audio_track": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "path": { "type": "string", "minLength": 1 },
+        "sha256": { "type": "string", "pattern": "^[a-f0-9]{64}$" },
+        "size_bytes": { "type": "integer", "minimum": 1 },
+        "gain": { "type": "number", "minimum": 0.0, "maximum": 2.0 }
+      }
+    },
+    "output": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["width", "height", "fps"],
+      "properties": {
+        "width": { "type": "integer", "minimum": 1 },
+        "height": { "type": "integer", "minimum": 1 },
+        "fps": { "type": "integer", "minimum": 1 }
+      }
+    },
+    "assets": {
+      "type": "array",
+      "minItems": 1,
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["asset_id", "media_type", "source_path", "sha256", "size_bytes"],
+        "properties": {
+          "asset_id": { "type": "string", "minLength": 1 },
+          "media_type": {
+            "type": "string",
+            "enum": ["photo", "video"]
+          },
+          "source_path": { "type": "string", "minLength": 1 },
+          "sha256": { "type": "string", "pattern": "^[a-f0-9]{64}$" },
+          "size_bytes": { "type": "integer", "minimum": 1 },
+          "original_name": { "type": "string", "minLength": 1 }
+        }
+      }
+    },
+    "operations": {
+      "type": "array",
+      "minItems": 1,
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["op", "asset_id"],
+        "properties": {
+          "operation_id": { "type": "string", "minLength": 1 },
+          "op": {
+            "type": "string",
+            "enum": ["image_hold", "video_segment"]
+          },
+          "asset_id": { "type": "string", "minLength": 1 },
+          "duration_ms": { "type": "integer", "minimum": 1 },
+          "source_in_ms": { "type": "integer", "minimum": 0 },
+          "source_out_ms": { "type": "integer", "minimum": 0 },
+          "mute_original_audio": { "type": "boolean" }
+        }
+      }
+    }
+  }
+}

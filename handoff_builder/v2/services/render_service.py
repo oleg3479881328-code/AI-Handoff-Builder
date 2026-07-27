@@ -8,9 +8,17 @@ from handoff_builder.ffmpeg_tools import FFmpegError
 
 from ..common import utc_now_iso
 from ..errors import InvalidQueueTransitionError, UnsafePackageError
-from ..plans.semantic import load_and_validate_local_photo_plan, load_and_validate_preview_plan
+from ..plans.semantic import (
+    load_and_validate_local_photo_plan,
+    load_and_validate_mixed_media_plan,
+    load_and_validate_preview_plan,
+)
 from ..qc.inspect import inspect_preview_output
-from ..render.compiler import compile_local_photo_render_plan, compile_preview_render_plan
+from ..render.compiler import (
+    compile_local_photo_render_plan,
+    compile_mixed_media_render_plan,
+    compile_preview_render_plan,
+)
 from ..render.ffmpeg_backend import FFmpegBackend
 from ..storage import connect_workspace_db
 from ..storage.repositories import SqliteRenderQueueRepository, WorkspaceRepository
@@ -119,6 +127,22 @@ def _process_job_row(
                 project_root,
             )
             compiled = compile_local_photo_render_plan(validated, ffmpeg_path=backend.ffmpeg, output_path=reel_path)
+        elif plan_schema_version == "3.0":
+            package_root = Path(package_row["extracted_root"])
+            manifest = json.loads((package_root / "ai_edit_package.json").read_text(encoding="utf-8"))
+            validated = load_and_validate_mixed_media_plan(
+                Path(plan_row["plan_path"]),
+                project_root,
+                package_root,
+                backend,
+                manifest,
+            )
+            compiled = compile_mixed_media_render_plan(
+                validated,
+                ffmpeg_path=backend.ffmpeg,
+                output_path=reel_path,
+                package_root=package_root,
+            )
         else:
             validated = load_and_validate_preview_plan(
                 Path(plan_row["plan_path"]),
