@@ -1,15 +1,16 @@
 # Current State
 
-- Date: 2026-07-26
+- Date: 2026-07-27
 - Repository: `oleg3479881328-code/AI-Handoff-Builder`
 - Broad v2 contract: `Yt-Dlp-Download-Manager` issue `#67`
 - HyperFrames contract: repository issue `#3`
 - One-file handoff workflow fix: repository issue `#10`
 - Handoff completeness defect: repository issue `#2`
-- Current branch: `feat/issue-16-preview-scroll-fix`
-- Base branch: `feat/issue-14-auto-project-root`
-- Draft PR: pending publication from `feat/issue-16-preview-scroll-fix` -> `feat/issue-14-auto-project-root`
-- Current phase: Issue `#16` scroll + current-preview-target fixes implemented and regression-validated in source; the next step is packaged `.exe` acceptance and draft-PR publication
+- Package Protocol freeze: repository issue `#20`
+- Current branch: `feat/package-protocol-freeze-davinci-first`
+- Base branch: `feat/issue-16-preview-scroll-fix`
+- Draft PR: pending publication from `feat/package-protocol-freeze-davinci-first` -> `feat/issue-16-preview-scroll-fix`
+- Current phase: Package Protocol frozen (v1.0). `AI_EDIT_PACKAGE` / `edit_plan` schema `3.0` with DaVinci-first rational timebase, `ANALYSIS_HANDOFF` protocol, `Normalized Timeline 1.0` internal schema, and authoritative Package Compiler implemented. All 157 tests pass.
 
 ## Accepted Baseline Preserved
 

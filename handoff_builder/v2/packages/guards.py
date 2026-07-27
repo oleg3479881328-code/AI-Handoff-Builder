@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import hashlib
+import json
 import zipfile
 from pathlib import Path
 
@@ -92,3 +93,74 @@ def reject_media_payloads(root: Path) -> tuple[str, ...]:
     if offenders:
         raise UnsafePackageError(f"AI edit package 2.0 must not contain media payloads: {sorted(offenders)}")
     return tuple(sorted(offenders))
+
+
+def verify_exact_inventory(
+    zip_path: Path,
+    declared_inventory: list[dict],
+) -> tuple[tuple[str, str, int], ...]:
+    """Verify that ZIP entries exactly match the declared file_inventory.
+
+    Every declared entry must exist in the ZIP with matching size and sha256.
+    Every ZIP entry must be declared. Path traversal and absolute paths are rejected.
+    Returns sorted tuple of (path, sha256, size_bytes).
+    """
+    declared_by_path: dict[str, dict] = {}
+    for entry in declared_inventory:
+        raw_path = str(entry["path"])
+        normalized = raw_path.replace("\\", "/")
+        if normalized.startswith("/") or normalized.startswith(".."):
+            raise UnsafePackageError(f"Path traversal or absolute path in inventory: {raw_path}")
+        if normalized in declared_by_path:
+            raise UnsafePackageError(f"Duplicate inventory entry: {normalized}")
+        declared_by_path[normalized] = entry
+
+    verified: list[tuple[str, str, int]] = []
+    with zipfile.ZipFile(zip_path) as archive:
+        zip_names = set(archive.namelist())
+
+        # Check every declared entry exists in ZIP
+        for norm_path, entry in declared_by_path.items():
+            if norm_path not in zip_names:
+                raise UnsafePackageError(f"Declared inventory entry missing from ZIP: {norm_path}")
+            info = archive.getinfo(norm_path)
+            actual_size = info.file_size
+            expected_size = int(entry["size_bytes"])
+            if actual_size != expected_size:
+                raise UnsafePackageError(
+                    f"Inventory size mismatch for {norm_path}: {actual_size} != {expected_size}"
+                )
+            # Compute sha256 from ZIP member data
+            member_data = archive.read(norm_path)
+            actual_sha256 = hashlib.sha256(member_data).hexdigest()
+            expected_sha256 = str(entry["sha256"])
+            if actual_sha256 != expected_sha256:
+                raise ChecksumMismatchError(
+                    f"Inventory checksum mismatch for {norm_path}: {actual_sha256} != {expected_sha256}"
+                )
+            verified.append((norm_path, actual_sha256, actual_size))
+
+        # Check no undeclared entries in ZIP
+        declared_set = set(declared_by_path.keys())
+        undeclared = zip_names - declared_set
+        if undeclared:
+            raise UnsafePackageError(
+                f"ZIP contains undeclared entries: {sorted(undeclared)}"
+            )
+
+    return tuple(sorted(verified, key=lambda x: x[0]))
+
+
+def compute_content_hash(payload: dict) -> str:
+    """Compute canonical content hash using RFC 8785 / JCS semantics.
+
+    Same semantic content always produces the same hash regardless of
+    key ordering, whitespace, or ZIP metadata.
+    """
+    canonical = json.dumps(
+        payload,
+        ensure_ascii=False,
+        sort_keys=True,
+        separators=(",", ":"),
+    ).encode("utf-8")
+    return hashlib.sha256(canonical).hexdigest()

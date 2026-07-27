@@ -126,7 +126,7 @@ def import_package_into_workspace(package_zip: Path, workspace: Path) -> ImportR
         if str(plan_payload["handoff_sha256"]) != imported.handoff_sha256:
             raise UnsafePackageError("Edit plan handoff_sha256 does not match package handoff.")
         resolution_report: dict | None = None
-        if plan_version in {"2.0", "2.1"}:
+        if plan_version in {"2.0", "2.1", "3.0"}:
             registry_payload = (
                 load_active_local_registry(project_root, fallback_dir=package_zip.parent)
                 if plan_version == "2.0"
@@ -135,7 +135,7 @@ def import_package_into_workspace(package_zip: Path, workspace: Path) -> ImportR
             resolution_report = resolve_plan_assets_against_registry(
                 list(plan_payload["assets"]),
                 registry_payload,
-                require_declared_integrity=plan_version == "2.0",
+                require_declared_integrity=plan_version in {"2.0", "3.0"},
             )
         if plan_payload.get("voiceover"):
             voiceover_path = (package_root / str(plan_payload["voiceover"]["spec_path"])).resolve()
