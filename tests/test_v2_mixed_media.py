@@ -24,7 +24,9 @@ from handoff_builder.v2.errors import UnsafePackageError
 
 def _create_minimal_mp4(path: Path) -> None:
     """Create a minimal valid MP4 file using ffmpeg."""
-    ffmpeg = r"C:\Users\oleg3\AppData\Local\Microsoft\WinGet\Packages\Gyan.FFmpeg_Microsoft.Winget.Source_8wekyb3d8bbwe\ffmpeg-8.0.1-full_build\bin\ffmpeg.exe"
+    ffmpeg = shutil.which("ffmpeg")
+    if ffmpeg is None:
+        pytest.skip("ffmpeg is required for mixed-media tests")
     subprocess.run(
         [
             ffmpeg, "-y",
@@ -707,6 +709,128 @@ class TestMixedMediaCompiler:
         args_str = " ".join(compiled.ffmpeg_args)
         # Should NOT reference audio
         assert "volume" not in args_str
+
+    def test_compiler_corrects_negative_ninety_rotation_and_strips_output_metadata(
+        self, validated_plan, tmp_path
+    ):
+        from dataclasses import replace
+
+        rotated_video = replace(validated_plan.assets["video-1"], rotation=-90)
+        rotated_plan = replace(
+            validated_plan,
+            assets={**validated_plan.assets, "video-1": rotated_video},
+        )
+        compiled = compile_mixed_media_render_plan(
+            rotated_plan,
+            ffmpeg_path="ffmpeg",
+            output_path=tmp_path / "reel_rotated.mp4",
+        )
+
+        filter_complex = compiled.ffmpeg_args[
+            compiled.ffmpeg_args.index("-filter_complex") + 1
+        ]
+        assert "transpose=clock" in filter_complex
+        assert "transpose=cclock" not in filter_complex
+        assert "-noautorotate" in compiled.ffmpeg_args
+        assert ["-map_metadata", "-1"] == compiled.ffmpeg_args[
+            compiled.ffmpeg_args.index("-map_metadata"):
+            compiled.ffmpeg_args.index("-map_metadata") + 2
+        ]
+        assert ["-metadata:s:v:0", "rotate=0"] == compiled.ffmpeg_args[
+            compiled.ffmpeg_args.index("-metadata:s:v:0"):
+            compiled.ffmpeg_args.index("-metadata:s:v:0") + 2
+        ]
+
+    def test_negative_ninety_rotation_renders_upright_without_display_matrix(
+        self, tmp_path
+    ):
+        from PIL import Image
+        from handoff_builder.v2.plans.semantic import (
+            ValidatedMixedMediaAsset,
+            ValidatedMixedMediaOperation,
+        )
+
+        ffmpeg = shutil.which("ffmpeg")
+        ffprobe = shutil.which("ffprobe")
+        if ffmpeg is None or ffprobe is None:
+            pytest.skip("ffmpeg and ffprobe are required for rotation render test")
+
+        pattern_path = tmp_path / "pattern.png"
+        pattern = Image.new("RGB", (160, 90), color="red")
+        for x in range(80, 160):
+            for y in range(90):
+                pattern.putpixel((x, y), (0, 0, 255))
+        pattern.save(pattern_path)
+
+        source_path = tmp_path / "rotated-source.mp4"
+        subprocess.run(
+            [
+                ffmpeg,
+                "-loglevel", "error",
+                "-y",
+                "-loop", "1",
+                "-t", "0.5",
+                "-i", str(pattern_path),
+                "-r", "10",
+                "-c:v", "libx264",
+                "-pix_fmt", "yuv420p",
+                str(source_path),
+            ],
+            check=True,
+        )
+
+        validated = ValidatedMixedMediaPlan(
+            payload={},
+            assets={
+                "video-rotated": ValidatedMixedMediaAsset(
+                    asset_id="video-rotated",
+                    path=source_path,
+                    media_type="video",
+                    duration_ms=500,
+                    width=160,
+                    height=90,
+                    rotation=-90,
+                    has_audio=False,
+                )
+            },
+            operations=(
+                ValidatedMixedMediaOperation(
+                    asset_id="video-rotated",
+                    op="video_segment",
+                    duration_ms=500,
+                    source_in_ms=0,
+                    source_out_ms=500,
+                    mute_original_audio=True,
+                ),
+            ),
+            planned_duration_ms=500,
+            output_width=90,
+            output_height=160,
+            output_fps=10,
+            audio_track=None,
+            audio_gain=1.0,
+        )
+        output_path = tmp_path / "upright-output.mp4"
+        compiled = compile_mixed_media_render_plan(
+            validated,
+            ffmpeg_path=ffmpeg,
+            output_path=output_path,
+        )
+        subprocess.run(compiled.ffmpeg_args, capture_output=True, check=True)
+
+        backend = FFmpegBackend(ffmpeg_path=ffmpeg, ffprobe_path=ffprobe)
+        output_meta = backend.probe(output_path)
+        assert output_meta["width"] == 90
+        assert output_meta["height"] == 160
+        assert output_meta["rotation"] == 0
+
+        frame_path = tmp_path / "upright-frame.png"
+        backend.extract_first_frame(output_path, frame_path)
+        with Image.open(frame_path) as frame:
+            top = frame.convert("RGB").getpixel((45, 20))
+            bottom = frame.convert("RGB").getpixel((45, 140))
+        assert top[0] > top[2]
+        assert bottom[2] > bottom[0]
 
 
 # ---------------------------------------------------------------------------

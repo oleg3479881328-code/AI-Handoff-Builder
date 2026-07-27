@@ -105,6 +105,10 @@ def compile_preview_render_plan(
             "aac",
             "-b:a",
             AUDIO_BITRATE,
+            "-map_metadata",
+            "-1",
+            "-metadata:s:v:0",
+            "rotate=0",
             "-movflags",
             "+faststart",
             str(output_path),
@@ -246,13 +250,15 @@ def compile_local_photo_render_plan(
 
 
 def _rotation_filter(rotation: int) -> str:
+    # ffprobe reports the MP4 display-matrix angle. FFmpeg's transpose filter
+    # must apply the inverse transform when -noautorotate is used.
     normalized = rotation % 360
     if normalized == 90:
-        return "transpose=clock,"
+        return "transpose=cclock,"
     if normalized == 180:
         return "hflip,vflip,"
     if normalized == 270:
-        return "transpose=cclock,"
+        return "transpose=clock,"
     return ""
 
 
@@ -396,6 +402,8 @@ def compile_mixed_media_render_plan(
         "-preset", VIDEO_PRESET,
         "-crf", str(VIDEO_CRF),
         "-pix_fmt", "yuv420p",
+        "-map_metadata", "-1",
+        "-metadata:s:v:0", "rotate=0",
         "-movflags", "+faststart",
         str(output_path),
     ])
