@@ -1,0 +1,343 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://github.com/oleg3479881328-code/AI-Handoff-Builder/schemas/normalized_timeline/1.0.json",
+  "title": "Normalized Timeline 1.0",
+  "description": "Internal renderer-neutral timeline compiled from a validated AI edit plan and local registry resolution. Not an AI-facing package schema.",
+  "type": "object",
+  "required": [
+    "schema_version",
+    "timeline_id",
+    "project_id",
+    "handoff_id",
+    "plan_id",
+    "plan_version",
+    "source_package_content_hash",
+    "normalized_timeline_hash",
+    "primary_renderer",
+    "timebase",
+    "canvas",
+    "tracks",
+    "visual_items",
+    "renderer_requirements"
+  ],
+  "properties": {
+    "schema_version": {
+      "type": "string",
+      "const": "1.0"
+    },
+    "timeline_id": {
+      "type": "string",
+      "minLength": 1
+    },
+    "project_id": {
+      "type": "string",
+      "minLength": 1
+    },
+    "handoff_id": {
+      "type": "string",
+      "minLength": 1
+    },
+    "plan_id": {
+      "type": "string",
+      "minLength": 1
+    },
+    "plan_version": {
+      "type": "integer",
+      "minimum": 1
+    },
+    "source_package_content_hash": {
+      "type": "string",
+      "pattern": "^[a-f0-9]{64}$"
+    },
+    "normalized_timeline_hash": {
+      "type": "string",
+      "pattern": "^[a-f0-9]{64}$"
+    },
+    "primary_renderer": {
+      "type": "string",
+      "const": "davinci"
+    },
+    "timebase": {
+      "type": "object",
+      "required": ["fps_num", "fps_den"],
+      "properties": {
+        "fps_num": {
+          "type": "integer",
+          "minimum": 1
+        },
+        "fps_den": {
+          "type": "integer",
+          "minimum": 1
+        }
+      },
+      "additionalProperties": false
+    },
+    "canvas": {
+      "type": "object",
+      "required": ["width", "height"],
+      "properties": {
+        "width": {
+          "type": "integer",
+          "minimum": 1
+        },
+        "height": {
+          "type": "integer",
+          "minimum": 1
+        }
+      },
+      "additionalProperties": false
+    },
+    "tracks": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": ["track_id", "track_type"],
+        "properties": {
+          "track_id": {
+            "type": "string",
+            "minLength": 1
+          },
+          "track_type": {
+            "type": "string",
+            "enum": ["video", "audio", "subtitle"]
+          },
+          "name": {
+            "type": "string"
+          },
+          "index": {
+            "type": "integer",
+            "minimum": 0
+          }
+        },
+        "additionalProperties": false
+      }
+    },
+    "visual_items": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": [
+          "item_id",
+          "asset_id",
+          "media_type",
+          "track_id",
+          "timeline_start_frame",
+          "duration_frames",
+          "source_in_us",
+          "source_out_us",
+          "source_audio_policy"
+        ],
+        "properties": {
+          "item_id": {
+            "type": "string",
+            "minLength": 1
+          },
+          "asset_id": {
+            "type": "string",
+            "minLength": 1
+          },
+          "media_type": {
+            "type": "string",
+            "enum": ["photo", "video"]
+          },
+          "track_id": {
+            "type": "string",
+            "minLength": 1
+          },
+          "timeline_start_frame": {
+            "type": "integer",
+            "minimum": 0
+          },
+          "duration_frames": {
+            "type": "integer",
+            "minimum": 1
+          },
+          "source_in_us": {
+            "type": "integer",
+            "minimum": 0
+          },
+          "source_out_us": {
+            "type": "integer",
+            "minimum": 0
+          },
+          "source_audio_policy": {
+            "type": "string",
+            "enum": ["discard", "keep", "duck_under_music", "replace"]
+          },
+          "resolved_source_path": {
+            "type": "string"
+          },
+          "resolved_sha256": {
+            "type": "string",
+            "pattern": "^[a-f0-9]{64}$"
+          },
+          "resolved_size_bytes": {
+            "type": "integer",
+            "minimum": 0
+          },
+          "transform": {
+            "type": "object",
+            "properties": {
+              "scale_x": { "type": "number" },
+              "scale_y": { "type": "number" },
+              "position_x": { "type": "number" },
+              "position_y": { "type": "number" },
+              "rotation_degrees": { "type": "number" }
+            },
+            "additionalProperties": false
+          },
+          "crop": {
+            "type": "object",
+            "properties": {
+              "left": { "type": "number", "minimum": 0 },
+              "top": { "type": "number", "minimum": 0 },
+              "right": { "type": "number", "minimum": 0 },
+              "bottom": { "type": "number", "minimum": 0 }
+            },
+            "additionalProperties": false
+          }
+        },
+        "additionalProperties": false
+      }
+    },
+    "audio_items": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": [
+          "item_id",
+          "audio_id",
+          "role",
+          "track_id",
+          "timeline_start_frame",
+          "duration_frames"
+        ],
+        "properties": {
+          "item_id": {
+            "type": "string",
+            "minLength": 1
+          },
+          "audio_id": {
+            "type": "string",
+            "minLength": 1
+          },
+          "role": {
+            "type": "string",
+            "enum": ["music", "voiceover"]
+          },
+          "track_id": {
+            "type": "string",
+            "minLength": 1
+          },
+          "timeline_start_frame": {
+            "type": "integer",
+            "minimum": 0
+          },
+          "duration_frames": {
+            "type": "integer",
+            "minimum": 1
+          },
+          "source_in_us": {
+            "type": "integer",
+            "minimum": 0
+          },
+          "source_out_us": {
+            "type": "integer",
+            "minimum": 0
+          },
+          "gain": {
+            "type": "number"
+          },
+          "fade_in_ms": {
+            "type": "integer",
+            "minimum": 0
+          },
+          "fade_out_ms": {
+            "type": "integer",
+            "minimum": 0
+          },
+          "resolved_audio_path": {
+            "type": "string"
+          },
+          "resolved_sha256": {
+            "type": "string",
+            "pattern": "^[a-f0-9]{64}$"
+          },
+          "resolved_size_bytes": {
+            "type": "integer",
+            "minimum": 0
+          }
+        },
+        "additionalProperties": false
+      }
+    },
+    "text_items": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": ["item_id", "text", "timeline_start_frame", "duration_frames"],
+        "properties": {
+          "item_id": {
+            "type": "string",
+            "minLength": 1
+          },
+          "text": {
+            "type": "string",
+            "minLength": 1
+          },
+          "timeline_start_frame": {
+            "type": "integer",
+            "minimum": 0
+          },
+          "duration_frames": {
+            "type": "integer",
+            "minimum": 1
+          }
+        },
+        "additionalProperties": false
+      }
+    },
+    "markers": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": ["marker_id", "frame", "note"],
+        "properties": {
+          "marker_id": {
+            "type": "string",
+            "minLength": 1
+          },
+          "frame": {
+            "type": "integer",
+            "minimum": 0
+          },
+          "note": {
+            "type": "string"
+          },
+          "color": {
+            "type": "string"
+          }
+        },
+        "additionalProperties": false
+      }
+    },
+    "renderer_requirements": {
+      "type": "object",
+      "required": ["primary_renderer"],
+      "properties": {
+        "primary_renderer": {
+          "type": "string",
+          "const": "davinci"
+        },
+        "capabilities": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        }
+      },
+      "additionalProperties": false
+    }
+  },
+  "additionalProperties": false
+}
