@@ -4,9 +4,9 @@ import json
 from pathlib import Path
 
 from ..domain.records import ImportedPackage, PackageFile
-from ..errors import ProjectMismatchError, UnsafePackageError
+from ..errors import ChecksumMismatchError, ProjectMismatchError, UnsafePackageError
 from ..plans.schema import validate_payload
-from .guards import compute_sha256, reject_media_payloads, safe_extract_package_zip, verify_package_checksums
+from .guards import compute_sha256, ensure_allowed_package_path, reject_media_payloads, safe_extract_package_zip, verify_package_checksums
 
 
 def _read_json(path: Path) -> dict:
@@ -43,6 +43,36 @@ def import_edit_package(
     files = verify_package_checksums(package_root, list(manifest.get("package_files", [])))
     if schema_version in {"2.0", "2.1"}:
         reject_media_payloads(package_root)
+        files = verify_package_checksums(
+            package_root,
+            [
+                {
+                    "path": item["path"],
+                    "sha256": item["sha256"],
+                    "size_bytes": int((package_root / str(item["path"])).stat().st_size),
+                }
+                for item in manifest.get("plans", [])
+            ],
+        )
+    elif schema_version == "3.0":
+        reject_media_payloads(package_root, allow_audio=True)
+        audio_track = manifest.get("audio_track")
+        if audio_track:
+            audio_path = str(audio_track["path"])
+            ensure_allowed_package_path(audio_path)
+            audio_file = package_root / audio_path
+            if not audio_file.exists():
+                raise UnsafePackageError(f"Declared audio track is missing: {audio_path}")
+            actual_sha = compute_sha256(audio_file)
+            if actual_sha != audio_track["sha256"]:
+                raise ChecksumMismatchError(
+                    f"Checksum mismatch for audio track {audio_path}: {actual_sha} != {audio_track['sha256']}"
+                )
+            actual_size = audio_file.stat().st_size
+            if actual_size != audio_track["size_bytes"]:
+                raise UnsafePackageError(
+                    f"Size mismatch for audio track {audio_path}: {actual_size} != {audio_track['size_bytes']}"
+                )
         files = verify_package_checksums(
             package_root,
             [

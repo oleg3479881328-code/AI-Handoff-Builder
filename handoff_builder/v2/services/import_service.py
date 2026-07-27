@@ -137,6 +137,11 @@ def import_package_into_workspace(package_zip: Path, workspace: Path) -> ImportR
                 registry_payload,
                 require_declared_integrity=plan_version == "2.0",
             )
+        elif plan_version == "3.0":
+            # Schema 3.0: photo/video assets are resolved locally by asset_id
+            # (not included in the AI package). Audio track is inside the package
+            # and was already validated by import_edit_package.
+            resolution_report = {"resolved_asset_count": 0, "mode": "mixed_media_local"}
         if plan_payload.get("voiceover"):
             voiceover_path = (package_root / str(plan_payload["voiceover"]["spec_path"])).resolve()
             if package_root not in voiceover_path.parents:

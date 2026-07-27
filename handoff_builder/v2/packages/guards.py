@@ -42,6 +42,7 @@ def ensure_allowed_package_path(path: str) -> None:
         "manifests/",
         "reports/",
         "voice/",
+        "audio/",
     )
     if normalized in {"ai_edit_package.json", "edit_plan.json", "edit_patch.json", "render_report.json"}:
         return
@@ -77,10 +78,13 @@ def verify_package_checksums(root: Path, files: list[dict]) -> tuple[tuple[str, 
     return tuple(verified)
 
 
-def reject_media_payloads(root: Path) -> tuple[str, ...]:
+def reject_media_payloads(root: Path, *, allow_audio: bool = False) -> tuple[str, ...]:
     forbidden_exts = set(PHOTO_EXTENSIONS) | set(VIDEO_EXTENSIONS) | {
         ".mp3", ".wav", ".aac", ".m4a", ".flac", ".ogg"
     }
+    if allow_audio:
+        audio_exts = {".mp3", ".wav", ".aac", ".m4a", ".flac", ".ogg"}
+        forbidden_exts = forbidden_exts - audio_exts
     offenders: list[str] = []
     for file_path in root.rglob("*"):
         if not file_path.is_file():
@@ -90,5 +94,5 @@ def reject_media_payloads(root: Path) -> tuple[str, ...]:
         if file_path.suffix.lower() in forbidden_exts:
             offenders.append(rel_path)
     if offenders:
-        raise UnsafePackageError(f"AI edit package 2.0 must not contain media payloads: {sorted(offenders)}")
+        raise UnsafePackageError(f"AI edit package must not contain media payloads: {sorted(offenders)}")
     return tuple(sorted(offenders))
