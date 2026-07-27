@@ -17,6 +17,7 @@ pyinstaller --noconfirm --clean --windowed ^
   --collect-all PIL ^
   --add-data "prototypes\hyperframes;prototypes\hyperframes" ^
   --add-data "schemas;schemas" ^
+  --add-data "handoff_builder\templates;handoff_builder\templates" ^
   app.py
 
 if not exist "dist\AI Handoff Builder\bin" mkdir "dist\AI Handoff Builder\bin"

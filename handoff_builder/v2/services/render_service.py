@@ -8,10 +8,15 @@ from handoff_builder.ffmpeg_tools import FFmpegError
 
 from ..common import utc_now_iso
 from ..errors import InvalidQueueTransitionError, UnsafePackageError
-from ..plans.semantic import load_and_validate_local_photo_plan, load_and_validate_preview_plan
+from ..plans.semantic import (
+    load_and_validate_edit_plan_3,
+    load_and_validate_local_photo_plan,
+    load_and_validate_preview_plan,
+)
 from ..qc.inspect import inspect_preview_output
 from ..render.compiler import compile_local_photo_render_plan, compile_preview_render_plan
 from ..render.ffmpeg_backend import FFmpegBackend
+from ..timeline.compiler import compile_normalized_timeline
 from ..storage import connect_workspace_db
 from ..storage.repositories import SqliteRenderQueueRepository, WorkspaceRepository
 
@@ -113,7 +118,41 @@ def _process_job_row(
     try:
         plan_payload = json.loads(Path(plan_row["plan_path"]).read_text(encoding="utf-8"))
         plan_schema_version = str(plan_payload["schema_version"])
-        if plan_schema_version in {"2.0", "2.1"}:
+        if plan_schema_version == "3.0":
+            # 3.0 uses Package Compiler → Normalized Timeline path
+            validated = load_and_validate_edit_plan_3(
+                Path(plan_row["plan_path"]),
+                Path(package_row["extracted_root"]),
+                backend,
+            )
+            # Compile Normalized Timeline (renderer-agnostic)
+            from ..assets import load_active_local_registry, resolve_plan_assets_against_registry
+            registry_payload = load_active_local_registry(project_root)
+            resolution_report = resolve_plan_assets_against_registry(
+                list(plan_payload["assets"]),
+                registry_payload,
+                require_declared_integrity=True,
+            )
+            normalized_timeline = compile_normalized_timeline(
+                plan_payload,
+                resolution_report["assets"],
+                fps_num=validated.fps_num,
+                fps_den=validated.fps_den,
+            )
+            # Write Normalized Timeline to output directory
+            normalized_timeline_path = output_dir / "normalized_timeline.json"
+            normalized_timeline_path.write_text(
+                json.dumps(normalized_timeline.payload, ensure_ascii=False, indent=2),
+                encoding="utf-8",
+            )
+            # For now, fall through to preview render for FFmpeg-based preview
+            validated = load_and_validate_preview_plan(
+                Path(plan_row["plan_path"]),
+                Path(package_row["extracted_root"]),
+                backend,
+            )
+            compiled = compile_preview_render_plan(validated, ffmpeg_path=backend.ffmpeg, output_path=reel_path)
+        elif plan_schema_version in {"2.0", "2.1"}:
             validated = load_and_validate_local_photo_plan(
                 Path(plan_row["plan_path"]),
                 project_root,

@@ -1,4 +1,5 @@
 from .import_service import import_package_into_workspace
+from .package_compiler import CompiledPackage, compile_package
 from .patch_service import apply_patch_in_workspace
 from .query_service import (
     list_plans,

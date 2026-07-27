@@ -75,6 +75,132 @@ class ValidatedLocalPhotoPlan:
 
 
 LOCAL_PHOTO_SCHEMA_VERSIONS = {"2.0", "2.1"}
+EDIT_PLAN_3_SCHEMA_VERSIONS = {"3.0"}
+
+
+@dataclass(frozen=True, slots=True)
+class ValidatedEditPlan3:
+    """Validated edit_plan 3.0 with resolved assets and rational timebase."""
+    payload: dict
+    assets: dict[str, ValidatedAsset]
+    audio_assets: dict[str, dict]
+    tracks: tuple[dict, ...]
+    fps_num: int
+    fps_den: int
+    total_duration_frames: int
+
+
+def load_and_validate_edit_plan_3(
+    plan_path: Path,
+    package_root: Path,
+    backend: FFmpegBackend,
+) -> ValidatedEditPlan3:
+    """Validate an edit_plan 3.0 with DaVinci-first rational timebase.
+
+    Validates:
+    - Schema conformance (3.0)
+    - source_audio_policy enum (discard, keep, duck_under_music, replace)
+    - Rational timebase (fps_num/fps_den from timebase object)
+    - Integer frame positions, microsecond source positions
+    - Asset existence and probe
+    - No forbidden keys (executable payloads)
+    """
+    payload = json.loads(plan_path.read_text(encoding="utf-8"))
+    validate_payload("edit_plan", "3.0", payload)
+    _reject_forbidden_keys(payload)
+
+    timebase = payload.get("timebase", {})
+    fps_num = int(timebase.get("fps_num", 30))
+    fps_den = int(timebase.get("fps_den", 1))
+    if fps_num <= 0 or fps_den <= 0:
+        raise UnsafePackageError(f"Invalid rational timebase: {fps_num}/{fps_den}")
+
+    # Validate source_audio_policy in visual_items
+    for item in payload.get("visual_items", []):
+        sap = str(item.get("source_audio_policy", "discard"))
+        if sap not in ("discard", "keep", "duck_under_music", "replace"):
+            raise UnsafePackageError(
+                f"Invalid source_audio_policy '{sap}' in visual_item "
+                f"{item.get('item_id', '?')}"
+            )
+
+    # Validate assets
+    assets: dict[str, ValidatedAsset] = {}
+    for asset in payload["assets"]:
+        asset_id = str(asset["asset_id"])
+        # 3.0 assets may not have a path (registry-resolved)
+        if asset.get("path"):
+            rel_path = str(asset["path"])
+            ensure_allowed_package_path(rel_path)
+            resolved = (package_root / rel_path).resolve()
+            if package_root.resolve() not in resolved.parents and resolved != package_root.resolve():
+                raise UnsafePackageError(f"Asset path escapes package root: {rel_path}")
+            if not resolved.exists():
+                raise UnsafePackageError(f"Asset file does not exist: {rel_path}")
+            meta = backend.probe(resolved)
+            if meta["codec"] is None:
+                raise UnsafePackageError(f"Asset is not a decodable video file: {rel_path}")
+            assets[asset_id] = ValidatedAsset(
+                asset_id=asset_id,
+                path=resolved,
+                duration_ms=round(float(meta["duration"]) * 1000),
+                width=int(meta["width"]),
+                height=int(meta["height"]),
+                rotation=int(meta["rotation"]),
+                has_audio=bool(meta["has_audio"]),
+            )
+
+    # Validate visual_items
+    validated_tracks: list[dict] = []
+    total_duration_frames = 0
+    validated_items: list[dict] = []
+    for item in payload.get("visual_items", []):
+        asset_id = str(item["asset_id"])
+        if asset_id not in assets:
+            raise UnsafePackageError(
+                f"Visual item references unknown asset_id: {asset_id}"
+            )
+        source_in_us = int(item["source_in_us"])
+        source_out_us = int(item["source_out_us"])
+        if source_in_us < 0 or source_out_us < 0:
+            raise UnsafePackageError(
+                f"Negative source position: {source_in_us}, {source_out_us}"
+            )
+        if source_out_us <= source_in_us:
+            raise UnsafePackageError(
+                f"source_out_us must be > source_in_us"
+            )
+        duration_frames = int(item["duration_frames"])
+        if duration_frames <= 0:
+            raise UnsafePackageError(
+                f"duration_frames must be positive"
+            )
+        total_duration_frames += duration_frames
+        validated_items.append({
+            "asset_id": asset_id,
+            "source_in_us": source_in_us,
+            "source_out_us": source_out_us,
+            "duration_frames": duration_frames,
+            "source_audio_policy": str(item.get("source_audio_policy", "discard")),
+        })
+    validated_tracks.append({
+        "track_index": 0,
+        "track_type": "video",
+        "items": tuple(validated_items),
+    })
+
+    if total_duration_frames <= 0:
+        raise UnsafePackageError("Total timeline duration must be positive.")
+
+    return ValidatedEditPlan3(
+        payload=payload,
+        assets=assets,
+        audio_assets={},
+        tracks=tuple(validated_tracks),
+        fps_num=fps_num,
+        fps_den=fps_den,
+        total_duration_frames=total_duration_frames,
+    )
 
 
 def load_and_validate_preview_plan(

@@ -1,7 +1,7 @@
 # -*- mode: python ; coding: utf-8 -*-
 from PyInstaller.utils.hooks import collect_all
 
-datas = [('prototypes\\hyperframes', 'prototypes\\hyperframes'), ('schemas', 'schemas')]
+datas = [('prototypes\\hyperframes', 'prototypes\\hyperframes'), ('schemas', 'schemas'), ('handoff_builder\\templates', 'handoff_builder\\templates')]
 binaries = []
 hiddenimports = []
 tmp_ret = collect_all('PIL')

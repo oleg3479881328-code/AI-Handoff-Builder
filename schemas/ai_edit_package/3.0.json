@@ -1,0 +1,121 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://github.com/oleg3479881328-code/AI-Handoff-Builder/schemas/ai_edit_package/3.0.json",
+  "title": "AI Edit Package Manifest 3.0",
+  "description": "Package manifest for AI-generated edit plans. Describes physical package contents only.",
+  "type": "object",
+  "required": [
+    "schema_version",
+    "package_type",
+    "project_id",
+    "handoff_id",
+    "handoff_sha256",
+    "plans",
+    "file_inventory",
+    "content_hash"
+  ],
+  "properties": {
+    "schema_version": {
+      "type": "string",
+      "const": "3.0"
+    },
+    "package_type": {
+      "type": "string",
+      "const": "ai_edit_package"
+    },
+    "project_id": {
+      "type": "string",
+      "minLength": 1
+    },
+    "handoff_id": {
+      "type": "string",
+      "minLength": 1
+    },
+    "handoff_sha256": {
+      "type": "string",
+      "pattern": "^[a-f0-9]{64}$"
+    },
+    "plans": {
+      "type": "array",
+      "minItems": 1,
+      "items": {
+        "type": "object",
+        "required": ["plan_id", "path", "sha256", "size_bytes"],
+        "properties": {
+          "plan_id": {
+            "type": "string",
+            "minLength": 1
+          },
+          "path": {
+            "type": "string",
+            "minLength": 1
+          },
+          "sha256": {
+            "type": "string",
+            "pattern": "^[a-f0-9]{64}$"
+          },
+          "size_bytes": {
+            "type": "integer",
+            "minimum": 0
+          }
+        },
+        "additionalProperties": false
+      }
+    },
+    "audio_assets": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": ["audio_id", "path", "sha256", "size_bytes"],
+        "properties": {
+          "audio_id": {
+            "type": "string",
+            "minLength": 1
+          },
+          "path": {
+            "type": "string",
+            "minLength": 1
+          },
+          "sha256": {
+            "type": "string",
+            "pattern": "^[a-f0-9]{64}$"
+          },
+          "size_bytes": {
+            "type": "integer",
+            "minimum": 0
+          }
+        },
+        "additionalProperties": false
+      }
+    },
+    "file_inventory": {
+      "type": "array",
+      "minItems": 1,
+      "items": {
+        "type": "object",
+        "required": ["path", "sha256", "size_bytes"],
+        "properties": {
+          "path": {
+            "type": "string",
+            "minLength": 1
+          },
+          "sha256": {
+            "type": "string",
+            "pattern": "^[a-f0-9]{64}$"
+          },
+          "size_bytes": {
+            "type": "integer",
+            "minimum": 0
+          }
+        },
+        "additionalProperties": false
+      },
+      "uniqueItems": true
+    },
+    "content_hash": {
+      "type": "string",
+      "pattern": "^[a-f0-9]{64}$"
+    }
+  },
+  "additionalProperties": false
+}

@@ -26,10 +26,12 @@ Current success for this stage means:
 ## Current Status
 
 - Mode: active execution
-- Phase: release-candidate baseline preserved; `AI_EDIT_PACKAGE` / `edit_plan` schema `2.1` handoff-derived workflow implemented and validated locally, including packaged `.exe` acceptance
-- Active branch: `feat/issue-16-preview-scroll-fix`
-- Draft PR: pending publication from `feat/issue-16-preview-scroll-fix` into `feat/issue-14-auto-project-root`
-- Health: current FFmpeg, Voice Studio, metadata, Light/Dark release-candidate baseline, packaged schema resources, HyperFrames follow-up, schema `2.1` handoff-derived workflow, and Issue `#14` owner-flow remain intact; the new Issue `#16` fixes keep `Local Edit Runner (v2)` vertically scrollable, collapse diagnostic JSON out of the main operator path, and bind `Open Preview` to the current active imported plan instead of stale global prototype state; no private media or generated outputs are tracked
+- Phase: Package Protocol frozen (v1.0). `AI_EDIT_PACKAGE` / `edit_plan` schema `3.0` with DaVinci-first rational timebase, `ANALYSIS_HANDOFF` protocol, `Normalized Timeline 1.0` internal schema, and authoritative Package Compiler implemented. All 157 tests pass.
+- Active branch: `feat/package-protocol-freeze-davinci-first`
+- Base branch: `feat/issue-16-preview-scroll-fix`
+- Draft PR: pending publication from `feat/package-protocol-freeze-davinci-first` -> `feat/issue-16-preview-scroll-fix`
+- Issue: `#20` — Freeze self-contained Package Protocol and compile deterministic DaVinci-first Normalized Timeline
+- Health: current FFmpeg, Voice Studio, metadata, Light/Dark release-candidate baseline, packaged schema resources, HyperFrames follow-up, schema `2.1` handoff-derived workflow, Issue `#14` owner-flow, and Issue `#16` scroll fixes remain intact; Package Protocol 3.0, Normalized Timeline 1.0, and authoritative Package Compiler added; no private media or generated outputs are tracked
 
 ## Done So Far
 
