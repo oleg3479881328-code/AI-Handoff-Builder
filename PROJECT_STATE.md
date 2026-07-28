@@ -1,15 +1,67 @@
 # Current State
 
-- Date: 2026-07-26
+- Date: 2026-07-28
 - Repository: `oleg3479881328-code/AI-Handoff-Builder`
 - Broad v2 contract: `Yt-Dlp-Download-Manager` issue `#67`
 - HyperFrames contract: repository issue `#3`
+- Shotcut MCP Windows proof contract: repository issue `#25`
 - One-file handoff workflow fix: repository issue `#10`
 - Handoff completeness defect: repository issue `#2`
-- Current branch: `feat/issue-16-preview-scroll-fix`
-- Base branch: `feat/issue-14-auto-project-root`
-- Draft PR: pending publication from `feat/issue-16-preview-scroll-fix` -> `feat/issue-14-auto-project-root`
-- Current phase: Issue `#16` scroll + current-preview-target fixes implemented and regression-validated in source; the next step is packaged `.exe` acceptance and draft-PR publication
+- Current branch: `experiment/shotcut-mcp-windows-proof`
+- Base branch: `feat/issue-16-preview-scroll-fix`
+- Draft PR: pending publication from `experiment/shotcut-mcp-windows-proof` -> `feat/issue-16-preview-scroll-fix`
+- Current phase: real Windows Shotcut MCP proof passed on one owner-selected MP4; minimal bounded Shotcut backend adapter, tests, and publication artifacts are being finalized without changing the existing FFmpeg production path
+
+## Issue #25 Snapshot
+
+- Gate 0:
+  - isolated worktree from base SHA `67b74e9d512012829efb9c990a1055d3f43eb59b`
+  - `python -m pytest -q` baseline in the clean Issue `#25` worktree:
+    - `124 passed`
+- Gate 1:
+  - official Shotcut `26.6.25` was not already available in the proof workspace
+  - official portable runtime was downloaded from the official Shotcut source and kept outside git
+- Gate 2:
+  - donor `matrodrigs/shotcut-mcp` pinned to `v1.5.0`
+  - full SHA behind the tag:
+    - `7e66c17b92c2058670ae5e4c21aa61e27c51d317`
+  - audit decision:
+    - `ACCEPT_FOR_ISOLATED_PROOF`
+  - audit document:
+    - `docs/shotcut-mcp-donor-audit.md`
+- Gate 3:
+  - official Shotcut portable runtime and donor checkout remain isolated outside the repository
+  - stdio server proof completed with a local JSON-RPC harness
+  - safety policy stayed strict:
+    - allowed roots only
+    - absolute paths required
+    - network resources disabled
+    - unsafe consumer properties disabled
+- Gate 4:
+  - repeated from scratch on one owner-selected real MP4
+  - all 15 required steps completed
+  - project readback proved a real timeline mutation:
+    - pre-edit revision:
+      - `0b9dbe445a750eea37c125dcadac627932a5d9cc3a03029219ea96650301e259`
+    - post-edit revision:
+      - `012c5dc02e3d3164dd996e2f1d369b7d1335b883be729292c59d48bdc6001625`
+  - proof artifacts remained local-only and outside git
+- Gate 5:
+  - added a narrow code-level Shotcut backend boundary:
+    - `handoff_builder/v2/render/shotcut_backend.py`
+    - `handoff_builder/v2/render/backends.py`
+  - existing FFmpeg render service remains unchanged and still instantiates `FFmpegBackend`
+- Gate 6:
+  - new focused adapter tests:
+    - `tests/test_v2_shotcut_backend.py`
+  - initial result:
+    - `14 passed`
+
+## New Verified Limitations From Issue #25
+
+- A raw donor checkout on Windows needs donor-root import visibility for detached render workers.
+- `render_status` can briefly surface a false terminal `failed` state before durable metadata settles to `completed`.
+- AI Handoff Builder now compensates for that race inside the adapter boundary before treating the job as failed.
 
 ## Accepted Baseline Preserved
 

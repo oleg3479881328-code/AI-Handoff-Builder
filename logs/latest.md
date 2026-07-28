@@ -1,7 +1,144 @@
 # Latest Log
 
-Date: 2026-07-26
-Step: Issue #16 Local Edit Runner scroll + current Preview target
+Date: 2026-07-28
+Step: Issue #25 Shotcut MCP Windows proof + bounded backend adapter
+
+## Completed
+
+- Re-entered through PEOS and re-read the active repository instructions plus Issue `#25` and the DeepSeek handoff.
+- Preserved Issue `#20`, PR `#21`, Issue `#23`, and PR `#24` by working in an isolated Issue `#25` worktree:
+  - branch:
+    - `experiment/shotcut-mcp-windows-proof`
+  - base SHA:
+    - `67b74e9d512012829efb9c990a1055d3f43eb59b`
+- Re-ran the clean worktree baseline:
+  - `python -m pytest -q`
+  - result:
+    - `124 passed`
+- Audited pinned donor `matrodrigs/shotcut-mcp`:
+  - tag:
+    - `v1.5.0`
+  - full SHA:
+    - `7e66c17b92c2058670ae5e4c21aa61e27c51d317`
+  - decision:
+    - `ACCEPT_FOR_ISOLATED_PROOF`
+  - document:
+    - `docs/shotcut-mcp-donor-audit.md`
+- Verified the isolated official Shotcut Windows stack in the proof workspace:
+  - Shotcut:
+    - `26.6.25`
+  - Melt:
+    - `7.40.0`
+  - bundled FFmpeg / FFprobe:
+    - `n8.1.2`
+- Completed the full Gate 4 cycle on one owner-selected real MP4 using all 15 required steps:
+  - `shotcut_status`
+  - `shotcut_doctor`
+  - `probe_media`
+  - `create_project`
+  - `inspect_project`
+  - `plan_project_edit`
+  - `edit_project`
+  - `validate_project`
+  - `render_preview`
+  - `render_contact_sheet`
+  - `open_in_shotcut`
+  - `start_render`
+  - `render_status`
+  - `probe_media` on the rendered MP4
+  - final `inspect_project`
+- Verified readback evidence from the real proof:
+  - pre-edit project revision:
+    - `0b9dbe445a750eea37c125dcadac627932a5d9cc3a03029219ea96650301e259`
+  - post-edit project revision:
+    - `012c5dc02e3d3164dd996e2f1d369b7d1335b883be729292c59d48bdc6001625`
+  - rendered MP4:
+    - non-zero
+    - `h264` video stream present
+    - `aac stereo` audio stream present
+    - duration:
+      - `2.986 s`
+- Posted the sanitized GitHub checkpoint:
+  - `LIVE PROOF CHECKPOINT`
+  - status:
+    - `REAL_SHOTCUT_MCP_PROOF_PASSED`
+- Added a narrow code-level Shotcut backend boundary inside the repository:
+  - `handoff_builder/v2/render/shotcut_backend.py`
+  - `handoff_builder/v2/render/backends.py`
+  - `handoff_builder/v2/render/__init__.py`
+- Added focused adapter regression coverage:
+  - `tests/test_v2_shotcut_backend.py`
+  - `python -m pytest -q tests/test_v2_shotcut_backend.py`
+  - result:
+    - `14 passed in 2.16s`
+- Added architecture/setup docs:
+  - `docs/shotcut-mcp-donor-audit.md`
+  - `docs/shotcut-backend-adapter.md`
+
+## Errors And Resolutions
+
+- `2026-07-28T20:06Z`
+  - stage:
+    - Gate 4 runner bootstrap
+  - command/tool:
+    - local proof runner using `probe_media`
+  - sanitized error:
+    - source frame rate came back as a numeric value instead of a fraction string
+  - hypothesis:
+    - the runner incorrectly assumed `avg_frame_rate` always contains `/`
+  - attempted solution:
+    - accept both numeric and fraction formats
+  - result:
+    - resolved
+
+- `2026-07-28T20:07Z`
+  - stage:
+    - Gate 4 edit
+  - command/tool:
+    - `edit_project`
+  - sanitized error:
+    - JSON-RPC argument validation rejected `$.validate`
+  - hypothesis:
+    - the local runner copied an unsupported field from older assumptions instead of the published v1.5.0 schema
+  - attempted solution:
+    - remove `validate` and treat schema contracts as authoritative
+  - result:
+    - resolved
+
+- `2026-07-28T20:08Z`
+  - stage:
+    - Gate 4 render bootstrap
+  - command/tool:
+    - detached donor render worker
+  - sanitized error:
+    - `ModuleNotFoundError: No module named 'shotcut_mcp'`
+  - hypothesis:
+    - the donor checkout script fixes `sys.path` only for the foreground server, not for the detached `python -m shotcut_mcp.render_worker` process
+  - attempted solution:
+    - inject donor-root `PYTHONPATH` from the caller boundary
+  - result:
+    - resolved and captured as a documented Windows limitation
+
+- `2026-07-28T20:08Z`
+  - stage:
+    - Gate 4 render completion
+  - command/tool:
+    - `render_status`
+  - sanitized error:
+    - transient `failed` with status note `The render supervisor exited before finalizing the job.`
+  - hypothesis:
+    - Windows race between early status polling and durable job finalization
+  - attempted solution:
+    - re-read the durable job JSON/log metadata before accepting the terminal failure
+  - result:
+    - resolved for proof acceptance and codified into the adapter
+
+## Remaining Work In This Run
+
+- run the donor tests required by the pinned donor documentation / repository
+- run the full repository suite from final HEAD
+- re-run the real final-HEAD proof through the new repository adapter code
+- update final GitHub report, commit, push, and open the Draft PR
 
 ## Completed
 
