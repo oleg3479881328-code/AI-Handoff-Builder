@@ -56,12 +56,18 @@
     - `tests/test_v2_shotcut_backend.py`
   - initial result:
     - `14 passed`
+  - full suite after the final `A1` track adapter update:
+    - `138 passed`
 
 ## New Verified Limitations From Issue #25
 
 - A raw donor checkout on Windows needs donor-root import visibility for detached render workers.
 - `render_status` can briefly surface a false terminal `failed` state before durable metadata settles to `completed`.
 - AI Handoff Builder now compensates for that race inside the adapter boundary before treating the job as failed.
+- The final repository-backed proof now materializes both:
+  - `V1`
+  - `A1`
+  inside the disposable Shotcut project readback, matching the Gate 4 structure contract.
 
 ## Accepted Baseline Preserved
 

@@ -12,6 +12,7 @@ from handoff_builder.v2.render.shotcut_backend import (
     ShotcutClipIntent,
     ShotcutMcpBackend,
     ShotcutProfile,
+    ShotcutTrackIntent,
     redact_private_paths,
     select_render_backend,
 )
@@ -171,10 +172,12 @@ def test_create_disposable_project_validates_profile_and_clip(tmp_path: Path, mo
         project_path,
         profile=ShotcutProfile(width=1920, height=1080, fps_num=30, fps_den=1),
         clips=[ShotcutClipIntent(media_path=media_path, in_frame=0, out_frame=89)],
+        tracks=[ShotcutTrackIntent(kind="audio", name="A1")],
     )
     assert result["revision"] == "a" * 64
     assert captured["tool_name"] == "create_project"
     assert captured["arguments"]["clips"][0]["path"] == str(media_path.resolve())
+    assert captured["arguments"]["tracks"] == [{"kind": "audio", "name": "A1"}]
 
 
 def test_append_linked_clip_uses_add_clip_operation(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:

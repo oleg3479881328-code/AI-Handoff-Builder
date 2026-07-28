@@ -73,6 +73,20 @@ class ShotcutClipIntent:
 
 
 @dataclass(frozen=True, slots=True)
+class ShotcutTrackIntent:
+    kind: str
+    name: str | None = None
+
+    def to_track_args(self) -> dict[str, str]:
+        if self.kind not in {"video", "audio"}:
+            raise ShotcutBackendError("Shotcut track kind must be 'video' or 'audio'.")
+        payload = {"kind": self.kind}
+        if self.name:
+            payload["name"] = self.name
+        return payload
+
+
+@dataclass(frozen=True, slots=True)
 class ShotcutRenderJob:
     job_id: str
     output_path: Path
@@ -178,6 +192,7 @@ class ShotcutMcpBackend:
         *,
         profile: ShotcutProfile,
         clips: list[ShotcutClipIntent],
+        tracks: list[ShotcutTrackIntent] | None = None,
         overwrite: bool = True,
     ) -> dict[str, Any]:
         if not clips:
@@ -188,6 +203,8 @@ class ShotcutMcpBackend:
             "clips": [clip.to_clip_args() for clip in clips],
             **profile.to_create_project_args(),
         }
+        if tracks:
+            payload["tracks"] = [track.to_track_args() for track in tracks]
         return self._invoke_tool("create_project", payload)
 
     def inspect_project(self, project_path: Path) -> dict[str, Any]:

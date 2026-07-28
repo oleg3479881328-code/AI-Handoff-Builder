@@ -74,6 +74,26 @@ Step: Issue #25 Shotcut MCP Windows proof + bounded backend adapter
 - Added architecture/setup docs:
   - `docs/shotcut-mcp-donor-audit.md`
   - `docs/shotcut-backend-adapter.md`
+- Tightened the adapter and final proof to materialize a separate `A1` audio track in the disposable Shotcut project:
+  - `ShotcutTrackIntent`
+  - explicit `tracks=[{kind=audio,name=A1}]`
+  - linked real-media audio clips on `A1`
+- Re-ran the full suite after the `A1` update:
+  - `python -m pytest -q`
+  - result:
+    - `138 passed in 43.78s`
+- Re-ran the real final-HEAD proof through `handoff_builder.v2.render.shotcut_backend` after the `A1` update:
+  - repository HEAD during proof:
+    - `5ba01f6241b921a43fc9116cac300e7754d7e7f1`
+  - final proof project readback now shows:
+    - `V1`
+    - `A1`
+    - `Titles`
+  - rendered MP4 remained valid with:
+    - `h264` video
+    - `aac stereo` audio
+  - local SHA-256 recorded outside GitHub for the final render:
+    - `e7d77ac0edf70c2fcd1b02c483ec030b2642cc3f630fc5e6635b2769b32def9d`
 
 ## Errors And Resolutions
 
@@ -135,10 +155,9 @@ Step: Issue #25 Shotcut MCP Windows proof + bounded backend adapter
 
 ## Remaining Work In This Run
 
-- run the donor tests required by the pinned donor documentation / repository
-- run the full repository suite from final HEAD
-- re-run the real final-HEAD proof through the new repository adapter code
-- update final GitHub report, commit, push, and open the Draft PR
+- publish the final GitHub execution report
+- create the final incremental commit for the explicit `A1` track update
+- push the updated branch head into the existing Draft PR
 
 ## Completed
 
