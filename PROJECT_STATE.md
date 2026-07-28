@@ -1,15 +1,59 @@
 # Current State
 
-- Date: 2026-07-26
+- Date: 2026-07-28
 - Repository: `oleg3479881328-code/AI-Handoff-Builder`
 - Broad v2 contract: `Yt-Dlp-Download-Manager` issue `#67`
 - HyperFrames contract: repository issue `#3`
 - One-file handoff workflow fix: repository issue `#10`
 - Handoff completeness defect: repository issue `#2`
-- Current branch: `feat/issue-16-preview-scroll-fix`
-- Base branch: `feat/issue-14-auto-project-root`
-- Draft PR: pending publication from `feat/issue-16-preview-scroll-fix` -> `feat/issue-14-auto-project-root`
-- Current phase: Issue `#16` scroll + current-preview-target fixes implemented and regression-validated in source; the next step is packaged `.exe` acceptance and draft-PR publication
+- Current branch: `experiment/kdenlive-live-mcp-windows`
+- Base branch: `feat/issue-16-preview-scroll-fix`
+- Draft PR: pending publication from `experiment/kdenlive-live-mcp-windows` -> `feat/issue-16-preview-scroll-fix`
+- Current phase: Issue `#23` Windows Kdenlive live integration spike completed through Phase 2 gating; current status is `BLOCKED_WITH_EVIDENCE` before any adapter implementation because the installed Kdenlive is stock/unpatched and this machine does not already have the required isolated Windows donor-build substrate
+
+## Update: Issue #23 Windows Kdenlive live MCP spike
+
+- Re-entered through Project Execution OS and recorded the required Phase 0 technical-plan Issue comment before any implementation change.
+- Isolated the work on the required dedicated branch:
+  - `experiment/kdenlive-live-mcp-windows`
+  - base: `feat/issue-16-preview-scroll-fix`
+- Pinned donor SHAs and licenses:
+  - `D-Ogi/mcp-kdenlive` -> `afe585143f631fa00f62a1d22207d85df06a0d74` -> no declared license found in GitHub repo metadata during this run
+  - `D-Ogi/kdenlive-api` -> `d1f87baa127d2950d89b923f7a0206defb124073` -> `MIT`
+  - `D-Ogi/kdenlive` -> `8312f5ef03a5bd1fbb177d0e1696948bcb1b9b3a` -> `GPL-3.0`
+- Completed Phase 1 read-only inspection of the installed Windows Kdenlive copy:
+  - registry uninstall entry reports `Kdenlive 26.04.3`
+  - publisher: `KDE e.V.`
+  - executable architecture: `x64`
+  - executable SHA-256:
+    - `B4CB9D9ECCEBD16F05564875A3EE67A3A145AEF41750853B7CCBDA95B097F851`
+  - Qt/DBus runtime DLLs are present in the installed `bin/` folder:
+    - `Qt6DBus.dll`
+    - `libdbus-1-3.dll`
+    - `libKF6DBusAddons.dll`
+- Confirmed the installed copy is not the donor-patched scripting build:
+  - donor fork explicitly requires Windows Craft with `-DUSE_DBUS=ON`
+  - donor fork registers `/MainWindow` and exports `Q_SCRIPTABLE` methods for the live API
+  - installed-tree binary scan found no matches for:
+    - `org.kde.kdenlive.MainWindow`
+    - `scriptGetProjectName`
+    - `scriptOpenProject`
+    - `scriptRenderWithParams`
+    - `scriptCreateSequence`
+- Confirmed the donor Python transport cannot connect on this machine in the current environment:
+  - `kdenlive-api` backend autodetect returned `None`
+  - no `dbus-send`, `qdbus`, or `gdbus` was present in `PATH`
+  - no `CraftRoot` was present
+  - the live donor transport attempt against a running Kdenlive process failed with:
+    - `FileNotFoundError [WinError 2]`
+- Completed the Phase 2 compatibility gate:
+  - no existing local `Craft`, `cmake`, `ninja`, `gcc`, `g++`, `cl`, or `pacman`
+  - no discovered donor GitHub release artifacts for a pinned Windows patched build in this run
+  - moving to a real isolated patched build would first require installing a substantial Windows build substrate that is not already present on this machine
+- Installed-build classification for this run:
+  - `STOCK_UNPATCHED_BUILD`
+- Current honest execution status for Issue `#23`:
+  - `BLOCKED_WITH_EVIDENCE`
 
 ## Accepted Baseline Preserved
 

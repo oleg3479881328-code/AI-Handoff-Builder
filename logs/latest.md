@@ -1,5 +1,97 @@
 # Latest Log
 
+Date: 2026-07-28
+Step: Issue #23 Windows Kdenlive live MCP spike
+
+## Completed
+
+- Re-entered the repository through the required project/router/state/log entrypoints.
+- Isolated the spike on the required dedicated branch:
+  - `experiment/kdenlive-live-mcp-windows`
+  - base: `feat/issue-16-preview-scroll-fix`
+- Posted the required pre-implementation technical plan comment on Issue `#23`.
+- Recorded donor SHAs and license state for:
+  - `D-Ogi/mcp-kdenlive`
+  - `D-Ogi/kdenlive-api`
+  - `D-Ogi/kdenlive`
+- Completed read-only inspection of the installed Windows Kdenlive copy:
+  - version: `26.04.3`
+  - publisher: `KDE e.V.`
+  - architecture: `x64`
+  - executable SHA-256:
+    - `B4CB9D9ECCEBD16F05564875A3EE67A3A145AEF41750853B7CCBDA95B097F851`
+  - DBus runtime DLLs present:
+    - `Qt6DBus.dll`
+    - `libdbus-1-3.dll`
+    - `libKF6DBusAddons.dll`
+- Launched the real installed Kdenlive process and confirmed live GUI instances were running on the machine.
+- Verified donor API expectations from source:
+  - object path:
+    - `/MainWindow`
+  - interface constants:
+    - `org.kde.kdenlive.MainWindow`
+  - donor README/docs text still also mentions:
+    - `org.kde.kdenlive.scripting`
+  - the donor stack therefore contains a real interface-description inconsistency that must not be hidden.
+- Verified the installed Kdenlive tree does not expose the donor scripting symbols in this run:
+  - no matches for:
+    - `org.kde.kdenlive.MainWindow`
+    - `scriptGetProjectName`
+    - `scriptOpenProject`
+    - `scriptRenderWithParams`
+    - `scriptCreateSequence`
+- Verified the donor transport cannot connect on this Windows machine in the current environment:
+  - backend autodetect:
+    - `None`
+  - discovered D-Bus CLI tools:
+    - `dbus-send`: missing
+    - `qdbus`: missing
+    - `gdbus`: missing
+  - live transport attempt result:
+    - `FileNotFoundError [WinError 2]`
+- Completed the Phase 2 compatibility gate:
+  - no local `CraftRoot`
+  - no local `Craft`, `cmake`, `ninja`, `gcc`, `g++`, `cl`, or `pacman`
+  - no discovered donor GitHub releases for a pinned Windows patched build in this run
+- Saved the full machine-specific proof details only into the ignored local artifact directory:
+  - `tmp_issue23_kdenlive_live/`
+
+## Acceptance Status
+
+- installed-build version/architecture/hash evidence: satisfied
+- donor SHA/license pinning: satisfied
+- real running Kdenlive process proof: satisfied
+- installed-build compatibility classification: satisfied
+- live donor transport success on this machine: not satisfied
+- live scripting-service proof against a compatible build: not satisfied
+- disposable project/timeline mutation proof: not started
+- V1/A1 readback proof: not started
+- rendered MP4 with picture and sound through live Kdenlive control: not started
+
+## Current Status
+
+- Issue `#23` installed-build classification:
+  - `STOCK_UNPATCHED_BUILD`
+- Issue `#23` honest status:
+  - `BLOCKED_WITH_EVIDENCE`
+
+## Exact Blocker
+
+- The installed Kdenlive on this machine is the official KDE build, not the donor-patched scripting build required for live MCP control.
+- The current machine also lacks the isolated Windows donor-build substrate required by the donor fork path:
+  - no Craft
+  - no compiler/build toolchain
+  - no D-Bus CLI transport tools expected by `kdenlive-api`
+- Proceeding to a real patched-build/live-control proof would require first installing a substantial Windows build environment or obtaining a pinned donor-built portable artifact that was not available during this run.
+
+## Next
+
+- Publish the blocker evidence to Issue `#23`.
+- Open a separate Draft PR for this Issue only.
+- Do not merge, do not mark Ready, do not close the Issue.
+
+## Previous Log
+
 Date: 2026-07-26
 Step: Issue #16 Local Edit Runner scroll + current Preview target
 
