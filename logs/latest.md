@@ -153,6 +153,20 @@ Step: Issue #25 Shotcut MCP Windows proof + bounded backend adapter
   - result:
     - resolved for proof acceptance and codified into the adapter
 
+- `2026-07-28T21:20Z`
+  - stage:
+    - Gate 6 donor tests
+  - command/tool:
+    - `python -m unittest -q tests.test_integration`
+  - sanitized error:
+    - direct donor integration tests failed with `melt was not found` in the raw-clone module-import path
+  - hypothesis:
+    - the donor integration suite exercises module-level executable discovery differently from the stdio proof path and does not inherit the same detached-worker/runtime wrapper guarantees
+  - attempted solution:
+    - re-run repository acceptance through the actual stdio server and then through the new AI Handoff Builder adapter boundary
+  - result:
+    - unresolved inside the raw donor test path; documented as a remaining donor limitation, while the real stdio proof and final repository adapter proof both passed
+
 ## Remaining Work In This Run
 
 - publish the final GitHub execution report
