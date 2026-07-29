@@ -25,6 +25,13 @@ from handoff_builder.v2.hyperframes_preview import (
     previewable_plan,
     resolve_active_preview_plan_id,
 )
+from handoff_builder.v2.services.shotcut_service import (
+    build_editable_shotcut_project,
+    describe_shotcut_runtime,
+    open_shotcut_project,
+    render_shotcut_job,
+)
+from handoff_builder.v2.shotcut_settings import ShotcutAppSettings, ShotcutSettingsStore
 from handoff_builder.v2.services.import_service import resolve_workspace_for_package
 from handoff_builder.v2.services import (
     list_voice_jobs,
@@ -103,6 +110,7 @@ class App(tk.Tk):
         self.v2_controller = V2RunnerController(self.events)
         self.v2_workspace_path = tk.StringVar(value=str(Path.home() / "Desktop" / "AI Handoff Workspace"))
         self.v2_project_id = tk.StringVar(value="proj-1")
+        self.v2_backend_name = tk.StringVar(value="ffmpeg")
         self.v2_status_text = tk.StringVar(value="Выберите AI_EDIT_PACKAGE.zip или откройте workspace вручную.")
         self.v2_summary_text = ""
         self.v2_qc_text = ""
@@ -113,6 +121,18 @@ class App(tk.Tk):
         self.v2_diagnostics_visible = False
         self.v2_first_frame_image: ImageTk.PhotoImage | None = None
         self.v2_busy = False
+        self.shotcut_settings_store = ShotcutSettingsStore()
+        self.shotcut_settings = self.shotcut_settings_store.load()
+        self.shotcut_runtime_dir = tk.StringVar(value=self.shotcut_settings.runtime_dir)
+        self.shotcut_server_script = tk.StringVar(value=self.shotcut_settings.server_script)
+        self.shotcut_runtime_text = tk.StringVar(
+            value="Shotcut: выберите runtime folder и MCP script или нажмите Check Status."
+        )
+        self.shotcut_status_text = tk.StringVar(
+            value="Shotcut backend пока не активирован. FFmpeg остаётся основным путём по умолчанию."
+        )
+        self.shotcut_current_cancel_event: threading.Event | None = None
+        self.shotcut_current_render_job_id: str | None = None
         self.main_notebook: ttk.Notebook | None = None
         self.voice_tab_loaded_once = False
         self.voice_base_url = tk.StringVar(value="http://127.0.0.1:17493")
@@ -301,7 +321,7 @@ class App(tk.Tk):
 
         outer = self.v2_scroll_content
         outer.columnconfigure(0, weight=1)
-        outer.rowconfigure(6, weight=1)
+        outer.rowconfigure(7, weight=1)
 
         workspace_frame = ttk.LabelFrame(outer, text="Workspace", padding=10)
         workspace_frame.grid(row=0, column=0, sticky="ew")
@@ -337,8 +357,53 @@ class App(tk.Tk):
 
         ttk.Label(outer, textvariable=self.v2_status_text).grid(row=2, column=0, sticky="w", pady=(8, 8))
 
+        shotcut_frame = ttk.LabelFrame(outer, text="Shotcut MCP", padding=10)
+        shotcut_frame.grid(row=3, column=0, sticky="ew")
+        shotcut_frame.columnconfigure(1, weight=1)
+        ttk.Label(shotcut_frame, text="Render backend:").grid(row=0, column=0, sticky="w")
+        ttk.Combobox(
+            shotcut_frame,
+            textvariable=self.v2_backend_name,
+            values=("ffmpeg", "shotcut"),
+            state="readonly",
+            width=18,
+        ).grid(row=0, column=1, sticky="w", padx=(8, 8))
+        ttk.Button(shotcut_frame, text="Check Status", command=self._shotcut_check_status).grid(row=0, column=2, sticky="e")
+        ttk.Button(shotcut_frame, text="Reset Paths", command=self._shotcut_reset_paths).grid(row=0, column=3, sticky="e", padx=(8, 0))
+
+        ttk.Label(shotcut_frame, text="Runtime folder:").grid(row=1, column=0, sticky="w", pady=(8, 0))
+        ttk.Entry(shotcut_frame, textvariable=self.shotcut_runtime_dir).grid(
+            row=1, column=1, columnspan=2, sticky="ew", padx=(8, 8), pady=(8, 0)
+        )
+        ttk.Button(shotcut_frame, text="Choose", command=self._shotcut_choose_runtime).grid(row=1, column=3, sticky="e", pady=(8, 0))
+
+        ttk.Label(shotcut_frame, text="MCP script:").grid(row=2, column=0, sticky="w", pady=(8, 0))
+        ttk.Entry(shotcut_frame, textvariable=self.shotcut_server_script).grid(
+            row=2, column=1, columnspan=2, sticky="ew", padx=(8, 8), pady=(8, 0)
+        )
+        ttk.Button(shotcut_frame, text="Choose", command=self._shotcut_choose_server_script).grid(row=2, column=3, sticky="e", pady=(8, 0))
+
+        shotcut_actions = ttk.Frame(shotcut_frame, style="App.TFrame")
+        shotcut_actions.grid(row=3, column=0, columnspan=4, sticky="ew", pady=(10, 0))
+        self.shotcut_build_button = ttk.Button(
+            shotcut_actions, text="Build Editable Project", command=self._shotcut_build_selected_project
+        )
+        self.shotcut_build_button.pack(side="left")
+        self.shotcut_open_project_button = ttk.Button(
+            shotcut_actions, text="Open Editable Project", command=self._shotcut_open_editable_project
+        )
+        self.shotcut_open_project_button.pack(side="left", padx=(8, 0))
+        self.shotcut_open_button = ttk.Button(shotcut_actions, text="Open in Shotcut", command=self._shotcut_open_in_shotcut)
+        self.shotcut_open_button.pack(side="left", padx=(8, 0))
+        ttk.Label(shotcut_frame, textvariable=self.shotcut_runtime_text, wraplength=980, justify="left").grid(
+            row=4, column=0, columnspan=4, sticky="w", pady=(8, 0)
+        )
+        ttk.Label(shotcut_frame, textvariable=self.shotcut_status_text, wraplength=980, justify="left").grid(
+            row=5, column=0, columnspan=4, sticky="w", pady=(6, 0)
+        )
+
         coordinator_frame = ttk.LabelFrame(outer, text="Coordinator Bridge", padding=10)
-        coordinator_frame.grid(row=3, column=0, sticky="ew")
+        coordinator_frame.grid(row=4, column=0, sticky="ew", pady=(10, 0))
         coordinator_frame.columnconfigure(0, weight=3)
         coordinator_frame.columnconfigure(1, weight=2)
         coordinator_frame.rowconfigure(1, weight=1)
@@ -374,7 +439,7 @@ class App(tk.Tk):
         )
 
         hyperframes_frame = ttk.LabelFrame(outer, text="HyperFrames Lab", padding=10)
-        hyperframes_frame.grid(row=4, column=0, sticky="ew", pady=(10, 0))
+        hyperframes_frame.grid(row=5, column=0, sticky="ew", pady=(10, 0))
         hyperframes_frame.columnconfigure(1, weight=1)
         ttk.Label(hyperframes_frame, text="Project dir:").grid(row=0, column=0, sticky="w")
         ttk.Entry(hyperframes_frame, textvariable=self.hyperframes_project_path).grid(row=0, column=1, sticky="ew", padx=(8, 8))
@@ -400,7 +465,7 @@ class App(tk.Tk):
         )
 
         summary_frame = ttk.LabelFrame(outer, text="Import AI Plan / Patch Summary", padding=10)
-        summary_frame.grid(row=5, column=0, sticky="nsew", pady=(10, 0))
+        summary_frame.grid(row=6, column=0, sticky="nsew", pady=(10, 0))
         summary_frame.columnconfigure(0, weight=1)
         summary_actions = ttk.Frame(summary_frame, style="Surface.TFrame")
         summary_actions.grid(row=0, column=0, sticky="ew")
@@ -425,7 +490,7 @@ class App(tk.Tk):
         self.v2_summary_json_frame.grid_remove()
 
         lower = ttk.Panedwindow(outer, orient="horizontal")
-        lower.grid(row=6, column=0, sticky="nsew", pady=(10, 0))
+        lower.grid(row=7, column=0, sticky="nsew", pady=(10, 0))
 
         queue_frame = ttk.Frame(lower, padding=4)
         queue_frame.columnconfigure(0, weight=1)
@@ -1148,6 +1213,16 @@ class App(tk.Tk):
         if not self.v2_controller.workspace:
             self._show_warning("Нет workspace", "Сначала откройте или создайте v2 workspace.")
             return
+        if self.v2_backend_name.get().strip().lower() == "shotcut":
+            pending_job = next(
+                (job for job in (self.v2_current_snapshot or {}).get("jobs", []) if job.get("status") == "pending"),
+                None,
+            )
+            if pending_job is None:
+                self._show_warning("Нет pending job", "Для Shotcut не найден pending render job.")
+                return
+            self._shotcut_run_render_job(str(pending_job["render_job_id"]))
+            return
         self._v2_set_busy(True, "Запуск next pending render job...")
         self.v2_controller.start_render_next()
 
@@ -1155,6 +1230,9 @@ class App(tk.Tk):
         job_id = self._v2_selected_job_id()
         if not job_id:
             self._show_warning("Нет job", "Выберите render job в очереди.")
+            return
+        if self.v2_backend_name.get().strip().lower() == "shotcut":
+            self._shotcut_run_render_job(job_id)
             return
         self._v2_set_busy(True, f"Запуск render job {job_id}...")
         self.v2_controller.start_render_job(job_id)
@@ -1164,6 +1242,9 @@ class App(tk.Tk):
         if not job_id:
             self._show_warning("Нет job", "Выберите render job в очереди.")
             return
+        if self.shotcut_current_render_job_id == job_id and self.shotcut_current_cancel_event is not None:
+            self.shotcut_current_cancel_event.set()
+            self.shotcut_status_text.set(f"Shotcut cancel requested for {job_id}...")
         self.v2_controller.request_cancel(job_id)
 
     def _v2_retry_selected(self) -> None:
@@ -1282,6 +1363,137 @@ class App(tk.Tk):
     def _v2_open_ffmpeg_command(self) -> None:
         if self.v2_current_details:
             self._open_path(Path(self.v2_current_details["ffmpeg_command_path"]))
+
+    def _shotcut_current_settings(self) -> ShotcutAppSettings:
+        return ShotcutAppSettings(
+            runtime_dir=self.shotcut_runtime_dir.get().strip(),
+            server_script=self.shotcut_server_script.get().strip(),
+        )
+
+    def _shotcut_save_settings(self) -> ShotcutAppSettings:
+        self.shotcut_settings = self.shotcut_settings_store.save(self._shotcut_current_settings())
+        self.shotcut_runtime_dir.set(self.shotcut_settings.runtime_dir)
+        self.shotcut_server_script.set(self.shotcut_settings.server_script)
+        return self.shotcut_settings
+
+    def _shotcut_choose_runtime(self) -> None:
+        value = filedialog.askdirectory(title="Выберите Shotcut runtime folder")
+        if not value:
+            return
+        self.shotcut_runtime_dir.set(value)
+        self._shotcut_save_settings()
+        self.shotcut_status_text.set("Shotcut runtime folder сохранён. Теперь проверьте статус.")
+
+    def _shotcut_choose_server_script(self) -> None:
+        value = filedialog.askopenfilename(
+            title="Выберите shotcut_mcp_server.py",
+            filetypes=[("Python", "*.py"), ("All files", "*.*")],
+        )
+        if not value:
+            return
+        self.shotcut_server_script.set(value)
+        self._shotcut_save_settings()
+        self.shotcut_status_text.set("Shotcut MCP script сохранён. Теперь проверьте статус.")
+
+    def _shotcut_reset_paths(self) -> None:
+        self.shotcut_settings_store.reset()
+        self.shotcut_settings = self.shotcut_settings_store.load()
+        self.shotcut_runtime_dir.set(self.shotcut_settings.runtime_dir)
+        self.shotcut_server_script.set(self.shotcut_settings.server_script)
+        self.shotcut_runtime_text.set("Shotcut paths сброшены. Можно выбрать их заново или использовать autodetect.")
+        self.shotcut_status_text.set("Shotcut config reset completed.")
+
+    def _shotcut_check_status(self) -> None:
+        self._v2_set_busy(True, "Проверка Shotcut runtime и MCP...")
+        threading.Thread(target=self._shotcut_status_worker, daemon=True).start()
+
+    def _shotcut_status_worker(self) -> None:
+        try:
+            settings = self._shotcut_save_settings()
+            workspace = self.v2_controller.workspace
+            payload = describe_shotcut_runtime(settings, workspace_root=workspace)
+            self.events.put(("shotcut_status", payload))
+        except Exception as exc:
+            self.events.put(("shotcut_error", str(exc)))
+
+    def _shotcut_build_selected_project(self) -> None:
+        job_id = self._v2_selected_job_id()
+        if not job_id:
+            self._show_warning("Нет job", "Сначала импортируйте AI_EDIT_PACKAGE.zip и выберите render job.")
+            return
+        if not self.v2_controller.workspace:
+            self._show_warning("Нет workspace", "Сначала откройте или создайте workspace.")
+            return
+        self._v2_set_busy(True, f"Сборка editable Shotcut project для {job_id}...")
+        threading.Thread(target=self._shotcut_build_worker, args=(job_id,), daemon=True).start()
+
+    def _shotcut_build_worker(self, render_job_id: str) -> None:
+        try:
+            settings = self._shotcut_save_settings()
+            details = build_editable_shotcut_project(
+                self.v2_controller.workspace,
+                render_job_id,
+                settings=settings,
+            )
+            self.events.put(("shotcut_project_built", details))
+        except Exception as exc:
+            self.events.put(("shotcut_error", str(exc)))
+
+    def _shotcut_open_editable_project(self) -> None:
+        if not self.v2_current_details:
+            self._show_warning("Нет результата", "Сначала соберите editable Shotcut project.")
+            return
+        project_path = Path(self.v2_current_details["output_directory"]) / "shotcut" / "editable_project.mlt"
+        self._open_path(project_path)
+
+    def _shotcut_open_in_shotcut(self) -> None:
+        job_id = self._v2_selected_job_id()
+        if not job_id:
+            self._show_warning("Нет job", "Выберите render job, для которого уже собран editable project.")
+            return
+        if not self.v2_controller.workspace:
+            self._show_warning("Нет workspace", "Сначала откройте или создайте workspace.")
+            return
+        self._v2_set_busy(True, f"Открытие {job_id} в Shotcut...")
+        threading.Thread(target=self._shotcut_open_worker, args=(job_id,), daemon=True).start()
+
+    def _shotcut_open_worker(self, render_job_id: str) -> None:
+        try:
+            settings = self._shotcut_save_settings()
+            payload = open_shotcut_project(
+                self.v2_controller.workspace,
+                render_job_id,
+                settings=settings,
+            )
+            self.events.put(("shotcut_opened", payload))
+        except Exception as exc:
+            self.events.put(("shotcut_error", str(exc)))
+
+    def _shotcut_run_render_job(self, render_job_id: str) -> None:
+        if not self.v2_controller.workspace:
+            self._show_warning("Нет workspace", "Сначала откройте или создайте workspace.")
+            return
+        self._v2_set_busy(True, f"Shotcut render для {render_job_id}...")
+        self.shotcut_current_cancel_event = threading.Event()
+        self.shotcut_current_render_job_id = render_job_id
+        threading.Thread(target=self._shotcut_render_worker, args=(render_job_id,), daemon=True).start()
+
+    def _shotcut_render_worker(self, render_job_id: str) -> None:
+        try:
+            settings = self._shotcut_save_settings()
+            details = render_shotcut_job(
+                self.v2_controller.workspace,
+                render_job_id,
+                settings=settings,
+                cancel_event=self.shotcut_current_cancel_event,
+                progress_callback=lambda payload: self.events.put(("shotcut_progress", payload)),
+            )
+            self.events.put(("shotcut_render_completed", details))
+        except Exception as exc:
+            self.events.put(("shotcut_error", str(exc)))
+        finally:
+            self.shotcut_current_cancel_event = None
+            self.shotcut_current_render_job_id = None
 
     def _on_v2_scroll_content_configure(self, _event: object | None = None) -> None:
         self.v2_scroll_canvas.configure(scrollregion=self.v2_scroll_canvas.bbox("all"))
@@ -1507,6 +1719,9 @@ class App(tk.Tk):
             self.v2_run_next_button,
             self.v2_run_selected_button,
             self.v2_retry_button,
+            self.shotcut_build_button,
+            self.shotcut_open_project_button,
+            self.shotcut_open_button,
         ):
             button.configure(state=state)
         self.v2_cancel_button.configure(state="normal")
@@ -1655,10 +1870,12 @@ class App(tk.Tk):
         job = details["job"]
         plan = details["plan"]
         report = details.get("report") or {}
+        backend_label = "Shotcut MCP" if "shotcut" in str(report.get("renderer_status", "")).lower() else "FFmpeg"
         self.v2_result_meta.configure(
             text=(
                 f"Render Job: {job['render_job_id']}\n"
                 f"Status: {job['status']}\n"
+                f"Backend: {backend_label}\n"
                 f"Plan ID: {plan['edit_plan_id']}\n"
                 f"Plan Version: {int(plan['plan_version'] or 1)}\n"
                 f"Output Dir: {details['output_directory']}"
@@ -1685,6 +1902,10 @@ class App(tk.Tk):
 
         first_frame_value = details.get("first_frame_path")
         first_frame_path = Path(first_frame_value) if first_frame_value else None
+        if (first_frame_path is None or not first_frame_path.exists()) and self.v2_current_details:
+            shotcut_preview = Path(self.v2_current_details["output_directory"]) / "shotcut" / "preview.png"
+            if shotcut_preview.exists():
+                first_frame_path = shotcut_preview
         if first_frame_path is not None and first_frame_path.exists():
             try:
                 image = Image.open(first_frame_path)
@@ -2147,6 +2368,44 @@ class App(tk.Tk):
                 elif kind == "render_cancel_requested":
                     self.v2_status_text.set(f"Cancel requested for {payload['render_job_id']}")
                     self.v2_controller.start_refresh()
+                elif kind == "shotcut_status":
+                    self._v2_set_busy(False, "Shotcut status checked.")
+                    ready = payload.get("ready")
+                    status = payload.get("status") or {}
+                    doctor = payload.get("doctor") or {}
+                    if isinstance(status, dict):
+                        shotcut_version = ((status.get("shotcut") or {}).get("version")) or "unknown"
+                        mcp_name = ((doctor.get("validated_stack") or {}).get("shotcut")) or "unknown"
+                        self.shotcut_runtime_text.set(
+                            f"Shotcut ready={ready} | Shotcut={shotcut_version} | Doctor={doctor.get('compatible')} | Stack={mcp_name}"
+                        )
+                    else:
+                        self.shotcut_runtime_text.set(str(payload.get("status")))
+                    self.shotcut_status_text.set(
+                        "Shotcut status OK." if ready else str(payload.get("status"))
+                    )
+                elif kind == "shotcut_project_built":
+                    self._v2_set_busy(False, "Editable Shotcut project готов.")
+                    self._v2_update_results(payload)
+                    self.shotcut_status_text.set("Editable Shotcut project saved. Можно открыть его в Shotcut.")
+                    self.v2_controller.start_refresh()
+                elif kind == "shotcut_opened":
+                    self._v2_set_busy(False, "Shotcut project opened.")
+                    self.shotcut_status_text.set("Shotcut opened the editable project.")
+                elif kind == "shotcut_progress":
+                    progress = payload.get("progress_percent")
+                    status_text = payload.get("status")
+                    suffix = f"{progress}%" if isinstance(progress, (int, float)) else "working"
+                    self.v2_status_text.set(f"Shotcut render {status_text}: {suffix}")
+                elif kind == "shotcut_render_completed":
+                    self._v2_set_busy(False, "Shotcut render completed.")
+                    self._v2_update_results(payload)
+                    self.shotcut_status_text.set("Shotcut render completed and MP4 verified.")
+                    self.v2_controller.start_refresh()
+                elif kind == "shotcut_error":
+                    self._v2_set_busy(False, "Shotcut operation failed.")
+                    self.shotcut_status_text.set(str(payload))
+                    self._show_error("Shotcut MCP", str(payload))
                 elif kind == "v2_error":
                     self._v2_set_busy(False, "Ошибка v2 workflow.")
                     self.v2_status_text.set(f"Ошибка: {payload}")

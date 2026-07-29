@@ -24,6 +24,9 @@ def test_v2_tab_uses_scroll_shell_and_collapsible_json():
     try:
         assert app.v2_scroll_canvas.winfo_exists() == 1
         assert app.v2_scrollbar.winfo_exists() == 1
+        assert app.v2_backend_name.get() == "ffmpeg"
+        assert app.shotcut_build_button.winfo_exists() == 1
+        assert app.shotcut_open_button.winfo_exists() == 1
         assert app.v2_diagnostics_visible is False
         assert app.v2_summary_json_frame.winfo_ismapped() == 0
 

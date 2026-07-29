@@ -346,6 +346,9 @@ class ShotcutMcpBackend:
             raw=result,
         )
 
+    def cancel_render(self, job_id: str) -> dict[str, Any]:
+        return self._invoke_tool("cancel_render", {"job_id": job_id})
+
     def render_status(self, job_id: str) -> dict[str, Any]:
         result = self._invoke_tool("render_status", {"job_id": job_id})
         return self._stabilize_render_status(result)

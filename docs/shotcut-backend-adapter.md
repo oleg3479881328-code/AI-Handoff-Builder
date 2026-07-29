@@ -1,11 +1,11 @@
 # Shotcut MCP Backend Adapter
 
-Date: 2026-07-28
-Issue: `#25`
+Date: 2026-07-29
+Issues: `#25`, `#27`
 
 ## Goal
 
-Add the smallest AI-Handoff-Builder integration boundary for a real, local Shotcut MCP backend without changing the existing FFmpeg production path.
+Add the smallest AI-Handoff-Builder integration boundary for a real, local Shotcut MCP backend without changing the existing FFmpeg production path, then expose that boundary as an owner-facing MVP inside the existing desktop app.
 
 ## Adapter Boundary
 
@@ -14,7 +14,7 @@ Code:
 - `handoff_builder/v2/render/shotcut_backend.py`
 - `handoff_builder/v2/render/backends.py`
 
-The adapter is intentionally narrow:
+The adapter remains intentionally narrow:
 
 - `status`
 - `doctor`
@@ -35,7 +35,35 @@ The adapter is intentionally narrow:
 - `await_render`
 - `verify_rendered_media`
 
-This is a code-level backend boundary, not a new GUI workflow and not a replacement for the current FFmpeg queue.
+Issue `#25` established the code-level backend boundary.
+
+Issue `#27` reuses that boundary inside the current Tkinter application. It does not replace the current FFmpeg queue and does not introduce a second app.
+
+## Owner-Facing MVP Surface
+
+The current owner-facing controls now live inside `Local Edit Runner (v2)` in `app.py`.
+
+Exposed controls:
+
+- backend selector:
+  - `ffmpeg`
+  - `shotcut`
+- Shotcut runtime folder path
+- donor `shotcut_mcp_server.py` path
+- `Check Status`
+- `Reset Paths`
+- `Build Editable Project`
+- `Open Editable Project`
+- `Open in Shotcut`
+
+Supporting code:
+
+- `handoff_builder/v2/shotcut_settings.py`
+- `handoff_builder/v2/services/shotcut_service.py`
+
+Persisted local-only settings:
+
+- `%LOCALAPPDATA%\\AI Handoff Builder\\shotcut_settings.json`
 
 ## Trust Boundary
 
@@ -98,6 +126,30 @@ Redaction support is included for sanitized reporting:
 
 - absolute private paths inside allowed roots become `<allowed-root-N>/...`
 
+## Editable Project Workflow
+
+The owner-facing MVP now supports a bounded editable-project loop for imported preview jobs:
+
+1. select or auto-detect the local Shotcut runtime folder
+2. select or auto-detect the donor `shotcut_mcp_server.py`
+3. choose backend `shotcut`
+4. build an editable `.mlt` from the selected imported job
+5. optionally open the generated project in the local Shotcut desktop app
+6. render the same job back into the existing workspace render location
+
+Generated artifacts stay inside the current workspace:
+
+- `renders/<job_id>/shotcut/editable_project.mlt`
+- `renders/<job_id>/shotcut/preview.png`
+- `renders/<job_id>/shotcut/contact_sheet.png`
+- `renders/<job_id>/shotcut/runtime_status.json`
+- `renders/<job_id>/shotcut/build_summary.json`
+- `renders/<job_id>/shotcut/render_summary.json`
+- `renders/<job_id>/reel.mp4`
+- `renders/<job_id>/first_frame.jpg`
+
+The service layer keeps the queue safe when the source job is already terminal by allowing a bounded rerender path instead of forcing invalid `pending -> running` transitions.
+
 ## Revision / Locking Model
 
 AI-Handoff-Builder relies on donor semantics instead of re-implementing timeline locking:
@@ -127,9 +179,32 @@ The adapter treats any one of these as insufficient on its own:
 
 - no new planner
 - no replacement of the FFmpeg backend
-- no GUI/operator surface in this issue
 - no bundling of donor source or Shotcut binaries into the repository
 - no arbitrary low-level MLT exposure to AI package payloads
+
+## Validation Status
+
+Repository validation on Wednesday, July 29, 2026:
+
+- `python -m pytest -q tests/test_v2_shotcut_backend.py tests/test_v2_shotcut_service.py tests/test_app_v2_ui.py`
+  - `20 passed in 3.09s`
+- `python -m pytest -q`
+  - `142 passed in 49.64s`
+
+Live service-path validation on the existing local acceptance workspace:
+
+- selected job:
+  - `f35260850bb76dead667`
+- build result:
+  - `renderer_status=shotcut_editable_ready`
+- render result:
+  - `renderer_status=completed`
+  - `540x960`
+  - `30.0 fps`
+  - `1.834 s`
+  - `audio_present=1`
+  - SHA-256:
+    - `f0f94ee7b46e85ea1a3a9b95d6c899ea0c3f24676899c0a764f414fccdfcc234`
 
 ## Rollback / Uninstall
 

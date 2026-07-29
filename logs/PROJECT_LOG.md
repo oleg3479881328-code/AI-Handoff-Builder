@@ -32,3 +32,29 @@
 - Added a bounded Shotcut backend adapter in the repository under `handoff_builder/v2/render/shotcut_backend.py` and `handoff_builder/v2/render/backends.py`.
 - Added focused regression coverage in `tests/test_v2_shotcut_backend.py`.
 - Added `docs/shotcut-mcp-donor-audit.md` and `docs/shotcut-backend-adapter.md`.
+
+## 2026-07-29
+
+- Continued the Shotcut track on the same isolated branch for Issue `#27` and extended the existing app instead of creating a second UI surface.
+- Added persistent local Shotcut runtime settings in `handoff_builder/v2/shotcut_settings.py`.
+- Added owner-facing orchestration in `handoff_builder/v2/services/shotcut_service.py` for editable project build, local Shotcut open, and Shotcut render.
+- Extended `app.py` so `Local Edit Runner (v2)` now exposes a `Shotcut MCP` panel with:
+  - backend switch
+  - runtime/script selection
+  - status check
+  - editable project build/open controls
+  - Shotcut-backed render path
+- Preserved FFmpeg as the default path and kept Shotcut opt-in.
+- Added regression coverage in `tests/test_v2_shotcut_service.py` and expanded `tests/test_app_v2_ui.py`.
+- Validated:
+  - targeted Shotcut/UI tests: `20 passed in 3.09s`
+  - full suite: `142 passed in 49.64s`
+- Completed a live service-path rerender against the existing acceptance workspace and confirmed a valid Shotcut-produced MP4 with audio:
+  - job:
+    - `f35260850bb76dead667`
+  - SHA-256:
+    - `f0f94ee7b46e85ea1a3a9b95d6c899ea0c3f24676899c0a764f414fccdfcc234`
+  - output:
+    - `540x960`
+    - `30.0 fps`
+    - `1.834 s`

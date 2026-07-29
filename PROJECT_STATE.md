@@ -1,16 +1,17 @@
 # Current State
 
-- Date: 2026-07-28
+- Date: 2026-07-29
 - Repository: `oleg3479881328-code/AI-Handoff-Builder`
 - Broad v2 contract: `Yt-Dlp-Download-Manager` issue `#67`
 - HyperFrames contract: repository issue `#3`
-- Shotcut MCP Windows proof contract: repository issue `#25`
+- Shotcut MCP proof contract: repository issue `#25`
+- Shotcut owner-facing GUI MVP contract: repository issue `#27`
 - One-file handoff workflow fix: repository issue `#10`
 - Handoff completeness defect: repository issue `#2`
 - Current branch: `experiment/shotcut-mcp-windows-proof`
 - Base branch: `feat/issue-16-preview-scroll-fix`
 - Draft PR: pending publication from `experiment/shotcut-mcp-windows-proof` -> `feat/issue-16-preview-scroll-fix`
-- Current phase: real Windows Shotcut MCP proof passed on one owner-selected MP4; minimal bounded Shotcut backend adapter, tests, and publication artifacts are being finalized without changing the existing FFmpeg production path
+- Current phase: real Windows Shotcut MCP proof remains passed, and the same branch now adds an owner-facing Shotcut GUI MVP inside `Local Edit Runner (v2)` without replacing the existing FFmpeg production path
 
 ## Issue #25 Snapshot
 
@@ -58,6 +59,67 @@
     - `14 passed`
   - full suite after the final `A1` track adapter update:
     - `138 passed`
+
+## Issue #27 Snapshot
+
+- Goal:
+  - turn the existing Shotcut proof boundary into a real owner-facing MVP inside the current Tkinter app
+  - keep FFmpeg as the default production path
+  - avoid a second application
+- New owner-facing surface inside `Local Edit Runner (v2)`:
+  - backend selector:
+    - `ffmpeg`
+    - `shotcut`
+  - pinned Shotcut runtime folder field
+  - pinned donor `shotcut_mcp_server.py` field
+  - `Check Status`
+  - `Reset Paths`
+  - `Build Editable Project`
+  - `Open Editable Project`
+  - `Open in Shotcut`
+- Persistence:
+  - new local settings store:
+    - `handoff_builder/v2/shotcut_settings.py`
+  - persisted under local app data:
+    - `shotcut_settings.json`
+  - auto-detects the already-proven local proof runtime when present
+- New orchestration layer:
+  - `handoff_builder/v2/services/shotcut_service.py`
+  - responsibilities:
+    - build editable `.mlt` project from imported preview plan `1.0`
+    - reuse the current render output folder
+    - render through Shotcut MCP into `reel.mp4`
+    - write preview / contact sheet / editable project artifacts under:
+      - `renders/<job>/shotcut/`
+    - keep the queue safe when the selected source job is already terminal
+- Live validation on Wednesday, July 29, 2026:
+  - targeted regression:
+    - `python -m pytest -q tests/test_v2_shotcut_backend.py tests/test_v2_shotcut_service.py tests/test_app_v2_ui.py`
+    - `20 passed in 3.09s`
+  - full suite:
+    - `python -m pytest -q`
+    - `142 passed in 49.64s`
+  - real service-path validation:
+    - workspace:
+      - `tmp_rc_real_e2e/workspace` from the existing local AI Handoff Builder acceptance set
+    - source package:
+      - `AI_EDIT_PACKAGE_REAL.zip`
+    - selected render job:
+      - `f35260850bb76dead667`
+    - build result:
+      - `renderer_status=shotcut_editable_ready`
+    - render result:
+      - `renderer_status=completed`
+      - output:
+        - `540x960`
+        - `30.0 fps`
+        - `1.834 s`
+        - `audio_present=1`
+        - SHA-256:
+          - `f0f94ee7b46e85ea1a3a9b95d6c899ea0c3f24676899c0a764f414fccdfcc234`
+  - visual proof:
+    - current application window screenshot with visible `Shotcut MCP` section captured locally on:
+      - Wednesday, July 29, 2026
 
 ## New Verified Limitations From Issue #25
 

@@ -9,6 +9,12 @@ from .query_service import (
     show_render_job,
 )
 from .render_service import render_job, render_next_pending_job
+from .shotcut_service import (
+    build_editable_shotcut_project,
+    describe_shotcut_runtime,
+    open_shotcut_project,
+    render_shotcut_job,
+)
 from .voice_service import (
     voice_delegated_technical_approval,
     list_voice_jobs,
@@ -34,6 +40,10 @@ __all__ = [
     "list_render_jobs",
     "render_job",
     "render_next_pending_job",
+    "build_editable_shotcut_project",
+    "describe_shotcut_runtime",
+    "open_shotcut_project",
+    "render_shotcut_job",
     "request_cancel_render_job",
     "retry_render_job",
     "show_plan",

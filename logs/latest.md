@@ -1,7 +1,83 @@
 # Latest Log
 
-Date: 2026-07-28
-Step: Issue #25 Shotcut MCP Windows proof + bounded backend adapter
+Date: 2026-07-29
+Step: Issue #27 owner-facing Shotcut MVP inside Local Edit Runner (v2)
+
+## Completed
+
+- Continued on the existing Issue `#25` worktree and branch instead of starting a parallel app or a fresh renderer path:
+  - branch:
+    - `experiment/shotcut-mcp-windows-proof`
+  - base branch:
+    - `feat/issue-16-preview-scroll-fix`
+- Kept FFmpeg as the default backend and added a bounded owner-facing Shotcut choice inside the existing `Local Edit Runner (v2)` UI.
+- Added a local persisted Shotcut settings layer:
+  - `handoff_builder/v2/shotcut_settings.py`
+  - stores:
+    - runtime folder
+    - donor `shotcut_mcp_server.py` path
+  - persistence path:
+    - `%LOCALAPPDATA%\\AI Handoff Builder\\shotcut_settings.json`
+  - auto-detects the already-proven local proof runtime when present
+- Added a new owner-facing orchestration layer:
+  - `handoff_builder/v2/services/shotcut_service.py`
+  - responsibilities:
+    - describe local Shotcut runtime readiness
+    - build editable `.mlt` projects from imported preview-plan `1.0` jobs
+    - write reusable local artifacts under:
+      - `workspace/renders/<job_id>/shotcut/`
+    - open the generated project in the local Shotcut app
+    - render the same job through the Shotcut MCP backend into:
+      - `workspace/renders/<job_id>/reel.mp4`
+- Extended the existing Tkinter app in `app.py` with a dedicated `Shotcut MCP` block inside `Local Edit Runner (v2)`:
+  - backend selector:
+    - `ffmpeg`
+    - `shotcut`
+  - runtime folder picker
+  - MCP script picker
+  - `Check Status`
+  - `Reset Paths`
+  - `Build Editable Project`
+  - `Open Editable Project`
+  - `Open in Shotcut`
+- Integrated the Shotcut path into the existing render controls without replacing the queue model:
+  - `Run Next Pending`
+  - `Run Selected Job`
+  - `Request Cancel`
+  - `Retry Job`
+- Preserved safe terminal-job behavior by allowing a completed FFmpeg source job to be re-built and re-rendered through Shotcut without forcing invalid queue transitions.
+- Added focused coverage:
+  - `tests/test_v2_shotcut_service.py`
+  - `tests/test_app_v2_ui.py`
+- Validation on Wednesday, July 29, 2026:
+  - syntax:
+    - `python -m py_compile app.py handoff_builder\\v2\\shotcut_settings.py handoff_builder\\v2\\services\\shotcut_service.py handoff_builder\\v2\\render\\shotcut_backend.py`
+    - result: success
+  - targeted regression:
+    - `python -m pytest -q tests\\test_v2_shotcut_backend.py tests\\test_v2_shotcut_service.py tests\\test_app_v2_ui.py`
+    - result: `20 passed in 3.09s`
+  - full suite:
+    - `python -m pytest -q`
+    - result: `142 passed in 49.64s`
+- Completed live service-path acceptance on the existing local acceptance set:
+  - workspace:
+    - `tmp_rc_real_e2e/workspace`
+  - package:
+    - `AI_EDIT_PACKAGE_REAL.zip`
+  - selected job:
+    - `f35260850bb76dead667`
+  - Shotcut editable build:
+    - `renderer_status=shotcut_editable_ready`
+  - Shotcut render:
+    - `renderer_status=completed`
+    - output:
+      - `540x960`
+      - `30.0 fps`
+      - `1.834 s`
+      - `audio_present=1`
+      - SHA-256:
+        - `f0f94ee7b46e85ea1a3a9b95d6c899ea0c3f24676899c0a764f414fccdfcc234`
+- Captured a local GUI proof image that shows the new `Shotcut MCP` section inside the live application window.
 
 ## Completed
 
