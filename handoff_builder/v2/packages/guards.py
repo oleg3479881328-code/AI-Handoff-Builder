@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import hashlib
+import json
 import zipfile
 from pathlib import Path
 
@@ -55,6 +56,18 @@ def compute_sha256(path: Path) -> str:
         for chunk in iter(lambda: handle.read(1024 * 1024), b""):
             digest.update(chunk)
     return digest.hexdigest()
+
+
+def compute_content_hash(payload: dict, *, self_hash_field: str) -> str:
+    canonical = json.loads(json.dumps(payload, ensure_ascii=False))
+    canonical[self_hash_field] = "0" * 64
+    blob = json.dumps(
+        canonical,
+        ensure_ascii=False,
+        sort_keys=True,
+        separators=(",", ":"),
+    ).encode("utf-8")
+    return hashlib.sha256(blob).hexdigest()
 
 
 def verify_package_checksums(root: Path, files: list[dict]) -> tuple[tuple[str, str, int], ...]:

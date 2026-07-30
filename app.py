@@ -32,7 +32,8 @@ from handoff_builder.v2.services.shotcut_service import (
     render_shotcut_job,
 )
 from handoff_builder.v2.shotcut_settings import ShotcutAppSettings, ShotcutSettingsStore
-from handoff_builder.v2.services.import_service import resolve_workspace_for_package
+from handoff_builder.v2.services.import_service import resolve_workspace_for_package, resolve_workspace_for_plan
+from handoff_builder.utils import slugify
 from handoff_builder.v2.services import (
     list_voice_jobs,
     show_plan,
@@ -111,7 +112,7 @@ class App(tk.Tk):
         self.v2_workspace_path = tk.StringVar(value=str(Path.home() / "Desktop" / "AI Handoff Workspace"))
         self.v2_project_id = tk.StringVar(value="proj-1")
         self.v2_backend_name = tk.StringVar(value="ffmpeg")
-        self.v2_status_text = tk.StringVar(value="Выберите AI_EDIT_PACKAGE.zip или откройте workspace вручную.")
+        self.v2_status_text = tk.StringVar(value="Выберите Edit Plan JSON или откройте workspace вручную.")
         self.v2_summary_text = ""
         self.v2_qc_text = ""
         self.v2_current_details: dict | None = None
@@ -339,7 +340,7 @@ class App(tk.Tk):
 
         action_frame = ttk.Frame(outer)
         action_frame.grid(row=1, column=0, sticky="ew", pady=(10, 0))
-        self.v2_import_package_button = ttk.Button(action_frame, text="Import AI_EDIT_PACKAGE.zip", command=self._v2_import_package)
+        self.v2_import_package_button = ttk.Button(action_frame, text="Import Edit Plan JSON", command=self._v2_import_package)
         self.v2_import_package_button.pack(side="left")
         self.v2_import_patch_button = ttk.Button(action_frame, text="Import AI_EDIT_PATCH", command=self._v2_import_patch)
         self.v2_import_patch_button.pack(side="left", padx=(8, 0))
@@ -1052,14 +1053,17 @@ class App(tk.Tk):
     def _run_builder(self, selected_sources: list[Path]) -> None:
         try:
             owner_project_root = self._owner_project_root_from_sources(selected_sources)
-            project_name = owner_project_root.name if owner_project_root is not None else self.project_name.get().strip()
+            single_zip = len(selected_sources) == 1 and selected_sources[0].suffix.lower() == ".zip"
+            if single_zip:
+                project_name = selected_sources[0].stem
+            else:
+                project_name = owner_project_root.name if owner_project_root is not None else self.project_name.get().strip()
             config = BuilderConfig(
                 project_name=project_name,
+                project_id=slugify(project_name, fallback="project"),
                 output_dir=Path(self.output_dir.get()).expanduser(),
                 workspace_root=owner_project_root,
-                source_zip_path=selected_sources[0].resolve()
-                if owner_project_root is not None and len(selected_sources) == 1 and selected_sources[0].suffix.lower() == ".zip"
-                else None,
+                source_zip_path=selected_sources[0].resolve() if single_zip else None,
                 include_video_proxies=self.include_proxies.get(),
                 gps_export_mode=self.gps_export_mode.get(),
                 worker_count=max(1, min(2, int(self.worker_count.get()))),
@@ -1172,23 +1176,30 @@ class App(tk.Tk):
 
     def _v2_import_package(self) -> None:
         value = filedialog.askopenfilename(
-            title="Выберите AI_EDIT_PACKAGE.zip",
-            filetypes=[("AI Edit Package", "*.zip"), ("All files", "*.*")],
+            title="Выберите Edit Plan JSON",
+            filetypes=[("Edit Plan JSON", "*.json"), ("Legacy AI Edit Package", "*.zip"), ("All files", "*.*")],
         )
         if value:
             package_zip = Path(value)
             fallback_path: Path | None = None
             if self.v2_controller.workspace is None:
                 try:
-                    resolved_workspace = resolve_workspace_for_package(package_zip)
+                    resolved_workspace = (
+                        resolve_workspace_for_plan(package_zip)
+                        if package_zip.suffix.lower() == ".json"
+                        else resolve_workspace_for_package(package_zip)
+                    )
                     self.v2_workspace_path.set(str(resolved_workspace))
                     self.v2_project_id.set(resolved_workspace.name)
                 except Exception:
                     fallback_path = self._ask_emergency_project_hint()
                     if fallback_path is None:
                         return
-            self._v2_set_busy(True, "Импорт AI_EDIT_PACKAGE.zip...")
-            self.v2_controller.start_import_package(package_zip, fallback_path=fallback_path)
+            self._v2_set_busy(True, f"Импорт {package_zip.name}...")
+            if package_zip.suffix.lower() == ".json":
+                self.v2_controller.start_import_plan(package_zip, fallback_path=fallback_path)
+            else:
+                self.v2_controller.start_import_package(package_zip, fallback_path=fallback_path)
 
     def _v2_import_patch(self) -> None:
         if not self.v2_controller.workspace:
@@ -1419,7 +1430,7 @@ class App(tk.Tk):
     def _shotcut_build_selected_project(self) -> None:
         job_id = self._v2_selected_job_id()
         if not job_id:
-            self._show_warning("Нет job", "Сначала импортируйте AI_EDIT_PACKAGE.zip и выберите render job.")
+            self._show_warning("Нет job", "Сначала импортируйте Edit Plan JSON и выберите render job.")
             return
         if not self.v2_controller.workspace:
             self._show_warning("Нет workspace", "Сначала откройте или создайте workspace.")
@@ -1443,7 +1454,17 @@ class App(tk.Tk):
         if not self.v2_current_details:
             self._show_warning("Нет результата", "Сначала соберите editable Shotcut project.")
             return
-        project_path = Path(self.v2_current_details["output_directory"]) / "shotcut" / "editable_project.mlt"
+        report = self.v2_current_details.get("report") or {}
+        outputs = report.get("outputs") or []
+        build_summary_path = Path(self.v2_current_details["output_directory"]) / "shotcut" / "build_summary.json"
+        project_path = Path(self.v2_current_details["output_directory"]) / "shotcut"
+        if build_summary_path.exists():
+            try:
+                project_path = Path(json.loads(build_summary_path.read_text(encoding="utf-8"))["project_path"])
+            except Exception:
+                project_path = project_path / "editable_project.mlt"
+        else:
+            project_path = project_path / "editable_project.mlt"
         self._open_path(project_path)
 
     def _shotcut_open_in_shotcut(self) -> None:
@@ -1781,6 +1802,7 @@ class App(tk.Tk):
         validation = summary.get("validation_summary") or {}
         lines = [
             f"Project ID: {summary.get('project_id')}",
+            f"Project Name: {summary.get('project_name')}",
             f"Package ID: {summary.get('package_id')}",
             f"Handoff ID: {summary.get('handoff_id')}",
             f"Schema Version: {summary.get('schema_version')}",

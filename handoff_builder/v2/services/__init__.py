@@ -1,4 +1,4 @@
-from .import_service import import_package_into_workspace
+from .import_service import import_package_into_workspace, import_plan_into_workspace
 from .patch_service import apply_patch_in_workspace
 from .query_service import (
     list_plans,
@@ -36,6 +36,7 @@ from .voice_service import (
 __all__ = [
     "apply_patch_in_workspace",
     "import_package_into_workspace",
+    "import_plan_into_workspace",
     "list_plans",
     "list_render_jobs",
     "render_job",

@@ -9,6 +9,7 @@ from typing import Any
 class BuilderConfig:
     project_name: str
     output_dir: Path
+    project_id: str | None = None
     workspace_root: Path | None = None
     source_zip_path: Path | None = None
     include_video_proxies: bool = True
@@ -31,6 +32,8 @@ class BuilderConfig:
             raise ValueError(
                 "gps_export_mode must be one of: exact, rounded, venue_label_only, excluded"
             )
+        if self.project_id is None:
+            self.project_id = self.project_name
 
 
 @dataclass(slots=True)
@@ -100,9 +103,12 @@ class BuildResult:
     validation_path: Path
     validation: dict[str, Any]
     failed_sources: list[str]
+    project_id: str | None = None
+    project_name: str | None = None
     metadata_warnings_path: Path | None = None
     local_asset_registry_path: Path | None = None
     project_root: Path | None = None
     handoff_id: str | None = None
     handoff_sha256: str | None = None
+    handoff_content_hash: str | None = None
     canceled: bool = False

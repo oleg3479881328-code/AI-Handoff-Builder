@@ -491,6 +491,48 @@ def test_owner_flow_single_source_zip_uses_project_root_workspace(tmp_path: Path
     assert handoff_index["handoffs"][0]["handoff_sha256"] == result.handoff_sha256
 
 
+def test_single_source_zip_derives_owner_visible_names_and_shotcut_contract(tmp_path: Path, monkeypatch):
+    monkeypatch.setenv("LOCALAPPDATA", str(tmp_path / "appdata"))
+    source_dir = tmp_path / "source"
+    photo = source_dir / "IMG-20240716-WA0001.jpg"
+    _make_photo(photo)
+    project_root = tmp_path / "Carolyn and Rob"
+    source_zip = project_root / "Carolyn and Rob.zip"
+    _make_source_zip(source_zip, [photo])
+
+    builder = HandoffBuilder(
+        BuilderConfig(
+            project_name="Carolyn and Rob",
+            project_id="carolyn_and_rob",
+            output_dir=tmp_path / "out",
+            workspace_root=project_root,
+            source_zip_path=source_zip,
+            include_video_proxies=False,
+        ),
+        project_root=tmp_path,
+    )
+    builder.ffmpeg = FakeFFmpegTools()
+
+    result = builder.build([source_zip])
+
+    assert result.archive_path.name == "Carolyn_and_Rob_ANALYSIS_HANDOFF.zip"
+    manifest = json.loads((result.package_root / "handoff_manifest.json").read_text(encoding="utf-8"))
+    assert manifest["project_name"] == "Carolyn and Rob"
+    assert manifest["project_id"] == "carolyn_and_rob"
+    assert manifest["expected_output_filename"] == "Carolyn and Rob.json"
+    assert manifest["target_editor"] == "shotcut"
+    assert manifest["content_hash"] == result.handoff_content_hash
+
+    start_here = (result.package_root / "00_START_HERE.md").read_text(encoding="utf-8")
+    brief = (result.package_root / "PROJECT_BRIEF.md").read_text(encoding="utf-8")
+    contract = (result.package_root / "OUTPUT_CONTRACT.md").read_text(encoding="utf-8")
+    combined = "\n".join([start_here, brief, contract])
+    assert "Shotcut" in combined
+    assert "standalone JSON" in combined
+    assert "AI_EDIT_PACKAGE.zip" not in combined
+    assert "DaVinci" not in combined
+
+
 def test_exiftool_uses_parent_cwd_for_unicode_zip_roots(tmp_path: Path, monkeypatch):
     source = tmp_path / "Раскладывание вещей" / "IMG-20240716-WA0001.jpg"
     _make_photo(source)

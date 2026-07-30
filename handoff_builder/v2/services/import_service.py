@@ -11,16 +11,21 @@ from ..domain.records import ImportResult, RenderQueueItem
 from ..errors import UnsafePackageError
 from ..project_registry import (
     ProjectRegistryStore,
+    find_local_handoff_entry,
     read_package_identity,
+    read_plan_identity,
     resolve_workspace_from_hint,
     verify_project_identity,
 )
 from ..packages.guards import compute_sha256
 from ..packages.importer import import_edit_package
 from ..plans.schema import deterministic_plan_hash, validate_payload
+from ..plans.semantic import load_and_validate_edit_plan_3
+from ..render.ffmpeg_backend import FFmpegBackend
 from ..render.report_stub import build_render_report_stub, write_render_report_stub
 from ..storage import apply_migrations, connect_workspace_db
 from ..storage.repositories import SqliteRenderQueueRepository, WorkspaceRepository
+from ..timeline.compiler import compile_normalized_timeline
 from ..workspace import load_project_config
 
 
@@ -64,6 +69,58 @@ def resolve_workspace_for_package(
         handoff_id=identity["handoff_id"],
         handoff_sha256=identity["handoff_sha256"],
         source_zip_path=fallback_path if fallback_path.is_file() else None,
+    )
+    return verified
+
+
+def resolve_workspace_for_plan(
+    plan_json: Path,
+    *,
+    fallback_path: Path | None = None,
+    registry_store: ProjectRegistryStore | None = None,
+) -> Path:
+    identity = read_plan_identity(plan_json)
+    store = registry_store or ProjectRegistryStore()
+    resolved = store.resolve_project_root(
+        project_id=identity["project_id"],
+        handoff_id=identity["handoff_id"],
+        handoff_content_hash=identity["handoff_content_hash"],
+    )
+    if resolved is not None:
+        try:
+            return verify_project_identity(
+                resolved,
+                project_id=identity["project_id"],
+                handoff_id=identity["handoff_id"],
+                handoff_content_hash=identity["handoff_content_hash"],
+            )
+        except Exception:
+            resolved = None
+    if fallback_path is None:
+        raise UnsafePackageError(
+            "No saved project mapping for this edit plan JSON. Choose the original project folder once to restore the link."
+        )
+    project_root = resolve_workspace_from_hint(fallback_path)
+    verified = verify_project_identity(
+        project_root,
+        project_id=identity["project_id"],
+        handoff_id=identity["handoff_id"],
+        handoff_content_hash=identity["handoff_content_hash"],
+    )
+    local_handoff = find_local_handoff_entry(
+        verified,
+        project_id=identity["project_id"],
+        handoff_id=identity["handoff_id"],
+        handoff_content_hash=identity["handoff_content_hash"],
+    )
+    store.register_project(
+        project_root=verified,
+        project_id=identity["project_id"],
+        project_name=identity.get("project_name") or None,
+        handoff_id=identity["handoff_id"],
+        handoff_sha256=str((local_handoff or {}).get("handoff_sha256") or ""),
+        handoff_content_hash=identity["handoff_content_hash"],
+        source_plan_path=plan_json,
     )
     return verified
 
@@ -240,6 +297,192 @@ def import_package_into_workspace(package_zip: Path, workspace: Path) -> ImportR
             render_report_path=report_path,
             package_root=imported.extracted_root,
             package_sha256=imported.package_sha256,
+            plan_hash=plan_hash,
+            duplicate=False,
+        )
+    except Exception:
+        if package_root and package_root.exists():
+            shutil.rmtree(package_root, ignore_errors=True)
+        raise
+    finally:
+        connection.close()
+
+
+def import_plan_into_workspace(plan_json: Path, workspace: Path) -> ImportResult:
+    project_root = workspace.resolve()
+    config = load_project_config(project_root)
+    project_id = str(config["project_id"])
+    database_path = project_root / "project.sqlite"
+    plan_sha256 = compute_sha256(plan_json)
+
+    connection = connect_workspace_db(database_path)
+    package_root: Path | None = None
+    try:
+        apply_migrations(connection)
+        workspace_repo = WorkspaceRepository(connection)
+        queue_repo = SqliteRenderQueueRepository(connection)
+        workspace_repo.get_project(project_id)
+
+        payload = json.loads(plan_json.read_text(encoding="utf-8"))
+        validate_payload("edit_plan", str(payload["schema_version"]), payload)
+        if str(payload.get("document_type")) != "edit_plan":
+            raise UnsafePackageError("Direct JSON import requires document_type=edit_plan.")
+        if str(payload["project_id"]) != project_id:
+            raise UnsafePackageError("Edit plan project_id does not match workspace project.")
+
+        handoff_entry = find_local_handoff_entry(
+            project_root,
+            project_id=project_id,
+            handoff_id=str(payload["handoff_id"]),
+            handoff_content_hash=str(payload["handoff_content_hash"]),
+        )
+        if handoff_entry is None:
+            raise UnsafePackageError(
+                "No saved handoff identity matches this edit plan JSON. Rebuild the analysis handoff in the original project folder first."
+            )
+
+        existing = workspace_repo.get_existing_import_result(project_id, plan_sha256)
+        if existing:
+            return ImportResult(
+                project_id=existing["project_id"],
+                package_id=existing["package_id"],
+                handoff_id=existing["handoff_id"],
+                edit_plan_id=existing["edit_plan_id"],
+                render_job_id=existing["render_job_id"],
+                render_report_path=Path(existing["report_path"]),
+                package_root=Path(existing["extracted_root"]),
+                package_sha256=existing["package_sha256"],
+                plan_hash=existing["plan_hash"],
+                duplicate=True,
+            )
+
+        package_id = stable_v2_id(project_id, str(payload["handoff_content_hash"]), "json", length=20)
+        package_root = project_root / "imported_edit_plans" / package_id
+        package_root.mkdir(parents=True, exist_ok=False)
+        imported_plan_path = package_root / plan_json.name
+        shutil.copy2(plan_json, imported_plan_path)
+
+        backend = FFmpegBackend(project_root=Path(__file__).resolve().parents[3])
+        validated = load_and_validate_edit_plan_3(imported_plan_path, project_root, backend)
+        resolution_report = resolve_plan_assets_against_registry(
+            list(payload["assets"]),
+            load_active_local_registry(project_root),
+            require_declared_integrity=False,
+        )
+        normalized_timeline = compile_normalized_timeline(
+            payload,
+            resolution_report["assets"],
+            source_package_content_hash=str(payload["handoff_content_hash"]),
+        )
+        timeline_path = package_root / "normalized_timeline.json"
+        timeline_path.write_text(
+            json.dumps(normalized_timeline.payload, ensure_ascii=False, indent=2),
+            encoding="utf-8",
+        )
+        compilation_report_path = package_root / "compilation_report.json"
+        compilation_report_path.write_text(
+            json.dumps(
+                {
+                    "resolved_asset_count": resolution_report["resolved_asset_count"],
+                    "timeline_hash": normalized_timeline.timeline_hash,
+                    "track_count": normalized_timeline.track_count,
+                    "total_duration_frames": normalized_timeline.total_duration_frames,
+                },
+                ensure_ascii=False,
+                indent=2,
+            ),
+            encoding="utf-8",
+        )
+
+        edit_plan_id = str(payload["plan_id"])
+        plan_hash = deterministic_plan_hash(payload)
+        render_job_id = stable_v2_id(project_id, package_id, edit_plan_id, "job", length=20)
+        report_path = project_root / "renders" / render_job_id / "render_report.json"
+        report = build_render_report_stub(
+            project_id=project_id,
+            package_id=package_id,
+            handoff_id=str(payload["handoff_id"]),
+            handoff_sha256=str(handoff_entry.get("handoff_sha256") or ""),
+            edit_plan_id=edit_plan_id,
+            render_job_id=render_job_id,
+            plan_hash=plan_hash,
+            output_directory=report_path.parent,
+            warnings=["direct_edit_plan_json"],
+        )
+
+        connection.execute("BEGIN")
+        try:
+            workspace_repo.insert_package(
+                package_id=package_id,
+                project_id=project_id,
+                handoff_id=str(payload["handoff_id"]),
+                handoff_sha256=str(handoff_entry.get("handoff_sha256") or ""),
+                schema_version=str(payload["schema_version"]),
+                package_sha256=plan_sha256,
+                source_zip_name=plan_json.name,
+                extracted_root=package_root,
+            )
+            workspace_repo.insert_plan(
+                edit_plan_id=edit_plan_id,
+                project_id=project_id,
+                package_id=package_id,
+                handoff_id=str(payload["handoff_id"]),
+                schema_version=str(payload["schema_version"]),
+                plan_sha256=plan_sha256,
+                plan_hash=plan_hash,
+                plan_path=imported_plan_path,
+                plan_version=int(payload.get("plan_version") or 1),
+                parent_plan_id=str(payload["parent_plan_id"]) if payload.get("parent_plan_id") else None,
+                patch_id=str(payload["patch_id"]) if payload.get("patch_id") else None,
+                base_plan_hash=str(payload["base_plan_hash"]) if payload.get("base_plan_hash") else None,
+            )
+            queue_repo.enqueue(
+                RenderQueueItem(
+                    render_job_id=render_job_id,
+                    project_id=project_id,
+                    package_id=package_id,
+                    edit_plan_id=edit_plan_id,
+                    status=QueueItemStatus.PENDING,
+                )
+            )
+            write_render_report_stub(report, report_path)
+            queue_repo.insert_render_output(
+                output_id=stable_v2_id(render_job_id, "report", length=20),
+                render_job_id=render_job_id,
+                report_path=report_path,
+                renderer_status="not_started",
+            )
+            workspace_repo.add_event(
+                project_id=project_id,
+                package_id=package_id,
+                render_job_id=render_job_id,
+                event_type="plan_json_imported",
+                payload={
+                    "package_id": package_id,
+                    "edit_plan_id": edit_plan_id,
+                    "render_job_id": render_job_id,
+                    "plan_sha256": plan_sha256,
+                    "plan_hash": plan_hash,
+                    "resolved_asset_count": resolution_report["resolved_asset_count"],
+                    "timeline_hash": normalized_timeline.timeline_hash,
+                },
+            )
+            connection.commit()
+        except Exception:
+            connection.rollback()
+            if report_path.exists():
+                report_path.unlink()
+            raise
+
+        return ImportResult(
+            project_id=project_id,
+            package_id=package_id,
+            handoff_id=str(payload["handoff_id"]),
+            edit_plan_id=edit_plan_id,
+            render_job_id=render_job_id,
+            render_report_path=report_path,
+            package_root=package_root,
+            package_sha256=plan_sha256,
             plan_hash=plan_hash,
             duplicate=False,
         )

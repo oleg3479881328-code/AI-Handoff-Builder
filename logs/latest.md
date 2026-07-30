@@ -1,5 +1,45 @@
 # Latest Log
 
+Date: 2026-07-30
+Step: Issue #27 one-JSON Shotcut workflow correction
+
+## Completed
+
+- Replaced the active owner path with:
+  - `<project_name>.zip -> <project_name>_ANALYSIS_HANDOFF.zip -> <project_name>.json -> <project_name>.mlt`
+- Added repository-owned analysis handoff templates for the standalone Shotcut JSON contract:
+  - `handoff_builder/templates/analysis_handoff/00_START_HERE.md`
+  - `handoff_builder/templates/analysis_handoff/PROJECT_BRIEF.md`
+  - `handoff_builder/templates/analysis_handoff/OUTPUT_CONTRACT.md`
+- Added new schemas:
+  - `schemas/analysis_handoff/1.0.json`
+  - `schemas/edit_plan/3.0.json`
+  - `schemas/normalized_timeline/1.0.json`
+- Extended Prepare Handoff so the manifest now records:
+  - `project_name`
+  - `expected_output_filename`
+  - `target_editor=shotcut`
+  - semantic `content_hash`
+- Added direct standalone JSON import and local identity verification through:
+  - `handoff_builder/v2/services/import_service.py`
+  - `handoff_builder/v2/project_registry.py`
+  - `handoff_builder/v2/timeline/compiler.py`
+- Extended Shotcut build path so `edit_plan 3.0` now compiles:
+  - `direct JSON -> Normalized Timeline -> editable <project_name>.mlt`
+- Updated the existing `Local Edit Runner (v2)` UI so the primary import action is:
+  - `Import Edit Plan JSON`
+- Added focused one-JSON regression coverage:
+  - `tests/test_v2_one_json_workflow.py`
+  - `tests/test_pipeline.py` owner naming/contract assertions
+- Validation on Thursday, July 30, 2026:
+  - `python -m pytest -q` -> `144 passed, 1 skipped in 48.56s`
+  - `python -m py_compile app.py handoff_builder\pipeline.py handoff_builder\v2\services\import_service.py handoff_builder\v2\services\shotcut_service.py handoff_builder\v2\plans\semantic.py handoff_builder\v2\timeline\compiler.py` -> success
+  - `cmd /c build_exe.bat` -> success
+- Packaged build verification:
+  - `dist\AI Handoff Builder\AI Handoff Builder.exe`
+  - SHA-256: `01e930e8dad8f383295ee082b252a7141a27df2a151f8a28814cea00a2e51c36`
+  - packaged templates and new schemas confirmed under `_internal`
+
 Date: 2026-07-29
 Step: Issue #27 owner-facing Shotcut MVP inside Local Edit Runner (v2)
 

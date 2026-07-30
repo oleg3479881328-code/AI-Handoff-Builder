@@ -16,6 +16,7 @@ pyinstaller --noconfirm --clean --windowed ^
   --name "AI Handoff Builder" ^
   --collect-all PIL ^
   --add-data "prototypes\hyperframes;prototypes\hyperframes" ^
+  --add-data "handoff_builder\templates\analysis_handoff;handoff_builder\templates\analysis_handoff" ^
   --add-data "schemas;schemas" ^
   app.py
 

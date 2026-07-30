@@ -1,5 +1,23 @@
 # Current State
 
+- Date: 2026-07-30
+- One-JSON owner workflow status:
+  - source ZIP -> `_ANALYSIS_HANDOFF.zip` -> one standalone `edit_plan 3.0` JSON -> editable Shotcut `.mlt`
+  - implemented on branch `experiment/shotcut-mcp-windows-proof`
+  - validated in source with:
+    - `python -m pytest -q` -> `144 passed, 1 skipped`
+    - `python -m py_compile app.py handoff_builder\pipeline.py handoff_builder\v2\services\import_service.py handoff_builder\v2\services\shotcut_service.py handoff_builder\v2\plans\semantic.py handoff_builder\v2\timeline\compiler.py`
+  - packaged build rebuilt on Thursday, July 30, 2026:
+    - `dist\AI Handoff Builder\AI Handoff Builder.exe`
+    - SHA-256: `01e930e8dad8f383295ee082b252a7141a27df2a151f8a28814cea00a2e51c36`
+  - packaged resources now verified:
+    - `_internal\handoff_builder\templates\analysis_handoff\00_START_HERE.md`
+    - `_internal\handoff_builder\templates\analysis_handoff\PROJECT_BRIEF.md`
+    - `_internal\handoff_builder\templates\analysis_handoff\OUTPUT_CONTRACT.md`
+    - `_internal\schemas\analysis_handoff\1.0.json`
+    - `_internal\schemas\edit_plan\3.0.json`
+    - `_internal\schemas\normalized_timeline\1.0.json`
+
 - Date: 2026-07-29
 - Repository: `oleg3479881328-code/AI-Handoff-Builder`
 - Broad v2 contract: `Yt-Dlp-Download-Manager` issue `#67`

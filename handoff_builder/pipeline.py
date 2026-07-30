@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import datetime as dt
+import json
 import threading
 import zipfile
 from concurrent.futures import ThreadPoolExecutor, as_completed
@@ -25,6 +26,7 @@ from .utils import (
     stable_asset_id,
 )
 from .v2.common import stable_v2_id
+from .v2.packages.guards import compute_content_hash
 from .v2.project_registry import ProjectRegistryStore, record_local_handoff
 from .v2.workspace import init_project_workspace
 
@@ -99,6 +101,16 @@ class HandoffBuilder:
             if not candidate.exists():
                 return candidate
         raise FileExistsError(f"Could not allocate a unique output path for {path.name}")
+
+    def _load_analysis_template(self, name: str) -> str:
+        path = Path(__file__).resolve().parent / "templates" / "analysis_handoff" / name
+        return path.read_text(encoding="utf-8")
+
+    def _render_analysis_template(self, name: str, replacements: dict[str, object]) -> str:
+        template = self._load_analysis_template(name)
+        for key, value in replacements.items():
+            template = template.replace(f"{{{{{key}}}}}", str(value))
+        return template
 
     def _process_photo(self, source: Path, asset: AssetRecord, package_root: Path) -> None:
         self._ensure_not_canceled()
@@ -221,10 +233,11 @@ class HandoffBuilder:
         self.cancel_event.clear()
         timestamp = dt.datetime.now().strftime("%Y%m%d_%H%M%S")
         project_slug = slugify(self.config.project_name)
-        handoff_id = stable_v2_id(self.config.project_name, timestamp, length=20)
+        project_id = str(self.config.project_id or self.config.project_name)
+        handoff_id = stable_v2_id(project_id, timestamp, length=20)
         project_root: Path | None = None
         if self.config.workspace_root is not None:
-            project_root = init_project_workspace(self.config.workspace_root, self.config.project_name)
+            project_root = init_project_workspace(self.config.workspace_root, project_id)
             job_root = project_root / "analysis" / "handoffs" / handoff_id
             archive_dir = project_root / "handoffs"
             local_asset_registry_path = project_root / "analysis" / "local_asset_registry.json"
@@ -425,7 +438,7 @@ class HandoffBuilder:
 
         validation = {
             "schema_version": "1.0",
-            "project_id": self.config.project_name,
+            "project_id": project_id,
             "handoff_id": handoff_id,
             "project_name": self.config.project_name,
             "source_asset_count": len(assets),
@@ -486,21 +499,121 @@ class HandoffBuilder:
             ),
         }
 
+        expected_output_filename = f"{self.config.project_name}.json"
+        created_at = dt.datetime.now(dt.timezone.utc).isoformat()
+        template_context = {
+            "PROJECT_ID": project_id,
+            "PROJECT_NAME": self.config.project_name,
+            "HANDOFF_ID": handoff_id,
+            "CREATED_AT": created_at,
+            "PHOTO_COUNT": len(source_photos),
+            "VIDEO_COUNT": len(source_videos),
+            "AUDIO_COUNT": 0,
+            "EXPECTED_OUTPUT_FILENAME": expected_output_filename,
+        }
+        start_here_text = self._render_analysis_template("00_START_HERE.md", template_context)
+        project_brief_text = self._render_analysis_template("PROJECT_BRIEF.md", template_context)
+        output_contract_text = self._render_analysis_template("OUTPUT_CONTRACT.md", template_context)
+
+        (package_root / "00_START_HERE.md").write_text(start_here_text, encoding="utf-8")
+        (package_root / "PROJECT_BRIEF.md").write_text(project_brief_text, encoding="utf-8")
+        (package_root / "OUTPUT_CONTRACT.md").write_text(output_contract_text, encoding="utf-8")
+
+        manifest_assets: list[dict[str, object]] = []
+        inventory_candidates: list[dict[str, object]] = []
+        for asset in assets:
+            representations: list[dict[str, object]] = []
+            for rel_path, rep_type in (
+                (asset.analysis_copy, "resized_photo"),
+                (asset.proxy, "video_proxy"),
+                (asset.storyboard, "contact_sheet"),
+            ):
+                if not rel_path:
+                    continue
+                abs_path = package_root / rel_path
+                if abs_path.exists():
+                    sha256 = file_sha256(abs_path)
+                    size_bytes = abs_path.stat().st_size
+                    representations.append(
+                        {
+                            "path": rel_path,
+                            "representation_type": rep_type,
+                            "sha256": sha256,
+                            "size_bytes": size_bytes,
+                        }
+                    )
+                    inventory_candidates.append(
+                        {
+                            "path": rel_path,
+                            "sha256": sha256,
+                            "size_bytes": size_bytes,
+                        }
+                    )
+            manifest_assets.append(
+                {
+                    "asset_id": asset.asset_id,
+                    "media_type": asset.media_type,
+                    "original_name": asset.original_name,
+                    "status": "included" if asset.status == "processed" else "failed_with_error",
+                    "error_message": asset.error,
+                    "analysis_representations": representations,
+                }
+            )
+        for scene in scenes:
+            for rel_path in (scene.keyframe_path,):
+                abs_path = package_root / rel_path
+                if abs_path.exists():
+                    inventory_candidates.append(
+                        {
+                            "path": rel_path,
+                            "sha256": file_sha256(abs_path),
+                            "size_bytes": abs_path.stat().st_size,
+                        }
+                    )
+        for rel_path in (
+            "00_START_HERE.md",
+            "PROJECT_BRIEF.md",
+            "OUTPUT_CONTRACT.md",
+            "metadata/asset_metadata_normalized.json",
+            "metadata/chronology_report.json",
+            "metadata/location_clusters.json",
+            "metadata/metadata_warnings.json",
+            "validation_report.json",
+            "scene_manifest.json",
+        ):
+            abs_path = package_root / rel_path
+            if abs_path.exists():
+                inventory_candidates.append(
+                    {
+                        "path": rel_path,
+                        "sha256": file_sha256(abs_path),
+                        "size_bytes": abs_path.stat().st_size,
+                    }
+                )
+
         manifest = {
             "schema_version": "1.0",
-            "project_id": self.config.project_name,
-            "handoff_id": handoff_id,
+            "package_type": "analysis_handoff",
+            "project_id": project_id,
             "project_name": self.config.project_name,
-            "created_at": dt.datetime.now(dt.timezone.utc).isoformat(),
+            "handoff_id": handoff_id,
+            "created_at": created_at,
+            "entrypoint": "00_START_HERE.md",
+            "entrypoint_sha256": file_sha256(package_root / "00_START_HERE.md"),
+            "project_brief": "PROJECT_BRIEF.md",
+            "project_brief_sha256": file_sha256(package_root / "PROJECT_BRIEF.md"),
+            "output_contract": "OUTPUT_CONTRACT.md",
+            "output_contract_sha256": file_sha256(package_root / "OUTPUT_CONTRACT.md"),
+            "expected_output_filename": expected_output_filename,
+            "target_editor": "shotcut",
+            "file_inventory": sorted(inventory_candidates, key=lambda item: str(item["path"])),
+            "content_hash": "0" * 64,
+            "asset_selection": {
+                "total_selected": len(manifest_assets),
+                "assets": manifest_assets,
+            },
             "settings": {
                 "include_video_proxies": self.config.include_video_proxies,
-                "photo_long_side": self.config.photo_long_side,
-                "photo_quality": self.config.photo_quality,
-                "proxy_height": self.config.proxy_height,
-                "scene_threshold": self.config.scene_threshold,
-                "short_video_seconds": self.config.short_video_seconds,
-                "fallback_segment_seconds": self.config.fallback_segment_seconds,
-                "max_segments_per_video": self.config.max_segments_per_video,
                 "gps_export_mode": self.config.gps_export_mode,
             },
             "summary": validation,
@@ -510,6 +623,7 @@ class HandoffBuilder:
                 for path in photo_sheets + video_sheets + scene_sheets
             ],
         }
+        manifest["content_hash"] = compute_content_hash(manifest, self_hash_field="content_hash")
         scene_manifest = {
             "schema_version": "1.0",
             "project_name": self.config.project_name,
@@ -521,48 +635,6 @@ class HandoffBuilder:
         json_dump(package_root / "handoff_manifest.json", manifest)
         json_dump(package_root / "scene_manifest.json", scene_manifest)
         json_dump(package_root / "validation_report.json", validation)
-
-        readme = f"""AI HANDOFF BUILDER v1
-
-PROJECT
-{self.config.project_name}
-
-SUMMARY
-- Assets: {len(assets)}
-- Videos: {len(source_videos)}
-- Photos: {len(source_photos)}
-- Scenes/coverage segments: {len(scenes)}
-- Failed assets: {len(failed)}
-- Coverage OK: {validation['coverage_ok']}
-- Metadata records: {validation['metadata_records_total']}
-- Assets with capture time: {validation['assets_with_capture_time']}
-- Assets with GPS: {validation['assets_with_gps']}
-- Metadata warnings: {validation['metadata_warning_count']}
-
-IMPORTANT
-Every source video must have at least one keyframe and one preview.
-Short videos are represented as one full-video scene.
-Long videos use detected cuts or uniform coverage segments.
-Photos are resized from every source folder, not just one category.
-
-FILES
-- handoff_manifest.json
-- scene_manifest.json
-- validation_report.json
-- metadata/asset_metadata_raw.json
-- metadata/asset_metadata_normalized.json
-- metadata/device_clock_profiles.json
-- metadata/chronology_report.json
-- metadata/location_clusters.json
-- metadata/metadata_warnings.json
-- photo_analysis_copies/
-- video_proxies/
-- scene_keyframes/
-- scene_previews/
-- video_storyboards/
-- contact_sheets/
-"""
-        (package_root / "README.txt").write_text(readme, encoding="utf-8")
 
         archive_path = self._next_available_file(archive_dir / f"{project_slug}_ANALYSIS_HANDOFF.zip")
         self.progress(0.98, "Creating final ZIP...")
@@ -582,17 +654,21 @@ FILES
         if project_root is not None:
             record_local_handoff(
                 project_root=project_root,
-                project_id=self.config.project_name,
+                project_id=project_id,
+                project_name=self.config.project_name,
                 handoff_id=handoff_id,
                 handoff_sha256=archive_sha256,
+                handoff_content_hash=str(manifest["content_hash"]),
                 source_zip_path=self.config.source_zip_path,
                 archive_path=archive_path,
             )
             ProjectRegistryStore().register_project(
                 project_root=project_root,
-                project_id=self.config.project_name,
+                project_id=project_id,
+                project_name=self.config.project_name,
                 handoff_id=handoff_id,
                 handoff_sha256=archive_sha256,
+                handoff_content_hash=str(manifest["content_hash"]),
                 source_zip_path=self.config.source_zip_path,
                 archive_path=archive_path,
             )
@@ -607,11 +683,14 @@ FILES
             validation_path=package_root / "validation_report.json",
             validation=validation,
             failed_sources=[asset.source_path for asset in failed if asset.source_path],
+            project_id=project_id,
+            project_name=self.config.project_name,
             metadata_warnings_path=metadata_dir / "metadata_warnings.json",
             local_asset_registry_path=local_asset_registry_path,
             project_root=project_root,
             handoff_id=handoff_id,
             handoff_sha256=archive_sha256,
+            handoff_content_hash=str(manifest["content_hash"]),
             canceled=False,
         )
 
