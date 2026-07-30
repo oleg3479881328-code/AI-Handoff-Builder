@@ -515,7 +515,7 @@ def test_single_source_zip_derives_owner_visible_names_and_shotcut_contract(tmp_
 
     result = builder.build([source_zip])
 
-    assert result.archive_path.name == "Carolyn_and_Rob_ANALYSIS_HANDOFF.zip"
+    assert result.archive_path.name == "Carolyn and Rob_ANALYSIS_HANDOFF.zip"
     manifest = json.loads((result.package_root / "handoff_manifest.json").read_text(encoding="utf-8"))
     assert manifest["project_name"] == "Carolyn and Rob"
     assert manifest["project_id"] == "carolyn_and_rob"

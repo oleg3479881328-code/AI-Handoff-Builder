@@ -367,18 +367,33 @@ def build_shotcut_project_from_timeline(
         tracks.append(ShotcutTrackIntent(kind=kind, name=track_id))
 
     clip_summary: list[dict] = []
+    track_item_indices: dict[str, int] = {}
     for item in visual_items:
         media_path = Path(str(item["resolved_source_path"]))
         media_type = str(item["media_type"])
+        duration_frames = int(item["duration_frames"])
         if media_type == "video":
             probe = _probe_once(backend, probe_cache, media_path)
             asset_fps = _rounded_fps(probe)
             in_frame = round(int(item["source_in_us"]) * asset_fps / 1_000_000)
             out_frame = max(in_frame, round(int(item["source_out_us"]) * asset_fps / 1_000_000) - 1)
+            _ensure_supported_video_duration(
+                duration_frames=duration_frames,
+                source_in_frame=in_frame,
+                source_out_frame=out_frame,
+                asset_fps=asset_fps,
+                fps_num=fps_num,
+                fps_den=fps_den,
+                item_id=str(item["item_id"]),
+            )
+            image_duration_seconds = None
         else:
-            in_frame = None
-            out_frame = None
+            in_frame = 0
+            out_frame = duration_frames - 1
+            image_duration_seconds = duration_frames * fps_den / fps_num
         track_name = str(item["track_id"])
+        track_item_index = track_item_indices.get(track_name, 0)
+        track_item_indices[track_name] = track_item_index + 1
         clips.append(
             ShotcutClipIntent(
                 media_path=media_path,
@@ -386,6 +401,7 @@ def build_shotcut_project_from_timeline(
                 position_frame=int(item["timeline_start_frame"]),
                 in_frame=in_frame,
                 out_frame=out_frame,
+                image_duration_seconds=image_duration_seconds,
                 caption=str(item["item_id"]),
             )
         )
@@ -393,8 +409,9 @@ def build_shotcut_project_from_timeline(
             {
                 "item_id": str(item["item_id"]),
                 "track": track_name,
+                "track_item_index": track_item_index,
                 "position_frame": int(item["timeline_start_frame"]),
-                "duration_frames": int(item["duration_frames"]),
+                "duration_frames": duration_frames,
                 "source_in_us": int(item["source_in_us"]),
                 "source_out_us": int(item["source_out_us"]),
             }
@@ -427,6 +444,15 @@ def build_shotcut_project_from_timeline(
         overwrite=True,
     )
     inspect_result = backend.inspect_project(artifacts.project_path)
+    edit_result = _apply_timeline_edit_intents(
+        timeline=timeline,
+        clip_summary=clip_summary,
+        backend=backend,
+        project_path=artifacts.project_path,
+        expected_revision=str(create_result["revision"]),
+    )
+    if edit_result is not None:
+        inspect_result = backend.inspect_project(artifacts.project_path)
     validate_result = backend.validate_project(artifacts.project_path)
     return {
         "project_name": project_name,
@@ -436,6 +462,7 @@ def build_shotcut_project_from_timeline(
         "width": int(timeline["canvas"]["width"]),
         "height": int(timeline["canvas"]["height"]),
         "create_result": create_result,
+        "edit_result": edit_result,
         "inspect_result": inspect_result,
         "validate_result": validate_result,
         "clip_summary": clip_summary,
@@ -586,6 +613,130 @@ def _resolved_assets_from_validated(validated) -> list[dict]:
                 }
             )
     return assets
+
+
+def _ensure_supported_video_duration(
+    *,
+    duration_frames: int,
+    source_in_frame: int,
+    source_out_frame: int,
+    asset_fps: int,
+    fps_num: int,
+    fps_den: int,
+    item_id: str,
+) -> None:
+    source_duration_frames = source_out_frame - source_in_frame + 1
+    expected_duration_frames = round(source_duration_frames * fps_num / fps_den / asset_fps)
+    if abs(expected_duration_frames - duration_frames) > 1:
+        raise UnsafePackageError(
+            f"Unsupported retiming for {item_id}: timeline={duration_frames} frames, source_range={source_duration_frames} frames."
+        )
+
+
+def _apply_timeline_edit_intents(
+    *,
+    timeline: dict,
+    clip_summary: list[dict],
+    backend: ShotcutMcpBackend,
+    project_path: Path,
+    expected_revision: str,
+) -> dict | None:
+    operations: list[dict] = []
+    clip_by_item_id = {str(item["item_id"]): item for item in clip_summary}
+    title_track_name = "Titles"
+    existing_track_names = {str(track["track_id"]) for track in timeline.get("tracks", [])}
+    title_track_added = title_track_name in existing_track_names
+
+    for item in sorted(timeline.get("visual_items", []), key=lambda value: (int(value["timeline_start_frame"]), str(value["item_id"]))):
+        item_id = str(item["item_id"])
+        clip_ref = clip_by_item_id[item_id]
+        transform = item.get("transform") or {}
+        if transform:
+            operations.append(
+                {
+                    "op": "animate_clip",
+                    "track": str(clip_ref["track"]),
+                    "item_index": int(clip_ref["track_item_index"]),
+                    "interpolation": "linear",
+                    "keyframes": _transform_keyframes(transform, int(item["duration_frames"])),
+                }
+            )
+        crop = item.get("crop") or {}
+        if crop:
+            operations.append(
+                {
+                    "op": "add_filter",
+                    "target": "clip",
+                    "track": str(clip_ref["track"]),
+                    "item_index": int(clip_ref["track_item_index"]),
+                    "service": "crop",
+                    "shotcut_filter": "crop",
+                    "properties": {
+                        "use_profile": 1,
+                        "center": 0,
+                        "center_bias": 0,
+                        "left": int(round(float(crop.get("left", 0)))),
+                        "top": int(round(float(crop.get("top", 0)))),
+                        "right": int(round(float(crop.get("right", 0)))),
+                        "bottom": int(round(float(crop.get("bottom", 0)))),
+                    },
+                }
+            )
+
+    for text_item in sorted(timeline.get("text_items", []), key=lambda value: (int(value["timeline_start_frame"]), str(value["item_id"]))):
+        if not title_track_added:
+            operations.append({"op": "add_track", "kind": "video", "name": title_track_name})
+            title_track_added = True
+        operations.append(
+            {
+                "op": "add_generator",
+                "track": title_track_name,
+                "generator": "text",
+                "text": str(text_item["text"]),
+                "duration_frames": int(text_item["duration_frames"]),
+                "position_frame": int(text_item["timeline_start_frame"]),
+                "mode": "insert",
+            }
+        )
+
+    if not operations:
+        return None
+    return backend.edit_operations(
+        project_path,
+        expected_revision=expected_revision,
+        operations=operations,
+    )
+
+
+def _transform_keyframes(transform: dict, duration_frames: int) -> list[dict]:
+    scale_x = float(transform.get("scale_x", 1.0))
+    scale_y = float(transform.get("scale_y", scale_x))
+    if abs(scale_x - scale_y) > 1e-6:
+        raise UnsafePackageError("Shotcut one-JSON transform currently requires scale_x == scale_y.")
+    center_x = float(transform.get("position_x", 0.5))
+    center_y = float(transform.get("position_y", 0.5))
+    rotation = float(transform.get("rotation_degrees", 0.0))
+    last_frame = max(0, duration_frames - 1)
+    points = [
+        {
+            "frame": 0,
+            "center_x": center_x,
+            "center_y": center_y,
+            "scale": scale_x,
+            "rotation_degrees": rotation,
+        }
+    ]
+    if last_frame > 0:
+        points.append(
+            {
+                "frame": last_frame,
+                "center_x": center_x,
+                "center_y": center_y,
+                "scale": scale_x,
+                "rotation_degrees": rotation,
+            }
+        )
+    return points
 
 
 def _build_allowed_roots(workspace_root: Path, package_root: Path, output_dir: Path) -> tuple[Path, ...]:

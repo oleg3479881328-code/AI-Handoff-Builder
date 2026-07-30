@@ -107,6 +107,7 @@ class App(tk.Tk):
         self.active_builder: HandoffBuilder | None = None
         self.worker_count = tk.IntVar(value=2)
         self.retry_only_failed = False
+        self.v1_settings_expanded = False
 
         self.v2_controller = V2RunnerController(self.events)
         self.v2_workspace_path = tk.StringVar(value=str(Path.home() / "Desktop" / "AI Handoff Workspace"))
@@ -236,7 +237,7 @@ class App(tk.Tk):
 
         ttk.Label(
             outer,
-            text="ZIP / папка / файлы → один проверенный PROJECT_ANALYSIS_HANDOFF.zip",
+            text="ZIP / папка / файлы → один проверенный <project_name>_ANALYSIS_HANDOFF.zip",
         ).pack(anchor="w", pady=(0, 12))
 
         source_frame = ttk.LabelFrame(outer, text="Исходные материалы", padding=10)
@@ -253,31 +254,44 @@ class App(tk.Tk):
         self.source_list.pack(fill="both", expand=True, pady=(10, 0))
         self._register_listbox(self.source_list)
 
-        settings = ttk.LabelFrame(outer, text="Настройки", padding=10)
-        settings.pack(fill="x", pady=12)
+        self.v1_settings_toggle_button = ttk.Button(
+            outer,
+            text="Показать настройки",
+            command=self._toggle_v1_settings,
+            style="Secondary.TButton",
+        )
+        self.v1_settings_toggle_button.pack(anchor="w", pady=(12, 0))
 
-        ttk.Label(settings, text="Название проекта:").grid(row=0, column=0, sticky="w")
-        ttk.Entry(settings, textvariable=self.project_name).grid(row=0, column=1, sticky="ew", padx=(8, 0))
-        ttk.Label(settings, text="Куда сохранить:").grid(row=1, column=0, sticky="w", pady=(8, 0))
-        ttk.Entry(settings, textvariable=self.output_dir).grid(row=1, column=1, sticky="ew", padx=(8, 0), pady=(8, 0))
-        ttk.Button(settings, text="Выбрать", command=self._choose_output).grid(row=1, column=2, padx=(8, 0), pady=(8, 0))
+        self.v1_settings_frame = ttk.LabelFrame(outer, text="Настройки", padding=10)
+        self.v1_settings_frame.pack(fill="x", pady=(8, 12))
+
+        ttk.Label(self.v1_settings_frame, text="Название проекта:").grid(row=0, column=0, sticky="w")
+        ttk.Entry(self.v1_settings_frame, textvariable=self.project_name).grid(row=0, column=1, sticky="ew", padx=(8, 0))
+        ttk.Label(self.v1_settings_frame, text="Куда сохранить:").grid(row=1, column=0, sticky="w", pady=(8, 0))
+        ttk.Entry(self.v1_settings_frame, textvariable=self.output_dir).grid(
+            row=1, column=1, sticky="ew", padx=(8, 0), pady=(8, 0)
+        )
+        ttk.Button(self.v1_settings_frame, text="Выбрать", command=self._choose_output).grid(
+            row=1, column=2, padx=(8, 0), pady=(8, 0)
+        )
         ttk.Checkbutton(
-            settings,
+            self.v1_settings_frame,
             text="Включить лёгкие 720p video proxies в ZIP",
             variable=self.include_proxies,
         ).grid(row=2, column=1, sticky="w", pady=(8, 0))
-        ttk.Label(settings, text="GPS export mode:").grid(row=3, column=0, sticky="w", pady=(8, 0))
+        ttk.Label(self.v1_settings_frame, text="GPS export mode:").grid(row=3, column=0, sticky="w", pady=(8, 0))
         ttk.Combobox(
-            settings,
+            self.v1_settings_frame,
             textvariable=self.gps_export_mode,
             values=("exact", "rounded", "venue_label_only", "excluded"),
             state="readonly",
         ).grid(row=3, column=1, sticky="w", padx=(8, 0), pady=(8, 0))
-        ttk.Label(settings, text="Параллельных workers:").grid(row=4, column=0, sticky="w", pady=(8, 0))
-        ttk.Spinbox(settings, from_=1, to=2, textvariable=self.worker_count, width=8).grid(
+        ttk.Label(self.v1_settings_frame, text="Параллельных workers:").grid(row=4, column=0, sticky="w", pady=(8, 0))
+        ttk.Spinbox(self.v1_settings_frame, from_=1, to=2, textvariable=self.worker_count, width=8).grid(
             row=4, column=1, sticky="w", padx=(8, 0), pady=(8, 0)
         )
-        settings.columnconfigure(1, weight=1)
+        self.v1_settings_frame.columnconfigure(1, weight=1)
+        self.v1_settings_frame.pack_forget()
 
         ttk.Progressbar(outer, variable=self.progress_value, maximum=100).pack(fill="x")
         ttk.Label(outer, textvariable=self.status_text).pack(anchor="w", pady=(6, 6))
@@ -387,7 +401,7 @@ class App(tk.Tk):
         shotcut_actions = ttk.Frame(shotcut_frame, style="App.TFrame")
         shotcut_actions.grid(row=3, column=0, columnspan=4, sticky="ew", pady=(10, 0))
         self.shotcut_build_button = ttk.Button(
-            shotcut_actions, text="Build Editable Project", command=self._shotcut_build_selected_project
+            shotcut_actions, text="Build editable Shotcut project", command=self._shotcut_build_selected_project
         )
         self.shotcut_build_button.pack(side="left")
         self.shotcut_open_project_button = ttk.Button(
@@ -2460,6 +2474,15 @@ class App(tk.Tk):
     def _open_result(self) -> None:
         if self.last_output:
             self._open_path(self.last_output.parent)
+
+    def _toggle_v1_settings(self) -> None:
+        self.v1_settings_expanded = not self.v1_settings_expanded
+        if self.v1_settings_expanded:
+            self.v1_settings_frame.pack(fill="x", pady=(8, 12), before=self.start_button.master)
+            self.v1_settings_toggle_button.configure(text="Скрыть настройки")
+        else:
+            self.v1_settings_frame.pack_forget()
+            self.v1_settings_toggle_button.configure(text="Показать настройки")
 
     def _open_path(self, path: Path) -> None:
         if not path.exists():

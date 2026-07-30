@@ -8,6 +8,7 @@ from handoff_builder.v2.plans.semantic import ValidatedAsset, ValidatedOperation
 from handoff_builder.v2.render.shotcut_backend import ShotcutRenderJob
 from handoff_builder.v2.services.shotcut_service import (
     ShotcutServicePaths,
+    build_shotcut_project_from_timeline,
     build_shotcut_project_from_validated_plan,
     render_built_shotcut_project,
 )
@@ -103,6 +104,108 @@ def test_render_built_shotcut_project_fails_closed_when_video_stream_is_missing(
         )
 
 
+def test_build_shotcut_project_from_timeline_preserves_photo_duration_and_applies_edit_intents(tmp_path: Path) -> None:
+    photo = tmp_path / "cover.jpg"
+    photo.write_bytes(b"photo")
+    video = tmp_path / "clip.mp4"
+    video.write_bytes(b"video")
+    artifacts = _artifacts(tmp_path)
+    backend = _FakeTimelineBackend()
+    timeline = {
+        "canvas": {"width": 1080, "height": 1920},
+        "timebase": {"fps_num": 30, "fps_den": 1},
+        "normalized_timeline_hash": "a" * 64,
+        "tracks": [{"track_id": "V1", "track_type": "video"}],
+        "visual_items": [
+            {
+                "item_id": "photo-1",
+                "asset_id": "asset-photo-1",
+                "media_type": "photo",
+                "track_id": "V1",
+                "timeline_start_frame": 0,
+                "duration_frames": 90,
+                "source_in_us": 0,
+                "source_out_us": 0,
+                "source_audio_policy": "discard",
+                "resolved_source_path": str(photo),
+                "transform": {"scale_x": 1.1, "scale_y": 1.1, "position_x": 0.5, "position_y": 0.5},
+                "crop": {"left": 10, "top": 20, "right": 30, "bottom": 40},
+            },
+            {
+                "item_id": "video-1",
+                "asset_id": "asset-video-1",
+                "media_type": "video",
+                "track_id": "V1",
+                "timeline_start_frame": 90,
+                "duration_frames": 30,
+                "source_in_us": 0,
+                "source_out_us": 1_000_000,
+                "source_audio_policy": "discard",
+                "resolved_source_path": str(video),
+            },
+        ],
+        "audio_items": [],
+        "text_items": [{"item_id": "title-1", "text": "Opening", "timeline_start_frame": 0, "duration_frames": 90}],
+    }
+
+    summary = build_shotcut_project_from_timeline(
+        timeline,
+        backend=backend,
+        artifacts=artifacts,
+        project_name="Carolyn and Rob",
+    )
+
+    assert summary["target_mlt_filename"] == "Carolyn and Rob.mlt"
+    assert backend.created["clips"][0]["image_duration_seconds"] == 3.0
+    assert backend.created["clips"][0]["in_frame"] == 0
+    assert backend.created["clips"][0]["out_frame"] == 89
+    assert backend.created["clips"][1]["position_frame"] == 90
+    assert summary["clip_summary"][0]["track_item_index"] == 0
+    assert summary["clip_summary"][1]["track_item_index"] == 1
+    assert backend.edits[0]["op"] == "animate_clip"
+    assert backend.edits[1]["op"] == "add_filter"
+    assert backend.edits[2] == {"op": "add_track", "kind": "video", "name": "Titles"}
+    assert backend.edits[3]["op"] == "add_generator"
+    assert backend.edits[3]["text"] == "Opening"
+
+
+def test_build_shotcut_project_from_timeline_rejects_mismatched_video_duration(tmp_path: Path) -> None:
+    video = tmp_path / "clip.mp4"
+    video.write_bytes(b"video")
+    artifacts = _artifacts(tmp_path)
+    backend = _FakeTimelineBackend()
+    timeline = {
+        "canvas": {"width": 1080, "height": 1920},
+        "timebase": {"fps_num": 30, "fps_den": 1},
+        "normalized_timeline_hash": "b" * 64,
+        "tracks": [{"track_id": "V1", "track_type": "video"}],
+        "visual_items": [
+            {
+                "item_id": "video-1",
+                "asset_id": "asset-video-1",
+                "media_type": "video",
+                "track_id": "V1",
+                "timeline_start_frame": 0,
+                "duration_frames": 60,
+                "source_in_us": 0,
+                "source_out_us": 1_000_000,
+                "source_audio_policy": "discard",
+                "resolved_source_path": str(video),
+            }
+        ],
+        "audio_items": [],
+        "text_items": [],
+    }
+
+    with pytest.raises(Exception, match="Unsupported retiming"):
+        build_shotcut_project_from_timeline(
+            timeline,
+            backend=backend,
+            artifacts=artifacts,
+            project_name="Carolyn and Rob",
+        )
+
+
 def _artifacts(tmp_path: Path) -> ShotcutServicePaths:
     output_dir = tmp_path / "renders" / "job-1"
     shotcut_dir = output_dir / "shotcut"
@@ -145,6 +248,16 @@ class _FakeBuildBackend:
 
     def validate_project(self, project_path: Path) -> dict:
         return {"valid": True, "ready": True}
+
+
+class _FakeTimelineBackend(_FakeBuildBackend):
+    def __init__(self) -> None:
+        super().__init__()
+        self.edits: list[dict] = []
+
+    def edit_operations(self, project_path: Path, *, expected_revision: str, operations: list[dict]) -> dict:
+        self.edits = operations
+        return {"edited": True, "expected_revision": expected_revision, "operation_results": operations}
 
 
 class _FakeRenderBackend:

@@ -233,6 +233,9 @@ class HandoffBuilder:
         self.cancel_event.clear()
         timestamp = dt.datetime.now().strftime("%Y%m%d_%H%M%S")
         project_slug = slugify(self.config.project_name)
+        owner_filename_project_name = "".join(
+            "_" if ch in '<>:"/\\|?*' else ch for ch in self.config.project_name
+        ).rstrip(" .") or project_slug
         project_id = str(self.config.project_id or self.config.project_name)
         handoff_id = stable_v2_id(project_id, timestamp, length=20)
         project_root: Path | None = None
@@ -636,7 +639,9 @@ class HandoffBuilder:
         json_dump(package_root / "scene_manifest.json", scene_manifest)
         json_dump(package_root / "validation_report.json", validation)
 
-        archive_path = self._next_available_file(archive_dir / f"{project_slug}_ANALYSIS_HANDOFF.zip")
+        archive_path = self._next_available_file(
+            archive_dir / f"{owner_filename_project_name}_ANALYSIS_HANDOFF.zip"
+        )
         self.progress(0.98, "Creating final ZIP...")
         with zipfile.ZipFile(
             archive_path,

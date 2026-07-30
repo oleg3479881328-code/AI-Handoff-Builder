@@ -19,7 +19,7 @@ from ..project_registry import (
 )
 from ..packages.guards import compute_sha256
 from ..packages.importer import import_edit_package
-from ..plans.schema import deterministic_plan_hash, validate_payload
+from ..plans.schema import deterministic_plan_hash, load_bounded_json_object, validate_payload
 from ..plans.semantic import load_and_validate_edit_plan_3
 from ..render.ffmpeg_backend import FFmpegBackend
 from ..render.report_stub import build_render_report_stub, write_render_report_stub
@@ -323,7 +323,7 @@ def import_plan_into_workspace(plan_json: Path, workspace: Path) -> ImportResult
         queue_repo = SqliteRenderQueueRepository(connection)
         workspace_repo.get_project(project_id)
 
-        payload = json.loads(plan_json.read_text(encoding="utf-8"))
+        payload = load_bounded_json_object(plan_json)
         validate_payload("edit_plan", str(payload["schema_version"]), payload)
         if str(payload.get("document_type")) != "edit_plan":
             raise UnsafePackageError("Direct JSON import requires document_type=edit_plan.")

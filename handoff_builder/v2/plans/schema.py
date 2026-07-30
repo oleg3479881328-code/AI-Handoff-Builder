@@ -5,7 +5,7 @@ import json
 import re
 from pathlib import Path
 
-from ..errors import UnsupportedSchemaVersionError
+from ..errors import UnsupportedSchemaVersionError, UnsafePackageError
 
 
 SCHEMA_ROOT = Path(__file__).resolve().parents[3] / "schemas"
@@ -40,6 +40,7 @@ SUPPORTED_SCHEMA_VERSIONS = {
     "render_report": {"1.0": SCHEMA_ROOT / "render_report" / "1.0.json"},
     "voiceover_spec": {"1.0": SCHEMA_ROOT / "voiceover_spec" / "1.0.json"},
 }
+MAX_DIRECT_JSON_BYTES = 10 * 1024 * 1024
 
 
 def schema_dispatch(schema_type: str, version: str) -> Path:
@@ -54,6 +55,33 @@ def schema_dispatch(schema_type: str, version: str) -> Path:
 def load_schema(schema_type: str, version: str) -> dict:
     path = schema_dispatch(schema_type, version)
     return json.loads(path.read_text(encoding="utf-8"))
+
+
+def load_bounded_json_object(path: Path, *, max_bytes: int = MAX_DIRECT_JSON_BYTES) -> dict:
+    resolved = path.resolve()
+    if resolved.suffix.lower() != ".json":
+        raise UnsafePackageError(f"Direct plan loader requires a .json file: {resolved.name}")
+    if not resolved.exists():
+        raise UnsafePackageError(f"JSON file does not exist: {resolved}")
+    if not resolved.is_file():
+        raise UnsafePackageError(f"JSON path must be a regular file: {resolved}")
+    size_bytes = resolved.stat().st_size
+    if size_bytes <= 0:
+        raise UnsafePackageError("JSON file is empty.")
+    if size_bytes > max_bytes:
+        raise UnsafePackageError(f"JSON file exceeds size limit: {size_bytes} > {max_bytes}")
+    raw = resolved.read_bytes()
+    try:
+        text = raw.decode("utf-8", errors="strict")
+    except UnicodeDecodeError as exc:
+        raise UnsafePackageError(f"JSON file is not valid UTF-8: {resolved.name}") from exc
+    try:
+        payload = json.loads(text)
+    except json.JSONDecodeError as exc:
+        raise UnsafePackageError(f"JSON file is not valid JSON: {resolved.name}") from exc
+    if not isinstance(payload, dict):
+        raise UnsafePackageError("JSON root must be one object.")
+    return payload
 
 
 def deterministic_plan_hash(payload: dict) -> str:

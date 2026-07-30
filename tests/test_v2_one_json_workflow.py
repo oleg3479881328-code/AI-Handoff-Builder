@@ -3,9 +3,12 @@ from __future__ import annotations
 import json
 from pathlib import Path
 
+import pytest
 from PIL import Image
 
 from handoff_builder.utils import file_sha256
+from handoff_builder.v2.errors import UnsafePackageError
+from handoff_builder.v2.plans.schema import load_bounded_json_object, validate_payload
 from handoff_builder.v2.project_registry import record_local_handoff
 from handoff_builder.v2.render.ffmpeg_backend import FFmpegBackend
 from handoff_builder.v2.services.import_service import import_plan_into_workspace
@@ -129,3 +132,47 @@ def test_normalized_timeline_is_deterministic_for_same_valid_json(tmp_path: Path
     }
 
     assert len(hashes) == 1
+
+
+def test_direct_json_loader_rejects_empty_file(tmp_path: Path) -> None:
+    path = tmp_path / "empty.json"
+    path.write_bytes(b"")
+
+    with pytest.raises(UnsafePackageError, match="empty"):
+        load_bounded_json_object(path)
+
+
+def test_direct_json_loader_rejects_oversized_file(tmp_path: Path) -> None:
+    path = tmp_path / "huge.json"
+    path.write_bytes(b"{" + b"a" * (10 * 1024 * 1024) + b"}")
+
+    with pytest.raises(UnsafePackageError, match="exceeds size limit"):
+        load_bounded_json_object(path)
+
+
+def test_direct_json_loader_rejects_invalid_utf8(tmp_path: Path) -> None:
+    path = tmp_path / "bad.json"
+    path.write_bytes(b'{"project_id":"x","bad":"\x80"}')
+
+    with pytest.raises(UnsafePackageError, match="UTF-8"):
+        load_bounded_json_object(path)
+
+
+def test_direct_json_loader_rejects_non_object_root(tmp_path: Path) -> None:
+    path = tmp_path / "array.json"
+    path.write_text("[]", encoding="utf-8")
+
+    with pytest.raises(UnsafePackageError, match="root must be one object"):
+        load_bounded_json_object(path)
+
+
+def test_direct_json_loader_keeps_unknown_schema_fail_closed(tmp_path: Path) -> None:
+    path = tmp_path / "unknown.json"
+    payload = _plan_payload()
+    payload["schema_version"] = "9.9"
+    path.write_text(json.dumps(payload, ensure_ascii=False, indent=2), encoding="utf-8")
+
+    loaded = load_bounded_json_object(path)
+
+    with pytest.raises(Exception, match="Unsupported schema version"):
+        validate_payload("edit_plan", str(loaded["schema_version"]), loaded)

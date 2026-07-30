@@ -9,7 +9,7 @@ from PIL import Image
 from ..assets import resolve_plan_assets_against_registry
 from ..errors import UnsafePackageError
 from ..packages.guards import ensure_allowed_package_path
-from ..plans.schema import validate_payload
+from ..plans.schema import load_bounded_json_object, validate_payload
 from ..render.ffmpeg_backend import FFmpegBackend
 
 
@@ -95,7 +95,7 @@ def load_and_validate_edit_plan_3(
     workspace: Path,
     backend: FFmpegBackend,
 ) -> ValidatedEditPlan3:
-    payload = json.loads(plan_path.read_text(encoding="utf-8"))
+    payload = load_bounded_json_object(plan_path)
     validate_payload("edit_plan", "3.0", payload)
     _reject_forbidden_keys(payload)
     if str(payload.get("document_type")) != "edit_plan":

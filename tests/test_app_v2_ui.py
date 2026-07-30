@@ -42,6 +42,28 @@ def test_v2_tab_uses_scroll_shell_and_collapsible_json():
         app.destroy()
 
 
+def test_v1_settings_start_collapsed_and_toggle_from_button():
+    app = _make_app()
+    try:
+        assert app.v1_settings_expanded is False
+        assert app.v1_settings_toggle_button.cget("text") == "Показать настройки"
+        assert app.v1_settings_frame.winfo_manager() == ""
+
+        app._toggle_v1_settings()
+        app.update_idletasks()
+        assert app.v1_settings_expanded is True
+        assert app.v1_settings_toggle_button.cget("text") == "Скрыть настройки"
+        assert app.v1_settings_frame.winfo_manager() == "pack"
+
+        app._toggle_v1_settings()
+        app.update_idletasks()
+        assert app.v1_settings_expanded is False
+        assert app.v1_settings_toggle_button.cget("text") == "Показать настройки"
+        assert app.v1_settings_frame.winfo_manager() == ""
+    finally:
+        app.destroy()
+
+
 def test_v2_snapshot_focuses_latest_job_and_scrolls_results_into_view():
     app = _make_app()
     try:

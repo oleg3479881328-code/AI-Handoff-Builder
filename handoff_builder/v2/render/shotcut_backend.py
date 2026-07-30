@@ -46,6 +46,7 @@ class ShotcutClipIntent:
     position_frame: int | None = None
     in_frame: int | None = None
     out_frame: int | None = None
+    image_duration_seconds: float | None = None
     caption: str | None = None
 
     def to_clip_args(self) -> dict[str, Any]:
@@ -57,6 +58,8 @@ class ShotcutClipIntent:
             raise ShotcutBackendError("out_frame must be >= 0.")
         if self.in_frame is not None and self.out_frame is not None and self.out_frame < self.in_frame:
             raise ShotcutBackendError("out_frame must be >= in_frame.")
+        if self.image_duration_seconds is not None and self.image_duration_seconds <= 0:
+            raise ShotcutBackendError("image_duration_seconds must be > 0.")
         payload: dict[str, Any] = {
             "track": self.track,
             "path": str(self.media_path),
@@ -67,6 +70,8 @@ class ShotcutClipIntent:
             payload["in_frame"] = self.in_frame
         if self.out_frame is not None:
             payload["out_frame"] = self.out_frame
+        if self.image_duration_seconds is not None:
+            payload["image_duration_seconds"] = self.image_duration_seconds
         if self.caption:
             payload["caption"] = self.caption
         return payload

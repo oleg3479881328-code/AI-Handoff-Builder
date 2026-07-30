@@ -7,6 +7,7 @@ from pathlib import Path
 
 from .common import utc_now_iso
 from .errors import UnsafePackageError
+from .plans.schema import load_bounded_json_object
 from .workspace import load_project_config
 
 
@@ -135,7 +136,7 @@ def read_package_identity(package_zip: Path) -> dict[str, str]:
 
 
 def read_plan_identity(plan_json: Path) -> dict[str, str]:
-    payload = json.loads(plan_json.read_text(encoding="utf-8"))
+    payload = load_bounded_json_object(plan_json)
     return {
         "project_id": str(payload["project_id"]),
         "handoff_id": str(payload["handoff_id"]),

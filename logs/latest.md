@@ -1,6 +1,27 @@
 # Latest Log
 
 Date: 2026-07-30
+Step: Issue #27 packaged UI parity correction
+
+## Completed
+
+- Matched the current `issue25` packaged UI to the owner-expected v1 behavior by collapsing the `Настройки` block behind:
+  - `Показать настройки`
+- Added the same toggle flow directly in the active branch app instead of launching the older `v1` build as a substitute.
+- Added focused UI regression coverage:
+  - `tests/test_app_v2_ui.py`
+  - verifies:
+    - collapsed initial state
+    - button text swap
+    - expand/collapse manager transition
+- Validation on Thursday, July 30, 2026:
+  - `python -m py_compile app.py` -> success
+  - `python -m pytest -q tests\test_app_v2_ui.py` -> `3 passed`
+  - `cmd /c build_exe.bat` -> success
+- Fresh packaged executable rebuilt from the active Issue `#27` worktree:
+  - `dist\AI Handoff Builder\AI Handoff Builder.exe`
+
+Date: 2026-07-30
 Step: Issue #27 one-JSON Shotcut workflow correction
 
 ## Completed
