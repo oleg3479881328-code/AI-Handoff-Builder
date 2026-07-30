@@ -85,6 +85,32 @@ def test_status_invokes_server_with_safe_env(tmp_path: Path, monkeypatch: pytest
     assert str(backend.paths.allowed_roots[0].resolve()) in env["SHOTCUT_MCP_ALLOWED_ROOTS"]
 
 
+def test_status_uses_real_python_when_frozen_app_executable_would_recurse(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    backend = _backend(tmp_path)
+    captured: dict[str, object] = {}
+
+    def fake_run(*args, **kwargs):
+        captured["args"] = args
+        return _completed_process(
+            {"jsonrpc": "2.0", "id": 1, "result": {"serverInfo": {"name": "shotcut-mcp"}}},
+            {"jsonrpc": "2.0", "id": 2, "result": {"isError": False, "structuredContent": {"ready": True}}},
+        )
+
+    monkeypatch.setattr("handoff_builder.v2.render.shotcut_backend.sys.frozen", True, raising=False)
+    monkeypatch.setattr("handoff_builder.v2.render.shotcut_backend.sys.executable", r"C:\fake\AI Handoff Builder.exe")
+    monkeypatch.setattr("handoff_builder.v2.render.shotcut_backend.sys._base_executable", "")
+    monkeypatch.setattr("handoff_builder.v2.render.shotcut_backend.shutil.which", lambda name: r"C:\Python314\python.exe" if name == "python" else None)
+    monkeypatch.setattr(subprocess, "run", fake_run)
+
+    result = backend.status()
+
+    assert result["ready"] is True
+    assert captured["args"][0][0] == r"C:\Python314\python.exe"
+
+
 def test_backend_rejects_malformed_json_response(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     backend = _backend(tmp_path)
 

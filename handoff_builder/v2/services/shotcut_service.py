@@ -389,7 +389,7 @@ def build_shotcut_project_from_timeline(
             image_duration_seconds = None
         else:
             in_frame = 0
-            out_frame = duration_frames - 1
+            out_frame = 0
             image_duration_seconds = duration_frames * fps_den / fps_num
         track_name = str(item["track_id"])
         track_item_index = track_item_indices.get(track_name, 0)
@@ -584,10 +584,11 @@ def _load_job_context(workspace_root: Path, render_job_id: str) -> _JobContext:
 def _artifact_paths(output_dir: Path, project_name: str) -> ShotcutServicePaths:
     shotcut_dir = output_dir / "shotcut"
     safe_name = "".join("_" if ch in '<>:"/\\|?*' else ch for ch in project_name).strip() or "project"
+    project_root = output_dir.parent.parent.resolve() if output_dir.parent.parent.exists() else output_dir
     return ShotcutServicePaths(
         output_dir=output_dir,
         shotcut_dir=shotcut_dir,
-        project_path=shotcut_dir / f"{safe_name}.mlt",
+        project_path=project_root / f"{safe_name}.mlt",
         preview_path=shotcut_dir / "preview.png",
         contact_sheet_path=shotcut_dir / "contact_sheet.png",
         runtime_status_path=shotcut_dir / "runtime_status.json",
@@ -652,13 +653,14 @@ def _apply_timeline_edit_intents(
         clip_ref = clip_by_item_id[item_id]
         transform = item.get("transform") or {}
         if transform:
+            transform_duration_frames = 1 if str(item.get("media_type")) == "photo" else int(item["duration_frames"])
             operations.append(
                 {
                     "op": "animate_clip",
                     "track": str(clip_ref["track"]),
                     "item_index": int(clip_ref["track_item_index"]),
                     "interpolation": "linear",
-                    "keyframes": _transform_keyframes(transform, int(item["duration_frames"])),
+                    "keyframes": _transform_keyframes(transform, transform_duration_frames),
                 }
             )
         crop = item.get("crop") or {}

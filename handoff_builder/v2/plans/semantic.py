@@ -116,6 +116,7 @@ def load_and_validate_edit_plan_3(
         list(payload.get("assets") or []),
         json.loads((workspace.resolve() / "analysis" / "local_asset_registry.json").read_text(encoding="utf-8")),
         require_declared_integrity=False,
+        workspace=workspace,
     )
     for resolved in resolution_report["assets"]:
         asset_id = str(resolved["asset_id"])
@@ -322,6 +323,7 @@ def load_and_validate_local_photo_plan(
         list(payload["assets"]),
         registry_payload,
         require_declared_integrity=schema_version == "2.0",
+        workspace=workspace,
     )
     assets: dict[str, ResolvedPhotoAsset] = {}
     for item in resolution_report["assets"]:

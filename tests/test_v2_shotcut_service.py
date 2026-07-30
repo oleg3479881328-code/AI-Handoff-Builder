@@ -158,11 +158,12 @@ def test_build_shotcut_project_from_timeline_preserves_photo_duration_and_applie
     assert summary["target_mlt_filename"] == "Carolyn and Rob.mlt"
     assert backend.created["clips"][0]["image_duration_seconds"] == 3.0
     assert backend.created["clips"][0]["in_frame"] == 0
-    assert backend.created["clips"][0]["out_frame"] == 89
+    assert backend.created["clips"][0]["out_frame"] == 0
     assert backend.created["clips"][1]["position_frame"] == 90
     assert summary["clip_summary"][0]["track_item_index"] == 0
     assert summary["clip_summary"][1]["track_item_index"] == 1
     assert backend.edits[0]["op"] == "animate_clip"
+    assert len(backend.edits[0]["keyframes"]) == 1
     assert backend.edits[1]["op"] == "add_filter"
     assert backend.edits[2] == {"op": "add_track", "kind": "video", "name": "Titles"}
     assert backend.edits[3]["op"] == "add_generator"

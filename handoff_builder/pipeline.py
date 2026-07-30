@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import datetime as dt
 import json
+import shutil
 import threading
 import zipfile
 from concurrent.futures import ThreadPoolExecutor, as_completed
@@ -16,6 +17,7 @@ from .metadata import AssetMetadataBuilder, METADATA_SCHEMA_VERSION
 from .models import AssetRecord, BuildResult, BuilderConfig, SceneRecord
 from .utils import (
     file_sha256,
+    extract_supported_media_from_zip,
     human_bytes,
     iter_media,
     json_dump,
@@ -67,8 +69,14 @@ class HandoffBuilder:
         if self.cancel_event.is_set():
             raise RuntimeError("Processing was canceled by the user.")
 
-    def _prepare_sources(self, inputs: Iterable[Path], workspace: Path) -> tuple[list[Path], Path]:
-        source_root = workspace / "source"
+    def _prepare_sources(
+        self,
+        inputs: Iterable[Path],
+        workspace: Path,
+        *,
+        project_root: Path | None = None,
+    ) -> tuple[list[Path], Path]:
+        source_root = (project_root or workspace) / "originals" if project_root is not None else workspace / "source"
         source_root.mkdir(parents=True, exist_ok=True)
         prepared: list[Path] = []
 
@@ -76,9 +84,20 @@ class HandoffBuilder:
             self._ensure_not_canceled()
             item = item.resolve()
             if item.suffix.lower() == ".zip":
-                target = source_root / f"zip_{index:03d}_{slugify(item.stem)}"
+                if project_root is not None:
+                    self._prepare_project_zip_sources(item, project_root, source_root)
+                    target = source_root
+                else:
+                    target = source_root / f"zip_{index:03d}_{slugify(item.stem)}"
                 self.log(f"Extracting ZIP: {item.name}")
-                safe_extract_zip(item, target)
+                if project_root is None:
+                    extraction = extract_supported_media_from_zip(item, target)
+                    if extraction.ignored_members:
+                        self.log(
+                            "Ignored non-media ZIP members: "
+                            + ", ".join(sorted(extraction.ignored_members)[:10])
+                            + (" ..." if len(extraction.ignored_members) > 10 else "")
+                        )
                 prepared.append(target)
             elif item.is_dir():
                 target = source_root / f"folder_{index:03d}_{slugify(item.name)}"
@@ -92,6 +111,50 @@ class HandoffBuilder:
                 self.log(f"Skipped missing input: {item}")
 
         return prepared, source_root
+
+    def _prepare_project_zip_sources(self, zip_path: Path, project_root: Path, originals_root: Path) -> None:
+        snapshot = self._load_source_snapshot(project_root)
+        existing_zip = str(snapshot.get("source_zip_path") or "")
+        if originals_root.exists() and any(originals_root.rglob("*")):
+            if existing_zip and Path(existing_zip).resolve() != zip_path.resolve():
+                raise ValueError(
+                    f"Project already contains extracted originals from another source ZIP: {existing_zip}"
+                )
+        stage_root = project_root / "cache" / "source_import_staging"
+        if stage_root.exists():
+            shutil.rmtree(stage_root, ignore_errors=True)
+        stage_originals = stage_root / "originals"
+        try:
+            extraction = extract_supported_media_from_zip(zip_path, stage_originals)
+            if not extraction.extracted_files:
+                raise ValueError(f"No supported media files were found in {zip_path.name}.")
+            if originals_root.exists():
+                shutil.rmtree(originals_root, ignore_errors=True)
+            originals_root.parent.mkdir(parents=True, exist_ok=True)
+            shutil.move(str(stage_originals), str(originals_root))
+            if extraction.ignored_members:
+                self.log(
+                    "Ignored non-media ZIP members: "
+                    + ", ".join(sorted(extraction.ignored_members)[:10])
+                    + (" ..." if len(extraction.ignored_members) > 10 else "")
+                )
+            proxies_root = project_root / "proxies"
+            if proxies_root.exists():
+                shutil.rmtree(proxies_root, ignore_errors=True)
+            proxies_root.mkdir(parents=True, exist_ok=True)
+        finally:
+            if stage_root.exists():
+                shutil.rmtree(stage_root, ignore_errors=True)
+
+    def _load_source_snapshot(self, project_root: Path) -> dict:
+        path = project_root / "source_snapshot.json"
+        if not path.exists():
+            return {}
+        try:
+            payload = json.loads(path.read_text(encoding="utf-8"))
+        except (OSError, json.JSONDecodeError):
+            return {}
+        return payload if isinstance(payload, dict) else {}
 
     def _next_available_file(self, path: Path) -> Path:
         if not path.exists():
@@ -156,9 +219,12 @@ class HandoffBuilder:
         asset.audio_present = bool(meta.get("audio_present"))
 
         if self.config.include_video_proxies:
-            proxy = package_root / "video_proxies" / f"asset_{asset.asset_id}.mp4"
+            proxy_root = self.config.workspace_root.resolve() / "proxies" if self.config.workspace_root is not None else package_root / "proxies"
+            proxy = proxy_root / f"asset_{asset.asset_id}.mp4"
             self.ffmpeg.make_proxy(source, proxy, self.config.proxy_height)
-            asset.proxy = relative_posix(proxy, package_root)
+            relative_root = self.config.workspace_root.resolve() if self.config.workspace_root is not None else package_root
+            asset.proxy = relative_posix(proxy, relative_root)
+            asset.proxy_project_path = asset.proxy
 
         segments, mode = self.ffmpeg.scene_segments(
             source,
@@ -241,18 +307,22 @@ class HandoffBuilder:
         project_root: Path | None = None
         if self.config.workspace_root is not None:
             project_root = init_project_workspace(self.config.workspace_root, project_id)
-            job_root = project_root / "analysis" / "handoffs" / handoff_id
+            job_root = project_root
             archive_dir = project_root / "handoffs"
             local_asset_registry_path = project_root / "analysis" / "local_asset_registry.json"
+            package_root = project_root / "analysis"
         else:
             job_root = self.config.output_dir.resolve() / f"{project_slug}_{timestamp}"
             archive_dir = self.config.output_dir.resolve()
             local_asset_registry_path = job_root / "local_asset_registry.json"
-        package_root = job_root / "package"
-        package_root.mkdir(parents=True, exist_ok=False)
+            package_root = job_root / "package"
+        if project_root is None:
+            package_root.mkdir(parents=True, exist_ok=False)
+        else:
+            self._reset_analysis_workspace(package_root)
 
         self.log(f"Project workspace: {job_root}")
-        prepared, source_root = self._prepare_sources(inputs, job_root)
+        prepared, source_root = self._prepare_sources(inputs, job_root, project_root=project_root)
         media_files = iter_media(prepared)
         if not media_files:
             raise ValueError("No supported photo or video files were found.")
@@ -289,6 +359,7 @@ class HandoffBuilder:
                     extension=source.suffix.lower(),
                     size_bytes=source.stat().st_size,
                     folder_category=category,
+                    original_project_path=relative_posix(source, project_root) if project_root is not None else None,
                 )
                 assets.append(asset)
                 asset_index[asset.asset_id] = asset
@@ -384,7 +455,7 @@ class HandoffBuilder:
         missing_paths: list[str] = []
         for asset in assets:
             for rel in (asset.analysis_copy, asset.proxy, asset.storyboard):
-                if rel and not (package_root / rel).exists():
+                if rel and not self._artifact_abspath(rel, package_root).exists():
                     missing_paths.append(rel)
         for scene in scenes:
             source_asset = asset_index.get(scene.asset_id)
@@ -393,7 +464,7 @@ class HandoffBuilder:
                 scene.location_cluster_id = source_asset.location_cluster_id
                 scene.capture_time_iso = source_asset.capture_time_iso
             for rel in (scene.keyframe_path, scene.preview_path):
-                if not (package_root / rel).exists():
+                if not self._artifact_abspath(rel, package_root).exists():
                     missing_paths.append(rel)
         scenes = self._stable_scene_order(scenes)
 
@@ -533,7 +604,7 @@ class HandoffBuilder:
             ):
                 if not rel_path:
                     continue
-                abs_path = package_root / rel_path
+                abs_path = self._artifact_abspath(rel_path, package_root)
                 if abs_path.exists():
                     sha256 = file_sha256(abs_path)
                     size_bytes = abs_path.stat().st_size
@@ -564,7 +635,7 @@ class HandoffBuilder:
             )
         for scene in scenes:
             for rel_path in (scene.keyframe_path,):
-                abs_path = package_root / rel_path
+                abs_path = self._artifact_abspath(rel_path, package_root)
                 if abs_path.exists():
                     inventory_candidates.append(
                         {
@@ -650,13 +721,31 @@ class HandoffBuilder:
             compresslevel=6,
             allowZip64=True,
         ) as archive:
-            for file_path in sorted(package_root.rglob("*")):
-                if file_path.is_file():
-                    archive.write(file_path, file_path.relative_to(package_root).as_posix())
+            for rel_path in self._handoff_archive_members(package_root):
+                file_path = self._artifact_abspath(rel_path, package_root)
+                archive.write(file_path, rel_path)
 
         self.progress(1.0, f"Done: {archive_path.name}")
         archive_sha256 = file_sha256(archive_path)
         if project_root is not None:
+            source_snapshot_path = project_root / "source_snapshot.json"
+            source_snapshot_path.write_text(
+                json.dumps(
+                    {
+                        "project_id": project_id,
+                        "project_name": self.config.project_name,
+                        "source_zip_path": str(self.config.source_zip_path.resolve()) if self.config.source_zip_path else None,
+                        "original_count": len(assets),
+                        "original_paths": [asset.original_project_path for asset in assets if asset.original_project_path],
+                        "proxy_count": len([asset for asset in assets if asset.proxy_project_path]),
+                        "proxy_paths": [asset.proxy_project_path for asset in assets if asset.proxy_project_path],
+                        "updated_at": created_at,
+                    },
+                    ensure_ascii=False,
+                    indent=2,
+                ),
+                encoding="utf-8",
+            )
             record_local_handoff(
                 project_root=project_root,
                 project_id=project_id,
@@ -698,6 +787,43 @@ class HandoffBuilder:
             handoff_content_hash=str(manifest["content_hash"]),
             canceled=False,
         )
+
+    def _reset_analysis_workspace(self, analysis_root: Path) -> None:
+        for relative in (
+            "contact_sheets",
+            "metadata",
+            "photo_analysis_copies",
+            "scene_keyframes",
+            "scene_previews",
+            "video_storyboards",
+        ):
+            target = analysis_root / relative
+            if target.exists():
+                shutil.rmtree(target, ignore_errors=True)
+            target.mkdir(parents=True, exist_ok=True)
+        for relative in ("handoff_manifest.json", "scene_manifest.json", "validation_report.json", "00_START_HERE.md", "PROJECT_BRIEF.md", "OUTPUT_CONTRACT.md"):
+            target = analysis_root / relative
+            if target.exists():
+                target.unlink()
+
+    def _artifact_abspath(self, rel_path: str, package_root: Path) -> Path:
+        candidate = (package_root / rel_path).resolve()
+        if candidate.exists() or self.config.workspace_root is None:
+            return candidate
+        return (self.config.workspace_root.resolve() / rel_path).resolve()
+
+    def _handoff_archive_members(self, package_root: Path) -> list[str]:
+        members: set[str] = set()
+        for file_path in package_root.rglob("*"):
+            if file_path.is_file():
+                members.add(file_path.relative_to(package_root).as_posix())
+        if self.config.workspace_root is not None:
+            proxy_root = self.config.workspace_root.resolve() / "proxies"
+            if proxy_root.exists():
+                for file_path in proxy_root.rglob("*"):
+                    if file_path.is_file():
+                        members.add(file_path.relative_to(self.config.workspace_root.resolve()).as_posix())
+        return sorted(members)
 
     def _stable_scene_order(self, scenes: list[SceneRecord]) -> list[SceneRecord]:
         return sorted(

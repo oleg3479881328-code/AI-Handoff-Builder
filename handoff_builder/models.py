@@ -45,6 +45,7 @@ class AssetRecord:
     relative_source_path: str
     extension: str
     size_bytes: int
+    original_project_path: str | None = None
     status: str = "pending"
     error: str | None = None
     duration_ms: int | None = None
@@ -67,6 +68,7 @@ class AssetRecord:
     analysis_copy: str | None = None
     proxy: str | None = None
     storyboard: str | None = None
+    proxy_project_path: str | None = None
     scene_ids: list[str] = field(default_factory=list)
 
     def to_dict(self) -> dict[str, Any]:

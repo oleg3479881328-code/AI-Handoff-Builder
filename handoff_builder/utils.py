@@ -5,7 +5,9 @@ import json
 import os
 import re
 import shutil
+import stat
 import zipfile
+from dataclasses import dataclass
 from pathlib import Path
 from typing import Iterable
 
@@ -16,6 +18,16 @@ PHOTO_EXTENSIONS = {
 VIDEO_EXTENSIONS = {
     ".mp4", ".mov", ".m4v", ".avi", ".mkv", ".webm", ".mts", ".m2ts", ".3gp"
 }
+AUDIO_EXTENSIONS = {
+    ".mp3", ".wav", ".m4a", ".aac", ".flac", ".ogg", ".opus", ".wma"
+}
+SUPPORTED_MEDIA_EXTENSIONS = PHOTO_EXTENSIONS | VIDEO_EXTENSIONS | AUDIO_EXTENSIONS
+
+
+@dataclass(frozen=True, slots=True)
+class ExtractedZipMedia:
+    extracted_files: list[Path]
+    ignored_members: list[str]
 
 
 def slugify(value: str, fallback: str = "project") -> str:
@@ -66,17 +78,61 @@ def safe_extract_zip(zip_path: Path, destination: Path) -> list[Path]:
         for info in archive.infolist():
             if info.is_dir():
                 continue
-            member = Path(info.filename)
-            if member.is_absolute() or ".." in member.parts:
-                raise ValueError(f"Unsafe ZIP member: {info.filename}")
-            target = (destination / member).resolve()
-            if destination not in target.parents and target != destination:
-                raise ValueError(f"ZIP path escapes destination: {info.filename}")
+            target = _validated_archive_member_path(info, destination)
+            if target is None:
+                continue
             target.parent.mkdir(parents=True, exist_ok=True)
             with archive.open(info) as src, target.open("wb") as dst:
                 shutil.copyfileobj(src, dst)
             extracted.append(target)
     return extracted
+
+
+def extract_supported_media_from_zip(zip_path: Path, destination: Path) -> ExtractedZipMedia:
+    destination = destination.resolve()
+    extracted: list[Path] = []
+    ignored_members: list[str] = []
+    with zipfile.ZipFile(zip_path) as archive:
+        for info in archive.infolist():
+            if info.is_dir():
+                continue
+            if _zip_member_is_link_like(info):
+                raise ValueError(f"Unsafe ZIP member type: {info.filename}")
+            target = _validated_archive_member_path(info, destination)
+            if target is None:
+                continue
+            if target.suffix.lower() not in SUPPORTED_MEDIA_EXTENSIONS:
+                ignored_members.append(info.filename)
+                continue
+            target.parent.mkdir(parents=True, exist_ok=True)
+            with archive.open(info) as src, target.open("wb") as dst:
+                shutil.copyfileobj(src, dst)
+            extracted.append(target)
+    return ExtractedZipMedia(extracted_files=extracted, ignored_members=ignored_members)
+
+
+def _validated_archive_member_path(info: zipfile.ZipInfo, destination: Path) -> Path | None:
+    member = Path(info.filename.replace("\\", "/"))
+    if member.is_absolute():
+        raise ValueError(f"Unsafe ZIP member: {info.filename}")
+    normalized_parts: list[str] = []
+    for part in member.parts:
+        if part in {"", "."}:
+            continue
+        if part == ".." or re.match(r"^[A-Za-z]:$", part) or part.startswith("\\\\"):
+            raise ValueError(f"Unsafe ZIP member: {info.filename}")
+        normalized_parts.append(part)
+    if not normalized_parts:
+        return None
+    target = (destination / Path(*normalized_parts)).resolve()
+    if destination not in target.parents and target != destination:
+        raise ValueError(f"ZIP path escapes destination: {info.filename}")
+    return target
+
+
+def _zip_member_is_link_like(info: zipfile.ZipInfo) -> bool:
+    mode = (info.external_attr >> 16) & 0o170000
+    return mode in {stat.S_IFLNK, stat.S_IFCHR, stat.S_IFBLK, stat.S_IFIFO, stat.S_IFSOCK}
 
 
 def media_type_for(path: Path) -> str | None:
@@ -85,6 +141,8 @@ def media_type_for(path: Path) -> str | None:
         return "photo"
     if ext in VIDEO_EXTENSIONS:
         return "video"
+    if ext in AUDIO_EXTENSIONS:
+        return "audio"
     return None
 
 

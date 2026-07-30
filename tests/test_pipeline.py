@@ -483,12 +483,16 @@ def test_owner_flow_single_source_zip_uses_project_root_workspace(tmp_path: Path
     assert result.archive_path.parent == (project_root / "handoffs").resolve()
     assert result.local_asset_registry_path == (project_root / "analysis" / "local_asset_registry.json").resolve()
     assert (project_root / "incoming_ai_packages").exists()
+    assert (project_root / "originals" / "IMG-20240716-WA0001.jpg").exists()
     manifest = json.loads((result.package_root / "handoff_manifest.json").read_text(encoding="utf-8"))
     assert manifest["project_id"] == "WEDDING_PROJECT"
     assert manifest["handoff_id"] == result.handoff_id
     handoff_index = json.loads((project_root / "analysis" / "handoff_index.json").read_text(encoding="utf-8"))
     assert handoff_index["handoffs"][0]["handoff_id"] == result.handoff_id
     assert handoff_index["handoffs"][0]["handoff_sha256"] == result.handoff_sha256
+    source_snapshot = json.loads((project_root / "source_snapshot.json").read_text(encoding="utf-8"))
+    assert source_snapshot["source_zip_path"] == str(source_zip.resolve())
+    assert source_snapshot["original_paths"] == ["originals/IMG-20240716-WA0001.jpg"]
 
 
 def test_single_source_zip_derives_owner_visible_names_and_shotcut_contract(tmp_path: Path, monkeypatch):
@@ -531,6 +535,50 @@ def test_single_source_zip_derives_owner_visible_names_and_shotcut_contract(tmp_
     assert "standalone JSON" in combined
     assert "AI_EDIT_PACKAGE.zip" not in combined
     assert "DaVinci" not in combined
+
+
+def test_single_source_zip_rejects_silent_collision_with_other_zip(tmp_path: Path, monkeypatch):
+    monkeypatch.setenv("LOCALAPPDATA", str(tmp_path / "appdata"))
+    source_dir = tmp_path / "source"
+    first_photo = source_dir / "first.jpg"
+    second_photo = source_dir / "second.jpg"
+    _make_photo(first_photo)
+    _make_photo(second_photo)
+    project_root = tmp_path / "Same Project"
+    first_zip = tmp_path / "Same Project.zip"
+    second_zip = tmp_path / "Same Project 2.zip"
+    _make_source_zip(first_zip, [first_photo])
+    _make_source_zip(second_zip, [second_photo])
+
+    builder = HandoffBuilder(
+        BuilderConfig(
+            project_name="Same Project",
+            project_id="same_project",
+            output_dir=tmp_path / "out",
+            workspace_root=project_root,
+            source_zip_path=first_zip,
+            include_video_proxies=False,
+        ),
+        project_root=tmp_path,
+    )
+    builder.ffmpeg = FakeFFmpegTools()
+    builder.build([first_zip])
+
+    colliding = HandoffBuilder(
+        BuilderConfig(
+            project_name="Same Project",
+            project_id="same_project",
+            output_dir=tmp_path / "out",
+            workspace_root=project_root,
+            source_zip_path=second_zip,
+            include_video_proxies=False,
+        ),
+        project_root=tmp_path,
+    )
+    colliding.ffmpeg = FakeFFmpegTools()
+
+    with pytest.raises(ValueError, match="another source ZIP"):
+        colliding.build([second_zip])
 
 
 def test_exiftool_uses_parent_cwd_for_unicode_zip_roots(tmp_path: Path, monkeypatch):

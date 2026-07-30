@@ -193,6 +193,7 @@ def import_package_into_workspace(package_zip: Path, workspace: Path) -> ImportR
                 list(plan_payload["assets"]),
                 registry_payload,
                 require_declared_integrity=plan_version == "2.0",
+                workspace=project_root,
             )
         if plan_payload.get("voiceover"):
             voiceover_path = (package_root / str(plan_payload["voiceover"]["spec_path"])).resolve()
@@ -357,10 +358,11 @@ def import_plan_into_workspace(plan_json: Path, workspace: Path) -> ImportResult
             )
 
         package_id = stable_v2_id(project_id, str(payload["handoff_content_hash"]), "json", length=20)
-        package_root = project_root / "imported_edit_plans" / package_id
+        package_root = project_root / "imports" / package_id
         package_root.mkdir(parents=True, exist_ok=False)
         imported_plan_path = package_root / plan_json.name
         shutil.copy2(plan_json, imported_plan_path)
+        shutil.copy2(plan_json, project_root / "imports" / plan_json.name)
 
         backend = FFmpegBackend(project_root=Path(__file__).resolve().parents[3])
         validated = load_and_validate_edit_plan_3(imported_plan_path, project_root, backend)
@@ -368,6 +370,7 @@ def import_plan_into_workspace(plan_json: Path, workspace: Path) -> ImportResult
             list(payload["assets"]),
             load_active_local_registry(project_root),
             require_declared_integrity=False,
+            workspace=project_root,
         )
         normalized_timeline = compile_normalized_timeline(
             payload,

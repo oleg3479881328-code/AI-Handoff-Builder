@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import time
 from pathlib import Path
 
 import pytest
@@ -116,3 +117,78 @@ def test_v2_snapshot_focuses_latest_job_and_scrolls_results_into_view():
         assert yview[0] > 0
     finally:
         app.destroy()
+
+
+def test_packaged_acceptance_config_is_disabled_by_default(tmp_path: Path) -> None:
+    from app import load_packaged_acceptance_config
+
+    source_zip = tmp_path / "Carolyn and Rob.zip"
+    source_zip.write_bytes(b"zip")
+    payload = {
+        "AIHB_ACCEPTANCE_SOURCE_ZIP": str(source_zip.resolve()),
+        "AIHB_ACCEPTANCE_EDIT_PLAN_JSON": str((tmp_path / "Carolyn and Rob.json").resolve()),
+        "AIHB_ACCEPTANCE_OUTPUT_DIR": str(tmp_path.resolve()),
+    }
+
+    assert load_packaged_acceptance_config(payload) is None
+
+
+def test_packaged_acceptance_config_rejects_relative_paths(tmp_path: Path) -> None:
+    from app import load_packaged_acceptance_config
+
+    with pytest.raises(ValueError, match="absolute path"):
+        load_packaged_acceptance_config(
+            {
+                "AIHB_PACKAGED_ACCEPTANCE": "1",
+                "AIHB_ACCEPTANCE_SOURCE_ZIP": "Carolyn and Rob.zip",
+                "AIHB_ACCEPTANCE_EDIT_PLAN_JSON": str((tmp_path / "Carolyn and Rob.json").resolve()),
+                "AIHB_ACCEPTANCE_OUTPUT_DIR": str(tmp_path.resolve()),
+            }
+        )
+
+
+def test_acceptance_mode_uses_same_gui_callbacks(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
+    import tkinter as tk
+    import app as app_module
+
+    source_zip = tmp_path / "Каролина And RÖB.zip"
+    source_zip.write_bytes(b"zip")
+    edit_plan_json = tmp_path / "Каролина And RÖB.json"
+    monkeypatch.setenv("AIHB_PACKAGED_ACCEPTANCE", "1")
+    monkeypatch.setenv("AIHB_ACCEPTANCE_SOURCE_ZIP", str(source_zip.resolve()))
+    monkeypatch.setenv("AIHB_ACCEPTANCE_EDIT_PLAN_JSON", str(edit_plan_json.resolve()))
+    monkeypatch.setenv("AIHB_ACCEPTANCE_OUTPUT_DIR", str(tmp_path.resolve()))
+
+    try:
+        ui = app_module.App()
+    except tk.TclError as exc:  # pragma: no cover - environment dependent
+        pytest.skip(f"Tk UI unavailable: {exc}")
+    ui.withdraw()
+    try:
+        assert ui.acceptance_mode_enabled is True
+        assert "PACKAGED ACCEPTANCE MODE ACTIVE" in ui.acceptance_banner_text.get()
+        assert ui.output_dir.get() == str(tmp_path.resolve())
+
+        seen: list[tuple[str, object]] = []
+
+        monkeypatch.setattr(ui, "_start_with_sources", lambda selected: seen.append(("v1", selected)))
+        monkeypatch.setattr(ui, "_v2_import_selected_path", lambda path: seen.append(("v2", path)))
+        monkeypatch.setattr(ui, "_shotcut_build_selected_project", lambda: seen.append(("build", None)))
+        monkeypatch.setattr(ui, "_shotcut_open_in_shotcut", lambda: seen.append(("open", None)))
+
+        ui._acceptance_start()
+        assert seen[0] == ("v1", [source_zip.resolve()])
+
+        edit_plan_json.write_text("{}", encoding="utf-8")
+        ui.acceptance_wait_deadline = time.time() + 1
+        ui._acceptance_wait_for_plan_json()
+        assert seen[1] == ("v2", edit_plan_json.resolve())
+
+        ui.acceptance_expected_job_id = "job-1"
+        ui.v2_queue.insert("", "end", iid="job-1", values=("pending", "plan-1", 1, "2026-07-30T00:00:00Z"))
+        ui._acceptance_try_build_job()
+        ui._acceptance_open_current_project()
+        assert ("build", None) in seen
+        assert ("open", None) in seen
+    finally:
+        ui.destroy()

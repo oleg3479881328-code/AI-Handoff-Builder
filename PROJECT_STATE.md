@@ -1,6 +1,29 @@
 # Current State
 
 - Date: 2026-07-30
+- Automatic complete local project status:
+  - single-source ZIP now creates a project-owned local workspace with:
+    - `originals/`
+    - `proxies/`
+    - `analysis/`
+    - `handoffs/`
+    - `imports/`
+    - root `<project_name>.mlt`
+  - local registry now preserves project-relative original/proxy paths so standalone JSON import still resolves after moving the workspace folder
+  - workspace re-entry now preserves `source_snapshot.json`, which keeps source-ZIP collision protection intact across reopen/rebuild cycles
+  - frozen packaged Shotcut builds no longer recurse into `AI Handoff Builder.exe` when invoking the donor MCP server; they fall back to a real Python interpreter
+  - still-image editable Shotcut builds now use still-safe duration/keyframe behavior, and the packaged acceptance flow reached:
+    - `shotcut_opened`
+  - latest packaged owner-flow evidence root:
+    - `C:\Users\oleg3\Documents\AIHB_issue27_packaged_acceptance_final`
+  - latest packaged executable from this branch:
+    - `dist\AI Handoff Builder\AI Handoff Builder.exe`
+    - SHA-256:
+      - `aaab08c84c733b8ba181a6e1b84b61082c665b075dce26df07cc281c2e4dc031`
+  - latest packaged acceptance report:
+    - `C:\Users\oleg3\Documents\AIHB_issue27_packaged_acceptance_final\evidence\acceptance_report.json`
+
+- Date: 2026-07-30
 - One-JSON owner workflow status:
   - source ZIP -> `_ANALYSIS_HANDOFF.zip` -> one standalone `edit_plan 3.0` JSON -> editable Shotcut `.mlt`
   - implemented on branch `experiment/shotcut-mcp-windows-proof`

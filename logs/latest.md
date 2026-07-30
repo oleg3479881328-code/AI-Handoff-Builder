@@ -1,6 +1,68 @@
 # Latest Log
 
 Date: 2026-07-30
+Step: Issue #27 automatic complete local project hardening + packaged acceptance
+
+## Completed
+
+- Kept the single-source-ZIP owner workflow on the active `issue25` / PR `#26` branch and hardened the local project workspace contract so the selected ZIP now materializes project-owned:
+  - `originals/`
+  - `proxies/`
+  - `analysis/`
+  - `handoffs/`
+  - `imports/`
+  - root `<project_name>.mlt`
+- Preserved stable local asset identity after extraction by extending the local registry with:
+  - `original_project_path`
+  - `proxy_project_path`
+- Stopped workspace re-entry from wiping `source_snapshot.json`, so a reopened project no longer silently loses the original source ZIP identity used for collision protection.
+- Fixed direct standalone JSON import to keep a project-root copy under:
+  - `imports/<project_name>.json`
+  and to resolve originals through project-relative registry paths even after moving the whole workspace folder.
+- Fixed the packaged Shotcut path for frozen `.exe` runs:
+  - the donor MCP server now launches with a real Python interpreter instead of recursively spawning `AI Handoff Builder.exe`
+  - photo-only Shotcut clips now use still-image-safe duration/keyframe behavior for the editable `.mlt` build path
+- Updated the packaged acceptance harness:
+  - Unicode-safe report output
+  - timeline-duration proof derived from the actual inspected Shotcut project
+- Added/updated focused regression coverage:
+  - `tests/test_pipeline.py`
+  - `tests/test_utils.py`
+  - `tests/test_v2_one_json_workflow.py`
+  - `tests/test_v2_shotcut_backend.py`
+  - `tests/test_v2_shotcut_service.py`
+  - `tests/test_app_v2_ui.py`
+
+## Validation
+
+- Focused workflow regression:
+  - `python -m pytest -q tests\test_utils.py tests\test_pipeline.py tests\test_v2_one_json_workflow.py tests\test_v2_shotcut_service.py tests\test_app_v2_ui.py`
+  - result: `49 passed, 1 skipped in 13.26s`
+- Full suite after the ZIP/workspace hardening:
+  - `python -m pytest -q`
+  - result: `160 passed in 46.00s`
+- Focused packaged Shotcut follow-up after the frozen-recursion + still-image fixes:
+  - `python -m pytest -q tests\test_v2_shotcut_backend.py tests\test_v2_shotcut_service.py tests\test_app_v2_ui.py tests\test_v2_one_json_workflow.py`
+  - result: `34 passed, 1 skipped in 4.08s`
+- Compile validation:
+  - `python -m py_compile handoff_builder\v2\render\shotcut_backend.py handoff_builder\v2\services\shotcut_service.py app.py`
+  - result: success
+- Fresh packaged build from the active worktree:
+  - `cmd /c "echo.| build_exe.bat"`
+  - result: success
+- Real packaged acceptance evidence:
+  - harness:
+    - `python scripts\run_issue27_packaged_acceptance.py`
+  - evidence root:
+    - `C:\Users\oleg3\Documents\AIHB_issue27_packaged_acceptance_final\evidence\`
+  - final packaged status:
+    - `shotcut_opened`
+  - real opened project:
+    - `C:\Users\oleg3\Documents\AIHB_issue27_packaged_acceptance_final\Каролина And RÖB\Каролина And RÖB.mlt`
+  - opened Shotcut window title showed:
+    - `Каролина And RÖB.mlt - 1080x1920 30.00fps 2ch - Shotcut`
+
+Date: 2026-07-30
 Step: Issue #27 packaged UI parity correction
 
 ## Completed

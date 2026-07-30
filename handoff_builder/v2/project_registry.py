@@ -257,5 +257,7 @@ def find_local_handoff_entry(
 
 def resolve_workspace_from_hint(hint_path: Path) -> Path:
     resolved = hint_path.resolve()
+    if resolved.is_file() and resolved.suffix.lower() == ".zip":
+        return resolved.parent / resolved.stem
     return resolved.parent if resolved.is_file() else resolved
 

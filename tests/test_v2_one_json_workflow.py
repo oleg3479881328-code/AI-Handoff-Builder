@@ -30,6 +30,7 @@ def _registry_payload(asset_path: Path) -> dict:
                 "asset_id": "asset-photo-1",
                 "media_type": "photo",
                 "source_path": str(asset_path.resolve()),
+                "original_project_path": "originals/cover.jpg",
                 "sha256": file_sha256(asset_path),
                 "size_bytes": asset_path.stat().st_size,
                 "original_name": asset_path.name,
@@ -76,8 +77,11 @@ def test_standalone_edit_plan_json_imports_without_zip_wrapper(tmp_path: Path) -
     workspace = init_project_workspace(tmp_path / "workspace", "carolyn_and_rob")
     photo = tmp_path / "source" / "cover.jpg"
     _make_photo(photo)
+    workspace_photo = workspace / "originals" / "cover.jpg"
+    workspace_photo.parent.mkdir(parents=True, exist_ok=True)
+    workspace_photo.write_bytes(photo.read_bytes())
     registry_path = workspace / "analysis" / "local_asset_registry.json"
-    registry_path.write_text(json.dumps(_registry_payload(photo), ensure_ascii=False, indent=2), encoding="utf-8")
+    registry_path.write_text(json.dumps(_registry_payload(workspace_photo), ensure_ascii=False, indent=2), encoding="utf-8")
     record_local_handoff(
         project_root=workspace,
         project_id="carolyn_and_rob",
@@ -95,12 +99,40 @@ def test_standalone_edit_plan_json_imports_without_zip_wrapper(tmp_path: Path) -
     assert result.render_report_path.exists()
     assert (result.package_root / "Carolyn and Rob.json").exists()
     assert (result.package_root / "normalized_timeline.json").exists()
+    assert (workspace / "imports" / "Carolyn and Rob.json").exists()
     connection = connect_workspace_db(workspace / "project.sqlite")
     try:
         assert connection.execute("SELECT COUNT(*) FROM ai_packages").fetchone()[0] == 1
         assert connection.execute("SELECT COUNT(*) FROM edit_plans").fetchone()[0] == 1
     finally:
         connection.close()
+
+
+def test_standalone_edit_plan_json_survives_workspace_move_via_project_relative_registry(tmp_path: Path) -> None:
+    original_workspace = init_project_workspace(tmp_path / "workspace", "carolyn_and_rob")
+    original_photo = original_workspace / "originals" / "cover.jpg"
+    _make_photo(original_photo)
+    registry_path = original_workspace / "analysis" / "local_asset_registry.json"
+    registry_payload = _registry_payload(original_photo)
+    registry_payload["assets"][0]["source_path"] = str((tmp_path / "old-location" / "cover.jpg").resolve())
+    registry_path.write_text(json.dumps(registry_payload, ensure_ascii=False, indent=2), encoding="utf-8")
+    record_local_handoff(
+        project_root=original_workspace,
+        project_id="carolyn_and_rob",
+        project_name="Carolyn and Rob",
+        handoff_id="handoff-1",
+        handoff_sha256="a" * 64,
+        handoff_content_hash="b" * 64,
+    )
+    moved_workspace = tmp_path / "moved workspace"
+    original_workspace.rename(moved_workspace)
+    plan_path = tmp_path / "Carolyn and Rob.json"
+    plan_path.write_text(json.dumps(_plan_payload(), ensure_ascii=False, indent=2), encoding="utf-8")
+
+    result = import_plan_into_workspace(plan_path, moved_workspace)
+
+    timeline = json.loads((result.package_root / "normalized_timeline.json").read_text(encoding="utf-8"))
+    assert timeline["visual_items"][0]["resolved_source_path"] == str((moved_workspace / "originals" / "cover.jpg").resolve())
 
 
 def test_normalized_timeline_is_deterministic_for_same_valid_json(tmp_path: Path) -> None:

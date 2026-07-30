@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import json
 import os
+import shutil
 import subprocess
 import sys
 import time
@@ -446,9 +447,10 @@ class ShotcutMcpBackend:
             json.dumps(item, ensure_ascii=False, separators=(",", ":")) + "\n"
             for item in payloads
         )
+        python_command = self._python_command()
         try:
             completed = subprocess.run(
-                [self.paths.python_executable, str(self.paths.server_script.resolve())],
+                [*python_command, str(self.paths.server_script.resolve())],
                 input=blob,
                 capture_output=True,
                 text=True,
@@ -487,6 +489,25 @@ class ShotcutMcpBackend:
         if not isinstance(structured, dict):
             raise ShotcutBackendError("Shotcut MCP result is missing structuredContent.")
         return structured
+
+    def _python_command(self) -> list[str]:
+        configured = str(self.paths.python_executable).strip()
+        if configured:
+            configured_path = Path(configured)
+            if not (getattr(sys, "frozen", False) and configured_path.resolve() == Path(sys.executable).resolve()):
+                return [configured]
+        base_executable = str(getattr(sys, "_base_executable", "") or "").strip()
+        if base_executable and Path(base_executable).name.lower().startswith("python"):
+            return [base_executable]
+        python_on_path = shutil.which("python")
+        if python_on_path:
+            return [python_on_path]
+        py_launcher = shutil.which("py")
+        if py_launcher:
+            return [py_launcher, "-3"]
+        raise ShotcutBackendError(
+            "Shotcut MCP requires a real Python interpreter. No usable python.exe or py launcher was found."
+        )
 
     def _stabilize_render_status(self, result: dict[str, Any]) -> dict[str, Any]:
         if result.get("status") != "failed" or result.get("status_note") != _FINALIZING_STATUS_NOTE:
