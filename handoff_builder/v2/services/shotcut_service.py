@@ -362,6 +362,8 @@ def build_shotcut_project_from_timeline(
         if track_id not in declared_track_ids:
             continue
         kind = "audio" if str(track["track_type"]) == "audio" else "video"
+        if kind == "video" and track_id == "V1":
+            continue
         tracks.append(ShotcutTrackIntent(kind=kind, name=track_id))
 
     clip_summary: list[dict] = []
