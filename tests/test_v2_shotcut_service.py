@@ -25,12 +25,19 @@ def test_shotcut_settings_store_round_trips(tmp_path: Path) -> None:
     server_script.write_text("print('ok')\n", encoding="utf-8")
     store = ShotcutSettingsStore(tmp_path / "shotcut_settings.json")
 
-    saved = store.save(ShotcutAppSettings(runtime_dir=str(runtime_dir), server_script=str(server_script)))
+    saved = store.save(
+        ShotcutAppSettings(
+            runtime_dir=str(runtime_dir),
+            server_script=str(server_script),
+            include_local_path_context=False,
+        )
+    )
     loaded = store.load()
 
     assert loaded == saved
     assert Path(loaded.runtime_dir) == runtime_dir.resolve()
     assert Path(loaded.server_script) == server_script.resolve()
+    assert loaded.include_local_path_context is False
 
 
 def test_build_editable_project_from_preview_plan_creates_video_and_audio_tracks(tmp_path: Path) -> None:

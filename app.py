@@ -184,6 +184,7 @@ class App(tk.Tk):
         self.shotcut_settings = self.shotcut_settings_store.load()
         self.shotcut_runtime_dir = tk.StringVar(value=self.shotcut_settings.runtime_dir)
         self.shotcut_server_script = tk.StringVar(value=self.shotcut_settings.server_script)
+        self.include_local_path_context = tk.BooleanVar(value=self.shotcut_settings.include_local_path_context)
         self.shotcut_runtime_text = tk.StringVar(
             value="Shotcut: выберите runtime folder и MCP script или нажмите Check Status."
         )
@@ -374,6 +375,12 @@ class App(tk.Tk):
         ttk.Spinbox(self.v1_settings_frame, from_=1, to=2, textvariable=self.worker_count, width=8).grid(
             row=4, column=1, sticky="w", padx=(8, 0), pady=(8, 0)
         )
+        ttk.Checkbutton(
+            self.v1_settings_frame,
+            text="Включить self-describing local path context для direct Shotcut MLT",
+            variable=self.include_local_path_context,
+            command=self._shotcut_save_settings,
+        ).grid(row=5, column=1, sticky="w", pady=(8, 0))
         self.v1_settings_frame.columnconfigure(1, weight=1)
         self.v1_settings_frame.pack_forget()
 
@@ -1244,6 +1251,7 @@ class App(tk.Tk):
                 output_dir=Path(self.output_dir.get()).expanduser(),
                 workspace_root=owner_project_root,
                 source_zip_path=selected_sources[0].resolve() if single_zip else None,
+                include_local_path_context=self._shotcut_save_settings().include_local_path_context,
                 include_video_proxies=self.include_proxies.get(),
                 gps_export_mode=self.gps_export_mode.get(),
                 worker_count=max(1, min(2, int(self.worker_count.get()))),
@@ -1563,12 +1571,14 @@ class App(tk.Tk):
         return ShotcutAppSettings(
             runtime_dir=self.shotcut_runtime_dir.get().strip(),
             server_script=self.shotcut_server_script.get().strip(),
+            include_local_path_context=bool(self.include_local_path_context.get()),
         )
 
     def _shotcut_save_settings(self) -> ShotcutAppSettings:
         self.shotcut_settings = self.shotcut_settings_store.save(self._shotcut_current_settings())
         self.shotcut_runtime_dir.set(self.shotcut_settings.runtime_dir)
         self.shotcut_server_script.set(self.shotcut_settings.server_script)
+        self.include_local_path_context.set(self.shotcut_settings.include_local_path_context)
         return self.shotcut_settings
 
     def _shotcut_choose_runtime(self) -> None:
@@ -1595,6 +1605,7 @@ class App(tk.Tk):
         self.shotcut_settings = self.shotcut_settings_store.load()
         self.shotcut_runtime_dir.set(self.shotcut_settings.runtime_dir)
         self.shotcut_server_script.set(self.shotcut_settings.server_script)
+        self.include_local_path_context.set(self.shotcut_settings.include_local_path_context)
         self.shotcut_runtime_text.set("Shotcut paths сброшены. Можно выбрать их заново или использовать autodetect.")
         self.shotcut_status_text.set("Shotcut config reset completed.")
 

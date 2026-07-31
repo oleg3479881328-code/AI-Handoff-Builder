@@ -1,5 +1,82 @@
 # Latest Log
 
+Date: 2026-07-31
+Step: Issue #27 self-describing handoff for first-try MLT
+
+## Completed
+
+- Added mandatory `ASSISTANT_CONTEXT.json` to every new analysis handoff package.
+- `ASSISTANT_CONTEXT.json` now carries the owner-facing direct-MLT contract when local path context is enabled:
+  - project identity
+  - actual `project_root`
+  - actual `originals_root`
+  - actual `proxies_root`
+  - `preferred_edit_source = originals`
+  - complete `asset_id -> original filename -> original path` mapping
+  - proxy mapping when available
+  - direct-MLT path rules:
+    - absolute original-media paths required
+    - downloaded `.mlt` may be opened from any folder
+    - no user file movement required
+- Added persisted owner control in:
+  - `handoff_builder/v2/shotcut_settings.py`
+  - owner default remains enabled for this build
+  - when disabled, direct MLT support is explicitly marked unavailable in `ASSISTANT_CONTEXT.json`
+- Updated analysis handoff templates:
+  - `handoff_builder/templates/analysis_handoff/00_START_HERE.md`
+  - `handoff_builder/templates/analysis_handoff/PROJECT_BRIEF.md`
+  - `handoff_builder/templates/analysis_handoff/OUTPUT_CONTRACT.md`
+  - all now include:
+    - `DIRECT SHOTCUT MLT MODE - NO USER FILE MOVEMENT`
+- Added a new direct-MLT helper:
+  - `handoff_builder/v2/direct_mlt.py`
+  - builds a first-try Shotcut `.mlt` from `ASSISTANT_CONTEXT.json`
+  - validates that:
+    - every selected asset has a mapped original path
+    - only original-media resources are used in direct mode
+    - no physical filename contains literal `%20`
+- Expanded regression coverage:
+  - `tests/test_pipeline.py`
+  - `tests/test_v2_shotcut_service.py`
+  - `tests/test_v2_direct_mlt.py`
+  - `tests/test_app_v2_ui.py`
+- Updated packaged acceptance harness:
+  - `scripts/run_issue27_packaged_acceptance.py`
+  - it now proves:
+    - packaged EXE creates the handoff
+    - `ASSISTANT_CONTEXT.json` exists with full mapping
+    - a direct `.mlt` can be created in an unrelated folder
+    - Shotcut opens that `.mlt` without `Missing Files`
+
+## Validation
+
+- Focused source regression:
+  - `python -m pytest -q tests\test_pipeline.py tests\test_v2_shotcut_service.py tests\test_v2_direct_mlt.py tests\test_app_v2_ui.py`
+  - result: `42 passed, 1 skipped in 22.77s`
+- Full suite:
+  - `python -m pytest -q`
+  - result: `166 passed in 85.24s`
+- Compile validation:
+  - `python -m py_compile app.py handoff_builder\pipeline.py handoff_builder\v2\shotcut_settings.py handoff_builder\v2\direct_mlt.py`
+  - result: success
+- Fresh packaged build from the active Issue `#27` worktree:
+  - `cmd /c "echo.| build_exe.bat"`
+  - result: success
+  - EXE SHA-256:
+    - `6365c90fef83ac7895fcfa5089766f1e14c5b1507e20bd468a04282ef94d7976`
+- Packaged acceptance:
+  - `python scripts\run_issue27_packaged_acceptance.py`
+  - result:
+    - handoff manifest includes `ASSISTANT_CONTEXT.json`
+    - direct MLT path:
+      - `C:\Users\oleg3\Documents\AIHB_issue27_packaged_acceptance_final\Unrelated Downloads\Каролина And RÖB direct owner test.mlt`
+    - `opened_from_unrelated_folder = true`
+    - `missing_files_dialog_absent = true`
+    - `physical_filename_contains_percent20 = false`
+    - direct MLT resource validation:
+      - `uses_only_originals = true`
+      - `missing_resources = []`
+
 Date: 2026-07-30
 Step: Issue #27 automatic complete local project hardening + packaged acceptance
 

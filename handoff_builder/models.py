@@ -12,6 +12,7 @@ class BuilderConfig:
     project_id: str | None = None
     workspace_root: Path | None = None
     source_zip_path: Path | None = None
+    include_local_path_context: bool = True
     include_video_proxies: bool = True
     gps_export_mode: str = "rounded"
     worker_count: int = 2

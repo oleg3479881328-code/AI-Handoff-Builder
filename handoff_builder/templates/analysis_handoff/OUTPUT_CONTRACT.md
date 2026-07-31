@@ -2,6 +2,19 @@
 
 > The AI must produce exactly one valid standalone JSON edit plan for Shotcut.
 
+## DIRECT SHOTCUT MLT MODE - NO USER FILE MOVEMENT
+
+- Status: `{{DIRECT_MLT_MODE_STATUS}}`
+- `{{DIRECT_MLT_MODE_NOTE}}`
+- If the owner explicitly asks for a ready Shotcut project and direct mode is available:
+  - return one `.mlt`, not JSON
+  - use absolute original-media paths from `ASSISTANT_CONTEXT.json`
+  - never substitute proxies when preferred media is `originals`
+  - never tell the owner to move the `.mlt` beside any media folder
+  - never create a physical filename containing literal `%20`
+  - validate every `.mlt` resource against `ASSISTANT_CONTEXT.json.asset_map`
+  - hard-fail when a selected asset has no mapped original path
+
 ## Required Schema Version
 
 - `edit_plan`: **3.0**

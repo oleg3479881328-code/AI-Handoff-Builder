@@ -49,6 +49,7 @@ def test_v1_settings_start_collapsed_and_toggle_from_button():
         assert app.v1_settings_expanded is False
         assert app.v1_settings_toggle_button.cget("text") == "Показать настройки"
         assert app.v1_settings_frame.winfo_manager() == ""
+        assert app.include_local_path_context.get() is True
 
         app._toggle_v1_settings()
         app.update_idletasks()

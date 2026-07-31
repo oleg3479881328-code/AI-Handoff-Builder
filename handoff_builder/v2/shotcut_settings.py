@@ -21,6 +21,7 @@ def get_shotcut_settings_path() -> Path:
 class ShotcutAppSettings:
     runtime_dir: str = ""
     server_script: str = ""
+    include_local_path_context: bool = True
 
     def runtime_path(self) -> Path | None:
         return Path(self.runtime_dir).expanduser().resolve() if self.runtime_dir else None
@@ -33,6 +34,7 @@ class ShotcutAppSettings:
         return ShotcutAppSettings(
             runtime_dir=self.runtime_dir or defaults.runtime_dir,
             server_script=self.server_script or defaults.server_script,
+            include_local_path_context=self.include_local_path_context,
         )
 
 
@@ -50,12 +52,14 @@ class ShotcutSettingsStore:
         return ShotcutAppSettings(
             runtime_dir=str(payload.get("runtime_dir") or ""),
             server_script=str(payload.get("server_script") or ""),
+            include_local_path_context=bool(payload.get("include_local_path_context", True)),
         ).with_defaults()
 
     def save(self, settings: ShotcutAppSettings) -> ShotcutAppSettings:
         normalized = ShotcutAppSettings(
             runtime_dir=str(settings.runtime_path()) if settings.runtime_dir else "",
             server_script=str(settings.server_script_path()) if settings.server_script else "",
+            include_local_path_context=bool(settings.include_local_path_context),
         )
         self.path.parent.mkdir(parents=True, exist_ok=True)
         self.path.write_text(
@@ -63,6 +67,7 @@ class ShotcutSettingsStore:
                 {
                     "runtime_dir": normalized.runtime_dir,
                     "server_script": normalized.server_script,
+                    "include_local_path_context": normalized.include_local_path_context,
                 },
                 ensure_ascii=False,
                 indent=2,

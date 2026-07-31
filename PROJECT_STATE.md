@@ -1,5 +1,48 @@
 # Current State
 
+- Date: 2026-07-31
+- Self-describing first-try MLT status:
+  - every new analysis handoff now writes mandatory:
+    - `ASSISTANT_CONTEXT.json`
+  - owner-controlled local path context is now persisted in:
+    - `%LOCALAPPDATA%\AI Handoff Builder\shotcut_settings.json`
+  - owner default for this build:
+    - `include_local_path_context = true`
+  - when enabled, `ASSISTANT_CONTEXT.json` now carries:
+    - project identity and project name
+    - actual `project_root`
+    - actual `originals_root`
+    - actual `proxies_root`
+    - `preferred_edit_source = originals`
+    - complete `asset_id -> original filename -> original path` mapping
+    - proxy mapping when available
+    - explicit flags:
+      - absolute original-media paths required
+      - downloaded `.mlt` may be opened from any folder
+      - no user file movement required
+  - when disabled, `ASSISTANT_CONTEXT.json` still exists but marks:
+    - `direct_mlt_support.available = false`
+  - the analysis handoff templates now document:
+    - `DIRECT SHOTCUT MLT MODE - NO USER FILE MOVEMENT`
+  - new direct-MLT helper now builds a first-try Shotcut `.mlt` from:
+    - `ASSISTANT_CONTEXT.json`
+  - latest packaged acceptance proof on Friday, July 31, 2026:
+    - fresh EXE path:
+      - `dist\AI Handoff Builder\AI Handoff Builder.exe`
+    - fresh EXE SHA-256:
+      - `6365c90fef83ac7895fcfa5089766f1e14c5b1507e20bd468a04282ef94d7976`
+    - evidence root:
+      - `C:\Users\oleg3\Documents\AIHB_issue27_packaged_acceptance_final`
+    - direct MLT opened from unrelated folder:
+      - `C:\Users\oleg3\Documents\AIHB_issue27_packaged_acceptance_final\Unrelated Downloads\Каролина And RÖB direct owner test.mlt`
+    - direct MLT used only original-media resources:
+      - `C:\Users\oleg3\Documents\AIHB_issue27_packaged_acceptance_final\Каролина And RÖB\originals\cover.jpg`
+    - acceptance proof confirmed:
+      - no `Missing Files` dialog
+      - no owner path repair
+      - no proxy `asset_...` media resource in direct-original mode
+      - no physical filename containing literal `%20`
+
 - Date: 2026-07-30
 - Automatic complete local project status:
   - single-source ZIP now creates a project-owned local workspace with:

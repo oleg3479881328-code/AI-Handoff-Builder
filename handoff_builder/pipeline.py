@@ -175,6 +175,97 @@ class HandoffBuilder:
             template = template.replace(f"{{{{{key}}}}}", str(value))
         return template
 
+    def _build_assistant_context(
+        self,
+        *,
+        assets: list[AssetRecord],
+        project_id: str,
+        handoff_id: str,
+        created_at: str,
+        project_root: Path | None,
+    ) -> dict[str, object]:
+        direct_mode_available = bool(self.config.include_local_path_context and project_root is not None)
+        payload: dict[str, object] = {
+            "schema_version": "1.0",
+            "document_type": "assistant_context",
+            "project_id": project_id,
+            "project_name": self.config.project_name,
+            "handoff_id": handoff_id,
+            "created_at": created_at,
+            "preferred_edit_source": "originals",
+            "must_use_absolute_original_media_paths": direct_mode_available,
+            "mlt_may_be_opened_from_any_folder": direct_mode_available,
+            "user_file_movement_required": False,
+            "direct_mlt_support": {
+                "available": direct_mode_available,
+                "reason_unavailable": None,
+            },
+            "project_root": None,
+            "originals_root": None,
+            "proxies_root": None,
+            "asset_map": {},
+            "asset_originals": [],
+            "asset_proxies": [],
+        }
+        if not direct_mode_available:
+            payload["direct_mlt_support"] = {
+                "available": False,
+                "reason_unavailable": (
+                    "Local path context is disabled in owner settings."
+                    if project_root is not None
+                    else "Direct Shotcut MLT mode requires a project-root workspace."
+                ),
+            }
+            return payload
+
+        assert project_root is not None
+        resolved_project_root = project_root.resolve()
+        originals_root = (resolved_project_root / "originals").resolve()
+        proxies_root = (resolved_project_root / "proxies").resolve()
+        payload["project_root"] = str(resolved_project_root)
+        payload["originals_root"] = str(originals_root)
+        payload["proxies_root"] = str(proxies_root)
+
+        asset_map: dict[str, dict[str, object]] = {}
+        asset_originals: list[dict[str, object]] = []
+        asset_proxies: list[dict[str, object]] = []
+        for asset in assets:
+            if not asset.original_project_path:
+                raise ValueError(f"Direct Shotcut MLT mode requires original_project_path for {asset.asset_id}")
+            original_path = (resolved_project_root / asset.original_project_path).resolve()
+            if not original_path.is_file():
+                raise ValueError(f"Direct Shotcut MLT mode missing original file for {asset.asset_id}: {original_path}")
+            original_entry = {
+                "asset_id": asset.asset_id,
+                "media_type": asset.media_type,
+                "original_filename": original_path.name,
+                "original_name": asset.original_name,
+                "original_path": str(original_path),
+                "original_project_path": asset.original_project_path,
+            }
+            proxy_entry: dict[str, object] | None = None
+            if asset.proxy_project_path:
+                proxy_path = (resolved_project_root / asset.proxy_project_path).resolve()
+                proxy_entry = {
+                    "asset_id": asset.asset_id,
+                    "proxy_filename": proxy_path.name,
+                    "proxy_path": str(proxy_path),
+                    "proxy_project_path": asset.proxy_project_path,
+                }
+                if proxy_path.exists():
+                    asset_proxies.append(proxy_entry)
+            asset_originals.append(original_entry)
+            asset_map[asset.asset_id] = {
+                **original_entry,
+                "proxy_filename": proxy_entry["proxy_filename"] if proxy_entry is not None else None,
+                "proxy_path": proxy_entry["proxy_path"] if proxy_entry is not None else None,
+                "proxy_project_path": proxy_entry["proxy_project_path"] if proxy_entry is not None else None,
+            }
+        payload["asset_map"] = asset_map
+        payload["asset_originals"] = asset_originals
+        payload["asset_proxies"] = asset_proxies
+        return payload
+
     def _process_photo(self, source: Path, asset: AssetRecord, package_root: Path) -> None:
         self._ensure_not_canceled()
         destination = package_root / "photo_analysis_copies" / f"asset_{asset.asset_id}.jpg"
@@ -575,6 +666,14 @@ class HandoffBuilder:
 
         expected_output_filename = f"{self.config.project_name}.json"
         created_at = dt.datetime.now(dt.timezone.utc).isoformat()
+        assistant_context = self._build_assistant_context(
+            assets=assets,
+            project_id=project_id,
+            handoff_id=handoff_id,
+            created_at=created_at,
+            project_root=project_root,
+        )
+        direct_mlt_available = bool((assistant_context.get("direct_mlt_support") or {}).get("available"))
         template_context = {
             "PROJECT_ID": project_id,
             "PROJECT_NAME": self.config.project_name,
@@ -584,6 +683,12 @@ class HandoffBuilder:
             "VIDEO_COUNT": len(source_videos),
             "AUDIO_COUNT": 0,
             "EXPECTED_OUTPUT_FILENAME": expected_output_filename,
+            "DIRECT_MLT_MODE_STATUS": "available" if direct_mlt_available else "unavailable",
+            "DIRECT_MLT_MODE_NOTE": (
+                "Use `ASSISTANT_CONTEXT.json` and return one `.mlt` when the owner explicitly asks for a ready Shotcut project."
+                if direct_mlt_available
+                else "If `ASSISTANT_CONTEXT.json.direct_mlt_support.available=false`, direct Shotcut MLT mode is unavailable and the normal JSON workflow stays authoritative."
+            ),
         }
         start_here_text = self._render_analysis_template("00_START_HERE.md", template_context)
         project_brief_text = self._render_analysis_template("PROJECT_BRIEF.md", template_context)
@@ -592,6 +697,7 @@ class HandoffBuilder:
         (package_root / "00_START_HERE.md").write_text(start_here_text, encoding="utf-8")
         (package_root / "PROJECT_BRIEF.md").write_text(project_brief_text, encoding="utf-8")
         (package_root / "OUTPUT_CONTRACT.md").write_text(output_contract_text, encoding="utf-8")
+        json_dump(package_root / "ASSISTANT_CONTEXT.json", assistant_context)
 
         manifest_assets: list[dict[str, object]] = []
         inventory_candidates: list[dict[str, object]] = []
@@ -648,6 +754,7 @@ class HandoffBuilder:
             "00_START_HERE.md",
             "PROJECT_BRIEF.md",
             "OUTPUT_CONTRACT.md",
+            "ASSISTANT_CONTEXT.json",
             "metadata/asset_metadata_normalized.json",
             "metadata/chronology_report.json",
             "metadata/location_clusters.json",
@@ -801,7 +908,7 @@ class HandoffBuilder:
             if target.exists():
                 shutil.rmtree(target, ignore_errors=True)
             target.mkdir(parents=True, exist_ok=True)
-        for relative in ("handoff_manifest.json", "scene_manifest.json", "validation_report.json", "00_START_HERE.md", "PROJECT_BRIEF.md", "OUTPUT_CONTRACT.md"):
+        for relative in ("handoff_manifest.json", "scene_manifest.json", "validation_report.json", "00_START_HERE.md", "PROJECT_BRIEF.md", "OUTPUT_CONTRACT.md", "ASSISTANT_CONTEXT.json"):
             target = analysis_root / relative
             if target.exists():
                 target.unlink()

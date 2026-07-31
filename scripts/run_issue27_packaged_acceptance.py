@@ -12,22 +12,33 @@ import ctypes
 import ctypes.wintypes as wt
 from pathlib import Path
 
+REPO_ROOT = Path(r"C:\Users\oleg3\Documents\AI Handoff Builder issue25")
+if str(REPO_ROOT) not in sys.path:
+    sys.path.insert(0, str(REPO_ROOT))
+
 import pyautogui
 import pygetwindow as gw
 from PIL import Image
+
+from handoff_builder.v2.direct_mlt import (
+    build_direct_shotcut_mlt_from_context,
+    load_assistant_context,
+    open_direct_shotcut_mlt_from_context,
+)
+from handoff_builder.v2.shotcut_settings import ShotcutSettingsStore
 
 pyautogui.FAILSAFE = False
 pyautogui.PAUSE = 0.2
 
 
 EXE_PATH = Path(r"C:\Users\oleg3\Documents\AI Handoff Builder issue25\dist\AI Handoff Builder\AI Handoff Builder.exe")
-REPO_ROOT = Path(r"C:\Users\oleg3\Documents\AI Handoff Builder issue25")
 SEED_IMAGE = REPO_ROOT / "tmp_issue27_one_json_acceptance" / "source" / "cover.jpg"
 TEMP_ROOT = Path(r"C:\Users\oleg3\Documents\AIHB_issue27_packaged_acceptance_final")
 PROJECT_NAME = "Каролина And RÖB"
 SOURCE_ZIP = TEMP_ROOT / f"{PROJECT_NAME}.zip"
 OVERSIZE_JSON = TEMP_ROOT / f"{PROJECT_NAME}_oversized.json"
 VALID_JSON = TEMP_ROOT / f"{PROJECT_NAME}.json"
+DIRECT_MLT_DIR = TEMP_ROOT / "Unrelated Downloads"
 EVIDENCE_DIR = TEMP_ROOT / "evidence"
 STATUS_PATH = TEMP_ROOT / "_packaged_acceptance" / "status.json"
 EVENTS_PATH = TEMP_ROOT / "_packaged_acceptance" / "events.jsonl"
@@ -198,9 +209,13 @@ def discover_capture_hwnd(exclude_titles: set[str] | None = None) -> int:
 def screenshot(name: str, hwnd: int | None = None) -> Path:
     EVIDENCE_DIR.mkdir(parents=True, exist_ok=True)
     path = EVIDENCE_DIR / name
-    if hwnd is None:
-        hwnd = discover_capture_hwnd(exclude_titles={"AI Handoff Builder"})
-    _capture_hwnd_to_path(hwnd, path)
+    try:
+        if hwnd is None:
+            hwnd = discover_capture_hwnd(exclude_titles={"AI Handoff Builder"})
+        _capture_hwnd_to_path(hwnd, path)
+    except OSError:
+        image = pyautogui.screenshot()
+        image.save(path)
     return path
 
 
@@ -347,9 +362,21 @@ def latest_file(pattern: str) -> Path:
     return matches[-1]
 
 
+def no_missing_files_dialog_present() -> bool:
+    for title in gw.getAllTitles():
+        lowered = (title or "").strip().lower()
+        if not lowered:
+            continue
+        if "missing files" in lowered or "missing file" in lowered:
+            return False
+    return True
+
+
 def inspect_results() -> dict:
     manifest_path = latest_handoff_manifest()
     manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
+    assistant_context_path = latest_file("ASSISTANT_CONTEXT.json")
+    assistant_context = load_assistant_context(assistant_context_path)
     imported_plan_path = latest_file(f"{PROJECT_NAME}.json")
     build_summary_path = latest_file("build_summary.json")
     build_summary = json.loads(build_summary_path.read_text(encoding="utf-8"))
@@ -362,6 +389,8 @@ def inspect_results() -> dict:
     return {
         "manifest_path": str(manifest_path),
         "manifest": manifest,
+        "assistant_context_path": str(assistant_context_path),
+        "assistant_context": assistant_context,
         "imported_plan_path": str(imported_plan_path),
         "imported_plan_sha256": sha256(imported_plan_path),
         "normalized_timeline_path": str(normalized_path),
@@ -377,6 +406,44 @@ def inspect_results() -> dict:
         "mlt_contains_cloud_path": ("http://" in mlt_text) or ("https://" in mlt_text),
         "timeline_duration_frames": timeline_duration_frames,
         "photo_duration_ok": timeline_duration_frames == 91,
+    }
+
+
+def build_and_open_direct_mlt() -> dict:
+    context_path = latest_file("ASSISTANT_CONTEXT.json")
+    context = load_assistant_context(context_path)
+    settings = ShotcutSettingsStore().load()
+    DIRECT_MLT_DIR.mkdir(parents=True, exist_ok=True)
+    output_path = DIRECT_MLT_DIR / f"{PROJECT_NAME} direct owner test.mlt"
+    if output_path.exists():
+        output_path.unlink()
+    kill_process("shotcut")
+    summary = build_direct_shotcut_mlt_from_context(
+        context_path,
+        settings=settings,
+        output_path=output_path,
+    )
+    open_result = open_direct_shotcut_mlt_from_context(
+        context_path,
+        settings=settings,
+        project_path=output_path,
+    )
+    pid = int(open_result.get("pid") or 0)
+    window = wait_for_window("Shotcut", timeout=20, pid=pid if pid else None)
+    time.sleep(2)
+    missing_files_ok = no_missing_files_dialog_present()
+    screenshot("06-direct-mlt-opened-from-unrelated-folder.png", hwnd=int(window._hWnd))
+    return {
+        "assistant_context_path": str(context_path),
+        "project_path": str(output_path.resolve()),
+        "project_sha256": sha256(output_path),
+        "summary": summary,
+        "open_result": open_result,
+        "window_title": window.title,
+        "window_hwnd": int(window._hWnd),
+        "opened_from_unrelated_folder": output_path.parent.resolve() != Path(str(context["project_root"])).resolve(),
+        "missing_files_dialog_absent": missing_files_ok,
+        "physical_filename_contains_percent20": "%20" in output_path.name,
     }
 
 
@@ -399,6 +466,7 @@ def main() -> None:
         {"shotcut_opened", "shotcut_error", "v2_error"},
     )
     results = inspect_results()
+    direct_mlt = build_and_open_direct_mlt()
 
     report = {
         "exe_path": str(EXE_PATH),
@@ -414,6 +482,7 @@ def main() -> None:
         "oversize_status": oversize_status,
         "valid_status": valid_status,
         "results": results,
+        "direct_mlt": direct_mlt,
     }
     REPORT_PATH.write_text(json.dumps(report, ensure_ascii=False, indent=2), encoding="utf-8")
     sys.stdout.buffer.write(json.dumps(report, ensure_ascii=False, indent=2).encode("utf-8", errors="replace"))
