@@ -12,6 +12,7 @@ from ..errors import UnsafePackageError
 from ..project_registry import (
     ProjectRegistryStore,
     find_local_handoff_entry,
+    get_local_handoff_index_path,
     read_package_identity,
     read_plan_identity,
     resolve_workspace_from_hint,
@@ -26,7 +27,25 @@ from ..render.report_stub import build_render_report_stub, write_render_report_s
 from ..storage import apply_migrations, connect_workspace_db
 from ..storage.repositories import SqliteRenderQueueRepository, WorkspaceRepository
 from ..timeline.compiler import compile_normalized_timeline
-from ..workspace import load_project_config
+from ..workspace import init_project_workspace, load_project_config
+
+
+def _resolve_local_plan_workspace(plan_json: Path, identity: dict[str, str]) -> Path | None:
+    candidate = resolve_workspace_from_hint(plan_json)
+    if not get_local_handoff_index_path(candidate).exists():
+        return None
+    project_file = candidate / "project.json"
+    if not project_file.exists():
+        init_project_workspace(candidate, identity["project_id"])
+    try:
+        return verify_project_identity(
+            candidate,
+            project_id=identity["project_id"],
+            handoff_id=identity["handoff_id"],
+            handoff_content_hash=identity["handoff_content_hash"],
+        )
+    except Exception:
+        return None
 
 
 def resolve_workspace_for_package(
@@ -85,6 +104,7 @@ def resolve_workspace_for_plan(
         project_id=identity["project_id"],
         handoff_id=identity["handoff_id"],
         handoff_content_hash=identity["handoff_content_hash"],
+        allow_project_id_fallback=False,
     )
     if resolved is not None:
         try:
@@ -96,6 +116,26 @@ def resolve_workspace_for_plan(
             )
         except Exception:
             resolved = None
+
+    local_workspace = _resolve_local_plan_workspace(plan_json, identity)
+    if local_workspace is not None:
+        local_handoff = find_local_handoff_entry(
+            local_workspace,
+            project_id=identity["project_id"],
+            handoff_id=identity["handoff_id"],
+            handoff_content_hash=identity["handoff_content_hash"],
+        )
+        store.register_project(
+            project_root=local_workspace,
+            project_id=identity["project_id"],
+            project_name=identity.get("project_name") or None,
+            handoff_id=identity["handoff_id"],
+            handoff_sha256=str((local_handoff or {}).get("handoff_sha256") or ""),
+            handoff_content_hash=identity["handoff_content_hash"],
+            source_plan_path=plan_json,
+        )
+        return local_workspace
+
     if fallback_path is None:
         raise UnsafePackageError(
             "No saved project mapping for this edit plan JSON. Choose the original project folder once to restore the link."

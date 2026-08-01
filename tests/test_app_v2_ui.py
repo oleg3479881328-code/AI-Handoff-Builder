@@ -66,6 +66,17 @@ def test_v1_settings_start_collapsed_and_toggle_from_button():
         app.destroy()
 
 
+def test_application_version_is_visible_in_title_and_header():
+    from handoff_builder.version import APP_DISPLAY_NAME, APP_VERSION
+
+    app = _make_app()
+    try:
+        assert app.title() == f"{APP_DISPLAY_NAME} - {APP_VERSION}"
+        assert app.app_version_label.cget("text") == f"Version: {APP_VERSION}"
+    finally:
+        app.destroy()
+
+
 def test_v2_snapshot_focuses_latest_job_and_scrolls_results_into_view():
     app = _make_app()
     try:

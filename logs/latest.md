@@ -1,5 +1,65 @@
 # Latest Log
 
+Date: 2026-08-01
+Step: Issue #27 owner-visible application version
+
+## Completed
+
+- Added the single version source:
+  - `handoff_builder/version.py`
+  - `APP_VERSION = V0.1.0`
+- Connected the same source to:
+  - PyInstaller bundle and EXE name: `V0.1.0_AI_Handoff_Builder.exe`
+  - application window title: `AI Handoff Builder - V0.1.0`
+  - stable visible header label: `Version: V0.1.0`
+- Preserved the existing workspace-resolution correction and included it in the pending PR update.
+- Captured packaged UI evidence in local-only `tmp_version_ui.png`.
+
+## Validation
+
+- `python -m pytest -q tests\\test_app_v2_ui.py tests\\test_packaged_resources.py` -> `8 passed, 1 skipped in 2.85s`
+- `python -m py_compile app.py handoff_builder\\version.py handoff_builder\\__init__.py` -> success
+- `cmd /c "echo.| build_exe.bat"` -> success; PyInstaller reported `Build complete!`
+- launched packaged EXE and verified title: `AI Handoff Builder - V0.1.0`
+- verified visible UI label: `Version: V0.1.0`
+- packaged EXE SHA-256: `057A32663C38FB6D17CDDFAFDAAD84045D498F911BD3D631B4D4630FB064D19C`
+
+## Status
+
+- Draft PR #26: remains Draft and unmerged
+- owner-visible version requirement: complete
+
+Date: 2026-07-31
+Step: Issue #27 direct JSON workspace recovers beside selected deep plan
+
+## Completed
+
+- Tightened direct `Edit Plan JSON` workspace resolution in:
+  - `handoff_builder/v2/project_registry.py`
+  - `handoff_builder/v2/services/import_service.py`
+- Direct JSON import no longer accepts the loose `project_id`-only registry fallback.
+- The import path now prefers:
+  - exact saved handoff identity from the registry
+  - then the folder containing the selected JSON itself
+- If the selected JSON sits inside the real local handoff folder and that folder already has:
+  - `analysis/handoff_index.json`
+  but does not yet have a v2 workspace bootstrap,
+  the app now initializes the workspace there automatically before importing.
+- Added focused regression coverage in:
+  - `tests/test_v2_one_json_workflow.py`
+  proving:
+  - stale same-`project_id` registry entries no longer steal the import
+  - exact handoff registry matches still win when they exist
+
+## Validation
+
+- Focused regression:
+  - `python -m pytest -q tests\test_v2_one_json_workflow.py tests\test_v2_gui_controller.py`
+  - result: `13 passed in 8.22s`
+- Compile validation:
+  - `python -m py_compile handoff_builder\v2\project_registry.py handoff_builder\v2\services\import_service.py app.py`
+  - result: success
+
 Date: 2026-07-31
 Step: Issue #27 self-describing handoff for first-try MLT
 

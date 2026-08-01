@@ -9,9 +9,9 @@ from PIL import Image
 from handoff_builder.utils import file_sha256
 from handoff_builder.v2.errors import UnsafePackageError
 from handoff_builder.v2.plans.schema import load_bounded_json_object, validate_payload
-from handoff_builder.v2.project_registry import record_local_handoff
+from handoff_builder.v2.project_registry import ProjectRegistryStore, record_local_handoff
 from handoff_builder.v2.render.ffmpeg_backend import FFmpegBackend
-from handoff_builder.v2.services.import_service import import_plan_into_workspace
+from handoff_builder.v2.services.import_service import import_plan_into_workspace, resolve_workspace_for_plan
 from handoff_builder.v2.storage import connect_workspace_db
 from handoff_builder.v2.timeline.compiler import compile_normalized_timeline
 from handoff_builder.v2.workspace import init_project_workspace
@@ -133,6 +133,77 @@ def test_standalone_edit_plan_json_survives_workspace_move_via_project_relative_
 
     timeline = json.loads((result.package_root / "normalized_timeline.json").read_text(encoding="utf-8"))
     assert timeline["visual_items"][0]["resolved_source_path"] == str((moved_workspace / "originals" / "cover.jpg").resolve())
+
+
+def test_resolve_workspace_for_plan_prefers_plan_folder_identity_over_stale_project_id_mapping(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setenv("LOCALAPPDATA", str(tmp_path / "appdata"))
+    stale_workspace = init_project_workspace(tmp_path / "stale-workspace", "carolyn_and_rob")
+    ProjectRegistryStore().register_project(
+        project_root=stale_workspace,
+        project_id="carolyn_and_rob",
+        handoff_id="old-handoff",
+        handoff_sha256="a" * 64,
+        handoff_content_hash="c" * 64,
+    )
+
+    actual_workspace = tmp_path / "deep-folder"
+    record_local_handoff(
+        project_root=actual_workspace,
+        project_id="carolyn_and_rob",
+        project_name="Carolyn and Rob",
+        handoff_id="handoff-1",
+        handoff_sha256="a" * 64,
+        handoff_content_hash="b" * 64,
+    )
+    plan_path = actual_workspace / "Carolyn and Rob.json"
+    plan_path.parent.mkdir(parents=True, exist_ok=True)
+    plan_path.write_text(json.dumps(_plan_payload(), ensure_ascii=False, indent=2), encoding="utf-8")
+
+    resolved = resolve_workspace_for_plan(plan_path)
+
+    assert resolved == actual_workspace.resolve()
+    assert (resolved / "project.json").exists()
+
+
+def test_resolve_workspace_for_plan_uses_exact_registry_match_before_local_plan_folder(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setenv("LOCALAPPDATA", str(tmp_path / "appdata"))
+    workspace = init_project_workspace(tmp_path / "workspace", "carolyn_and_rob")
+    record_local_handoff(
+        project_root=workspace,
+        project_id="carolyn_and_rob",
+        project_name="Carolyn and Rob",
+        handoff_id="handoff-1",
+        handoff_sha256="a" * 64,
+        handoff_content_hash="b" * 64,
+    )
+    ProjectRegistryStore().register_project(
+        project_root=workspace,
+        project_id="carolyn_and_rob",
+        project_name="Carolyn and Rob",
+        handoff_id="handoff-1",
+        handoff_sha256="a" * 64,
+        handoff_content_hash="b" * 64,
+    )
+    decoy_folder = tmp_path / "deep-folder"
+    record_local_handoff(
+        project_root=decoy_folder,
+        project_id="carolyn_and_rob",
+        project_name="Carolyn and Rob",
+        handoff_id="other-handoff",
+        handoff_sha256="f" * 64,
+        handoff_content_hash="e" * 64,
+    )
+    plan_path = decoy_folder / "Carolyn and Rob.json"
+    plan_path.parent.mkdir(parents=True, exist_ok=True)
+    plan_path.write_text(json.dumps(_plan_payload(), ensure_ascii=False, indent=2), encoding="utf-8")
+
+    resolved = resolve_workspace_for_plan(plan_path)
+
+    assert resolved == workspace.resolve()
 
 
 def test_normalized_timeline_is_deterministic_for_same_valid_json(tmp_path: Path) -> None:

@@ -18,6 +18,7 @@ from PIL import Image, ImageTk
 from handoff_builder.models import BuildResult, BuilderConfig
 from handoff_builder.pipeline import HandoffBuilder
 from handoff_builder.theme import ThemePalette, ThemeSettingsStore, get_theme_palette
+from handoff_builder.version import APP_DISPLAY_NAME, APP_VERSION
 from handoff_builder.v2.coordinator_bridge import CoordinatorDraft, build_coordinator_draft, draft_to_payload, draft_to_summary
 from handoff_builder.v2.gui_controller import V2RunnerController
 from handoff_builder.v2.hyperframes_lab import HyperFramesAdapter, HyperFramesLabError
@@ -129,7 +130,7 @@ class App(tk.Tk):
     def __init__(self) -> None:
         self.acceptance_config = load_packaged_acceptance_config()
         super().__init__()
-        self.title("AI Handoff Builder")
+        self.title(f"{APP_DISPLAY_NAME} - {APP_VERSION}")
         self.geometry("1200x860")
         self.minsize(980, 720)
         self.style = ttk.Style(self)
@@ -257,7 +258,17 @@ class App(tk.Tk):
 
         title_col = ttk.Frame(header, style="App.TFrame")
         title_col.grid(row=0, column=0, sticky="w")
-        ttk.Label(title_col, text="AI Handoff Builder", style="Title.TLabel").pack(anchor="w")
+        ttk.Label(
+            title_col,
+            text=f"{APP_DISPLAY_NAME} - {APP_VERSION}",
+            style="Title.TLabel",
+        ).pack(anchor="w")
+        self.app_version_label = ttk.Label(
+            title_col,
+            text=f"Version: {APP_VERSION}",
+            style="Muted.TLabel",
+        )
+        self.app_version_label.pack(anchor="w", pady=(2, 0))
         ttk.Label(
             title_col,
             text="v1 Prepare Handoff + v2 Local Edit Runner в одном Windows приложении",

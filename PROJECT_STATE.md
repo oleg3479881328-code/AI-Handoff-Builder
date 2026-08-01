@@ -1,5 +1,30 @@
 # Current State
 
+- Date: 2026-08-01
+- Issue #27 version visibility update:
+  - single source: `handoff_builder/version.py`
+  - human-readable version: `V0.1.0`
+  - packaged filename: `V0.1.0_AI_Handoff_Builder.exe`
+  - window title: `AI Handoff Builder - V0.1.0`
+  - stable visible header label: `Version: V0.1.0`
+  - source-level UI regression and packaged screenshot evidence passed
+  - latest packaged SHA-256: `057A32663C38FB6D17CDDFAFDAAD84045D498F911BD3D631B4D4630FB064D19C`
+  - screenshot evidence: `tmp_version_ui.png`
+
+- Date: 2026-07-31
+- Direct JSON local workspace recovery status:
+  - standalone `Edit Plan JSON` import no longer falls back to an unrelated old workspace just because the same `project_id` appears once in `%LOCALAPPDATA%\\AI Handoff Builder\\project_registry.json`
+  - for direct JSON import, the app now prefers:
+    - exact saved handoff identity match
+    - then the local folder where the selected JSON actually lies
+  - if that local JSON folder already contains:
+    - `analysis/handoff_index.json`
+    the app now initializes `project.json` / `project.sqlite` there automatically and reuses that folder as the project workspace
+  - this restores the owner expectation that the project is created/opened next to the selected `deep` JSON when the handoff folder itself is the correct local project root
+  - focused validation on Friday, July 31, 2026:
+    - `python -m pytest -q tests\test_v2_one_json_workflow.py tests\test_v2_gui_controller.py` -> `13 passed in 8.22s`
+    - `python -m py_compile handoff_builder\v2\project_registry.py handoff_builder\v2\services\import_service.py app.py` -> success
+
 - Date: 2026-07-31
 - Self-describing first-try MLT status:
   - every new analysis handoff now writes mandatory:

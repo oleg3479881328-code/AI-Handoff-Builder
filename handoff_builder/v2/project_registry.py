@@ -97,6 +97,7 @@ class ProjectRegistryStore:
         handoff_id: str,
         handoff_sha256: str | None = None,
         handoff_content_hash: str | None = None,
+        allow_project_id_fallback: bool = True,
     ) -> Path | None:
         payload = self.load()
         exact = [
@@ -111,6 +112,8 @@ class ProjectRegistryStore:
         ]
         if exact:
             return exact[-1].resolve()
+        if not allow_project_id_fallback:
+            return None
         project_only = [
             Path(entry["project_root"])
             for entry in payload["projects"]
