@@ -1,4 +1,5 @@
 from .import_service import import_package_into_workspace, import_plan_into_workspace
+from .master_package_service import prepare_master_package
 from .patch_service import apply_patch_in_workspace
 from .query_service import (
     list_plans,
@@ -15,6 +16,7 @@ from .shotcut_service import (
     open_shotcut_project,
     render_shotcut_job,
 )
+from .transcript_service import create_final_analysis_handoff, import_gemini_transcript
 from .voice_service import (
     voice_delegated_technical_approval,
     list_voice_jobs,
@@ -41,8 +43,11 @@ __all__ = [
     "list_render_jobs",
     "render_job",
     "render_next_pending_job",
+    "prepare_master_package",
     "build_editable_shotcut_project",
+    "create_final_analysis_handoff",
     "describe_shotcut_runtime",
+    "import_gemini_transcript",
     "open_shotcut_project",
     "render_shotcut_job",
     "request_cancel_render_job",

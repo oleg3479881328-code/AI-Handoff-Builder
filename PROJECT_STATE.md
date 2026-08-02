@@ -1,5 +1,19 @@
 # Current State
 
+- Date: 2026-08-02
+- Issue #28 master-audio transcript workflow:
+  - `Prepare Handoff (v1)` is being extended toward:
+    - `Prepare Master Package`
+    - `MASTER_AUDIO.mp3`
+    - Gemini transcript import
+    - validated final `ANALYSIS_HANDOFF.zip`
+  - new repository service layer added:
+    - `handoff_builder/v2/services/master_package_service.py`
+    - `handoff_builder/v2/services/transcript_service.py`
+  - new schema added:
+    - `schemas/master_audio_transcript/1.0.json`
+  - repository-owned handoff templates now describe the validated transcript-first final handoff instead of the old standalone-JSON-first assumption
+
 - Date: 2026-08-01
 - Issue #27 version visibility update:
   - single source: `handoff_builder/version.py`

@@ -1,5 +1,27 @@
 # Shotcut MCP Backend Adapter
 
+Date: 2026-08-02
+Issues: `#25`, `#27`, `#28`
+
+## Issue #28 Extension - MASTER_AUDIO transcript workflow
+
+The same repository-owned Shotcut boundary is now reused for the new owner workflow in Issue `#28`:
+
+`Prepare Master Package -> MASTER_AUDIO.mp3 -> Gemini transcript import -> validated final ANALYSIS_HANDOFF.zip`
+
+New owner-facing expectations:
+
+- no final `ANALYSIS_HANDOFF.zip` before transcript import succeeds
+- no mandatory master MP4 by default
+- the canonical transcript source is the generated master MP3, not uploaded video
+- the editable master `.mlt` remains a local project artifact the owner can open in Shotcut
+
+Repository additions for this workflow include:
+
+- `handoff_builder/v2/services/master_package_service.py`
+- `handoff_builder/v2/services/transcript_service.py`
+- `schemas/master_audio_transcript/1.0.json`
+
 Date: 2026-07-29
 Issues: `#25`, `#27`
 

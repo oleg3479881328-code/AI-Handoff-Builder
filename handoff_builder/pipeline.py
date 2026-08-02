@@ -14,7 +14,7 @@ from PIL import Image, ImageOps
 from .contact_sheets import build_contact_sheet, paginate_contact_sheets
 from .ffmpeg_tools import FFmpegTools
 from .metadata import AssetMetadataBuilder, METADATA_SCHEMA_VERSION
-from .models import AssetRecord, BuildResult, BuilderConfig, SceneRecord
+from .models import AssetRecord, BuildResult, BuilderConfig, MasterPackageResult, SceneRecord
 from .utils import (
     file_sha256,
     extract_supported_media_from_zip,
@@ -30,6 +30,8 @@ from .utils import (
 from .v2.common import stable_v2_id
 from .v2.packages.guards import compute_content_hash
 from .v2.project_registry import ProjectRegistryStore, record_local_handoff
+from .v2.services.master_package_service import prepare_master_package as prepare_master_package_service
+from .v2.shotcut_settings import ShotcutSettingsStore
 from .v2.workspace import init_project_workspace
 
 
@@ -383,7 +385,7 @@ class HandoffBuilder:
             return []
         return self._process_video(source, asset, package_root)
 
-    def build(self, inputs: list[Path]) -> BuildResult:
+    def build(self, inputs: list[Path]) -> BuildResult | MasterPackageResult:
         if not inputs:
             raise ValueError("No input files or folders were selected.")
 
@@ -663,6 +665,22 @@ class HandoffBuilder:
                 and not metadata_hard_failures
             ),
         }
+
+        if self.config.prepare_master_only:
+            if project_root is None:
+                raise ValueError("prepare_master_only requires a project-root workspace.")
+            self.progress(0.98, "Preparing master package...")
+            master_result = prepare_master_package_service(
+                project_root=project_root,
+                project_id=project_id,
+                project_name=self.config.project_name,
+                assets=assets,
+                metadata_records=metadata_result.normalized_records,
+                ffmpeg_tools=self.ffmpeg,
+                shotcut_settings=ShotcutSettingsStore().load(),
+            )
+            self.progress(1.0, f"Master package ready: {master_result.master_package_dir.name}")
+            return master_result
 
         expected_output_filename = f"{self.config.project_name}.json"
         created_at = dt.datetime.now(dt.timezone.utc).isoformat()

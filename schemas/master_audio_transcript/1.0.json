@@ -1,0 +1,36 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://example.local/schemas/master_audio_transcript/1.0.json",
+  "title": "Master Audio Transcript 1.0",
+  "type": "object",
+  "required": ["project_name", "events"],
+  "properties": {
+    "schema_version": { "type": "string" },
+    "document_type": { "type": "string" },
+    "project_name": { "type": "string", "minLength": 1 },
+    "events": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": ["start_time", "end_time", "event_type"],
+        "properties": {
+          "start_time": { "type": "string", "pattern": "^\\d{2}:\\d{2}:\\d{2}\\.\\d{3}$" },
+          "end_time": { "type": "string", "pattern": "^\\d{2}:\\d{2}:\\d{2}\\.\\d{3}$" },
+          "event_type": { "type": "string", "minLength": 1 },
+          "speaker": {},
+          "original_text": {},
+          "normalized_text": {},
+          "description": {},
+          "emotion": {},
+          "confidence": {},
+          "intensity": {},
+          "foreground_or_background": {},
+          "possible_hook": {},
+          "possible_edit_use": {}
+        },
+        "additionalProperties": true
+      }
+    }
+  },
+  "additionalProperties": true
+}
