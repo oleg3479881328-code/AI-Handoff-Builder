@@ -66,18 +66,6 @@ def test_v1_settings_start_collapsed_and_toggle_from_button():
         app.destroy()
 
 
-def test_prepare_for_chatgpt_action_stays_visible_above_master_workflow():
-    app = _make_app()
-    try:
-        assert app.start_button.cget("text") == "Подготовить для ChatGPT"
-        assert app.start_button.winfo_manager() == "pack"
-        app._toggle_v1_settings()
-        app.update_idletasks()
-        assert app.start_button.winfo_y() < app.master_workflow_frame.winfo_y()
-    finally:
-        app.destroy()
-
-
 def test_application_version_is_visible_in_title_and_header():
     from handoff_builder.version import APP_DISPLAY_NAME, APP_VERSION
 

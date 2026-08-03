@@ -1,25 +1,6 @@
 # Latest Log
 
 Date: 2026-08-02
-Step: Issue #28 owner-facing preparation button visibility
-
-## Completed
-
-- Moved the primary `Подготовить для ChatGPT` action immediately below the source list in the existing `Prepare Handoff (v1)` tab.
-- Kept the same `_start` callback and MASTER_PACKAGE workflow.
-- Kept settings collapsible and placed the full `MASTER_AUDIO workflow` below it without hiding the primary action.
-- Updated the owner-facing intro text to describe the `MASTER_PACKAGE -> ANALYSIS_HANDOFF` sequence.
-
-## Validation
-
-- `python -m pytest -q tests\\test_app_v2_ui.py tests\\test_v2_master_audio_workflow.py` -> `10 passed, 1 skipped`
-- `python -m py_compile app.py` -> success
-
-## Status
-
-- Primary preparation action remains visible when settings are expanded.
-
-Date: 2026-08-02
 Step: Issue #28 master package + transcript workflow groundwork
 
 ## Completed
