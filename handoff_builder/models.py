@@ -26,7 +26,6 @@ class BuilderConfig:
     max_segments_per_video: int = 30
     storyboard_frames: int = 11
     overwrite: bool = False
-    prepare_master_only: bool = False
 
     def __post_init__(self) -> None:
         allowed = {"exact", "rounded", "venue_label_only", "excluded"}
@@ -116,57 +115,3 @@ class BuildResult:
     handoff_sha256: str | None = None
     handoff_content_hash: str | None = None
     canceled: bool = False
-
-
-@dataclass(slots=True)
-class MasterPackageResult:
-    project_root: Path
-    project_id: str
-    project_name: str
-    master_package_dir: Path
-    master_mlt_path: Path
-    master_audio_path: Path
-    timeline_map_path: Path
-    edit_plan_json_path: Path
-    edit_plan_csv_path: Path
-    prompt_path: Path
-    transcript_import_dir: Path
-    state: str
-    timeline_item_count: int
-    video_count: int
-    photo_count: int
-    master_duration_ms: int
-    mp3_duration_ms: int
-    duration_delta_ms: int
-    transcript_event_count: int = 0
-    transcript_validation_errors: list[str] = field(default_factory=list)
-    final_zip_path: Path | None = None
-    visual_master_path: Path | None = None
-
-
-@dataclass(slots=True)
-class TranscriptImportResult:
-    project_root: Path
-    project_id: str
-    project_name: str
-    transcript_original_path: Path | None
-    transcript_normalized_path: Path | None
-    state: str
-    errors: list[str]
-    event_count: int
-
-
-@dataclass(slots=True)
-class FinalHandoffResult:
-    project_root: Path
-    project_id: str
-    project_name: str
-    archive_path: Path
-    sha256: str
-    validation_report_path: Path
-    state: str
-    timeline_item_count: int
-    transcript_event_count: int
-    master_duration_ms: int
-    mp3_duration_ms: int
-    duration_delta_ms: int

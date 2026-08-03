@@ -15,7 +15,7 @@ from tkinter import filedialog, ttk
 
 from PIL import Image, ImageTk
 
-from handoff_builder.models import BuildResult, BuilderConfig, FinalHandoffResult, MasterPackageResult, TranscriptImportResult
+from handoff_builder.models import BuildResult, BuilderConfig
 from handoff_builder.pipeline import HandoffBuilder
 from handoff_builder.theme import ThemePalette, ThemeSettingsStore, get_theme_palette
 from handoff_builder.version import APP_DISPLAY_NAME, APP_VERSION
@@ -36,10 +36,6 @@ from handoff_builder.v2.services.shotcut_service import (
 )
 from handoff_builder.v2.shotcut_settings import ShotcutAppSettings, ShotcutSettingsStore
 from handoff_builder.v2.services.import_service import resolve_workspace_for_package, resolve_workspace_for_plan
-from handoff_builder.v2.project_registry import ProjectRegistryStore
-from handoff_builder.v2.services.master_package_service import prepare_master_package
-from handoff_builder.v2.services.transcript_service import create_final_analysis_handoff, import_gemini_transcript
-from handoff_builder.v2.workspace import load_project_workflow_state, save_project_workflow_state
 from handoff_builder.utils import slugify
 from handoff_builder.v2.services import (
     list_voice_jobs,
@@ -165,27 +161,11 @@ class App(tk.Tk):
         self.events: queue.Queue[tuple[str, object]] = queue.Queue()
         self.last_output: Path | None = None
         self.last_result: BuildResult | None = None
-        self.last_master_result: MasterPackageResult | None = None
-        self.last_transcript_result: TranscriptImportResult | None = None
-        self.last_final_handoff_result: FinalHandoffResult | None = None
-        self.current_issue28_project_root: Path | None = None
         self.last_failed_sources: list[Path] = []
         self.active_builder: HandoffBuilder | None = None
-        self.active_master_builder: HandoffBuilder | None = None
         self.worker_count = tk.IntVar(value=2)
         self.retry_only_failed = False
         self.v1_settings_expanded = False
-        self.master_workflow_state = tk.StringVar(value="SOURCE_READY")
-        self.master_duration_text = tk.StringVar(value="-")
-        self.master_mp3_duration_text = tk.StringVar(value="-")
-        self.master_duration_delta_text = tk.StringVar(value="-")
-        self.master_timeline_item_count_text = tk.StringVar(value="-")
-        self.master_video_count_text = tk.StringVar(value="-")
-        self.master_photo_count_text = tk.StringVar(value="-")
-        self.master_transcript_event_count_text = tk.StringVar(value="-")
-        self.master_transcript_errors_text = tk.StringVar(value="-")
-        self.master_final_zip_text = tk.StringVar(value="-")
-        self.create_visual_master = tk.BooleanVar(value=False)
 
         self.v2_controller = V2RunnerController(self.events)
         self.v2_workspace_path = tk.StringVar(value=str(Path.home() / "Desktop" / "AI Handoff Workspace"))
@@ -263,7 +243,6 @@ class App(tk.Tk):
             )
 
         self._build_ui()
-        self._load_issue28_state_from_latest_project()
         self._apply_theme()
         self.after(120, self._poll_events)
         if self.acceptance_config is not None:
@@ -420,114 +399,16 @@ class App(tk.Tk):
         ttk.Label(outer, textvariable=self.status_text).pack(anchor="w", pady=(6, 6))
         ttk.Label(outer, textvariable=self.metadata_status_text).pack(anchor="w", pady=(0, 6))
 
-        workflow_frame = ttk.LabelFrame(outer, text="MASTER_AUDIO workflow", padding=10)
-        workflow_frame.pack(fill="x", pady=(0, 10))
-        workflow_frame.columnconfigure(1, weight=1)
-        ttk.Label(workflow_frame, text="Current state:").grid(row=0, column=0, sticky="w")
-        ttk.Label(workflow_frame, textvariable=self.master_workflow_state).grid(row=0, column=1, sticky="w")
-        ttk.Label(workflow_frame, text="Master duration:").grid(row=1, column=0, sticky="w", pady=(6, 0))
-        ttk.Label(workflow_frame, textvariable=self.master_duration_text).grid(row=1, column=1, sticky="w", pady=(6, 0))
-        ttk.Label(workflow_frame, text="MP3 duration:").grid(row=2, column=0, sticky="w", pady=(6, 0))
-        ttk.Label(workflow_frame, textvariable=self.master_mp3_duration_text).grid(row=2, column=1, sticky="w", pady=(6, 0))
-        ttk.Label(workflow_frame, text="Duration delta:").grid(row=3, column=0, sticky="w", pady=(6, 0))
-        ttk.Label(workflow_frame, textvariable=self.master_duration_delta_text).grid(row=3, column=1, sticky="w", pady=(6, 0))
-        ttk.Label(workflow_frame, text="Timeline items:").grid(row=4, column=0, sticky="w", pady=(6, 0))
-        ttk.Label(workflow_frame, textvariable=self.master_timeline_item_count_text).grid(row=4, column=1, sticky="w", pady=(6, 0))
-        ttk.Label(workflow_frame, text="Videos / photos:").grid(row=5, column=0, sticky="w", pady=(6, 0))
-        ttk.Label(
-            workflow_frame,
-            textvariable=tk.StringVar(value=""),
-        )
-        self.master_counts_label = ttk.Label(
-            workflow_frame,
-            text="",
-        )
-        self.master_counts_label.grid(row=5, column=1, sticky="w", pady=(6, 0))
-        ttk.Label(workflow_frame, text="Transcript events:").grid(row=6, column=0, sticky="w", pady=(6, 0))
-        ttk.Label(workflow_frame, textvariable=self.master_transcript_event_count_text).grid(row=6, column=1, sticky="w", pady=(6, 0))
-        ttk.Label(workflow_frame, text="Transcript validation errors:").grid(row=7, column=0, sticky="nw", pady=(6, 0))
-        ttk.Label(workflow_frame, textvariable=self.master_transcript_errors_text, wraplength=760, justify="left").grid(
-            row=7, column=1, sticky="w", pady=(6, 0)
-        )
-        ttk.Label(workflow_frame, text="Final ZIP path:").grid(row=8, column=0, sticky="nw", pady=(6, 0))
-        ttk.Label(workflow_frame, textvariable=self.master_final_zip_text, wraplength=760, justify="left").grid(
-            row=8, column=1, sticky="w", pady=(6, 0)
-        )
-        ttk.Checkbutton(
-            workflow_frame,
-            text="Create visual master MP4",
-            variable=self.create_visual_master,
-        ).grid(row=9, column=1, sticky="w", pady=(10, 0))
-
         actions = ttk.Frame(outer)
         actions.pack(fill="x")
-        self.start_button = ttk.Button(actions, text="Prepare Master Package", command=self._start, style="Accent.TButton")
+        self.start_button = ttk.Button(actions, text="ПОДГОТОВИТЬ ДЛЯ CHATGPT", command=self._start, style="Accent.TButton")
         self.start_button.pack(side="left")
-        self.import_transcript_button = ttk.Button(
-            actions,
-            text="Import Gemini Transcript JSON",
-            command=self._import_gemini_transcript_json,
-            state="disabled",
-            style="Secondary.TButton",
-        )
-        self.import_transcript_button.pack(side="left", padx=(8, 0))
-        self.validate_transcript_button = ttk.Button(
-            actions,
-            text="Validate Transcript",
-            command=self._validate_current_transcript,
-            state="disabled",
-            style="Secondary.TButton",
-        )
-        self.validate_transcript_button.pack(side="left", padx=(8, 0))
-        self.create_final_handoff_button = ttk.Button(
-            actions,
-            text="Create Final ANALYSIS_HANDOFF.zip",
-            command=self._create_final_analysis_handoff,
-            state="disabled",
-            style="Secondary.TButton",
-        )
-        self.create_final_handoff_button.pack(side="left", padx=(8, 0))
         self.cancel_button = ttk.Button(actions, text="Отменить", command=self._cancel, state="disabled", style="Secondary.TButton")
         self.cancel_button.pack(side="left", padx=(8, 0))
         self.retry_button = ttk.Button(actions, text="Повторить failed", command=self._retry_failed, state="disabled", style="Secondary.TButton")
         self.retry_button.pack(side="left", padx=(8, 0))
-        self.open_button = ttk.Button(actions, text="Open Final ZIP Folder", command=self._open_result, state="disabled", style="Secondary.TButton")
+        self.open_button = ttk.Button(actions, text="Открыть результат", command=self._open_result, state="disabled", style="Secondary.TButton")
         self.open_button.pack(side="left", padx=8)
-
-        master_actions = ttk.Frame(outer, style="App.TFrame")
-        master_actions.pack(fill="x", pady=(8, 0))
-        self.open_master_package_button = ttk.Button(
-            master_actions,
-            text="Open Master Package Folder",
-            command=self._open_master_package_folder,
-            state="disabled",
-            style="Secondary.TButton",
-        )
-        self.open_master_package_button.pack(side="left")
-        self.open_master_project_button = ttk.Button(
-            master_actions,
-            text="Open Master Project in Shotcut",
-            command=self._open_master_project_in_shotcut,
-            state="disabled",
-            style="Secondary.TButton",
-        )
-        self.open_master_project_button.pack(side="left", padx=(8, 0))
-        self.open_mp3_folder_button = ttk.Button(
-            master_actions,
-            text="Open MP3 Folder",
-            command=self._open_master_package_folder,
-            state="disabled",
-            style="Secondary.TButton",
-        )
-        self.open_mp3_folder_button.pack(side="left", padx=(8, 0))
-        self.copy_prompt_button = ttk.Button(
-            master_actions,
-            text="Copy Gemini Prompt",
-            command=self._copy_gemini_prompt,
-            state="disabled",
-            style="Secondary.TButton",
-        )
-        self.copy_prompt_button.pack(side="left", padx=(8, 0))
 
         self.log = tk.Text(outer, height=9, wrap="word", state="disabled")
         self.log.pack(fill="both", expand=False, pady=(10, 0))
@@ -1338,59 +1219,6 @@ class App(tk.Tk):
         self.log.see("end")
         self.log.configure(state="disabled")
 
-    def _load_issue28_state_from_latest_project(self) -> None:
-        latest_root = ProjectRegistryStore().latest_project_root()
-        if latest_root is None:
-            self._update_master_workflow_widgets()
-            return
-        try:
-            workflow = load_project_workflow_state(latest_root)
-        except Exception:
-            workflow = {}
-        if workflow:
-            self.current_issue28_project_root = latest_root
-            self._apply_issue28_state_payload(workflow)
-        self._update_master_workflow_widgets()
-
-    def _save_issue28_state(self, payload: dict[str, object]) -> None:
-        if self.current_issue28_project_root is None:
-            return
-        save_project_workflow_state(self.current_issue28_project_root, payload)
-
-    def _apply_issue28_state_payload(self, payload: dict[str, object]) -> None:
-        state = str(payload.get("state") or "SOURCE_READY")
-        self.master_workflow_state.set(state)
-        self.master_duration_text.set(str(payload.get("master_duration") or "-"))
-        self.master_mp3_duration_text.set(str(payload.get("mp3_duration") or "-"))
-        self.master_duration_delta_text.set(str(payload.get("duration_delta") or "-"))
-        self.master_timeline_item_count_text.set(str(payload.get("timeline_item_count") or "-"))
-        self.master_video_count_text.set(str(payload.get("video_count") or "-"))
-        self.master_photo_count_text.set(str(payload.get("photo_count") or "-"))
-        self.master_transcript_event_count_text.set(str(payload.get("transcript_event_count") or "-"))
-        errors = payload.get("transcript_validation_errors")
-        if isinstance(errors, list) and errors:
-            self.master_transcript_errors_text.set("; ".join(str(item) for item in errors))
-        else:
-            self.master_transcript_errors_text.set("-")
-        self.master_final_zip_text.set(str(payload.get("final_zip_path") or "-"))
-        self.master_counts_label.configure(
-            text=f"{self.master_video_count_text.get()} videos / {self.master_photo_count_text.get()} photos"
-        )
-
-    def _update_master_workflow_widgets(self) -> None:
-        state = self.master_workflow_state.get()
-        master_ready = state in {"WAITING_FOR_TRANSCRIPT", "TRANSCRIPT_INVALID", "TRANSCRIPT_READY", "HANDOFF_READY"}
-        transcript_ready = state == "TRANSCRIPT_READY"
-        handoff_ready = state == "HANDOFF_READY"
-        self.open_master_package_button.configure(state="normal" if master_ready else "disabled")
-        self.open_master_project_button.configure(state="normal" if master_ready else "disabled")
-        self.open_mp3_folder_button.configure(state="normal" if master_ready else "disabled")
-        self.copy_prompt_button.configure(state="normal" if master_ready else "disabled")
-        self.import_transcript_button.configure(state="normal" if master_ready else "disabled")
-        self.validate_transcript_button.configure(state="normal" if state in {"TRANSCRIPT_INVALID", "TRANSCRIPT_READY"} else "disabled")
-        self.create_final_handoff_button.configure(state="normal" if transcript_ready else "disabled")
-        self.open_button.configure(state="normal" if handoff_ready else "disabled")
-
     def _start(self) -> None:
         self.retry_only_failed = False
         self._start_with_sources(self.sources.copy())
@@ -1416,7 +1244,6 @@ class App(tk.Tk):
         self.status_text.set("Запуск...")
         self.last_output = None
         self.last_result = None
-        self.last_master_result = None
 
         thread = threading.Thread(target=self._run_builder, args=(selected_sources,), daemon=True)
         thread.start()
@@ -1439,7 +1266,6 @@ class App(tk.Tk):
                 include_video_proxies=self.include_proxies.get(),
                 gps_export_mode=self.gps_export_mode.get(),
                 worker_count=max(1, min(2, int(self.worker_count.get()))),
-                prepare_master_only=True,
             )
             builder = HandoffBuilder(
                 config,
@@ -1454,87 +1280,6 @@ class App(tk.Tk):
             self.events.put(("error", str(exc)))
         finally:
             self.active_builder = None
-
-    def _import_gemini_transcript_json(self) -> None:
-        if self.current_issue28_project_root is None:
-            self._show_warning("Нет master package", "Сначала выполните Prepare Master Package.")
-            return
-        value = filedialog.askopenfilename(title="Import Gemini Transcript JSON", filetypes=[("JSON", "*.json")])
-        if not value:
-            return
-        self.progress_value.set(0)
-        self.status_text.set("Импорт Gemini transcript...")
-        threading.Thread(target=self._import_gemini_transcript_worker, args=(Path(value),), daemon=True).start()
-
-    def _import_gemini_transcript_worker(self, path: Path) -> None:
-        try:
-            project_root = self.current_issue28_project_root
-            assert project_root is not None
-            project_name = project_root.name
-            payload = import_gemini_transcript(
-                project_root=project_root,
-                project_id=slugify(project_name, fallback="project"),
-                project_name=project_name,
-                transcript_json_path=path,
-            )
-            self.events.put(("transcript_done", payload))
-        except Exception as exc:
-            self.events.put(("error", str(exc)))
-
-    def _validate_current_transcript(self) -> None:
-        if self.last_transcript_result is None:
-            self._show_warning("Нет transcript", "Сначала импортируйте transcript JSON.")
-            return
-        if self.last_transcript_result.errors:
-            self._show_warning("Transcript invalid", "\n".join(self.last_transcript_result.errors))
-            return
-        self._show_info("Transcript valid", f"Events: {self.last_transcript_result.event_count}")
-
-    def _create_final_analysis_handoff(self) -> None:
-        if self.current_issue28_project_root is None:
-            self._show_warning("Нет project", "Сначала выполните Prepare Master Package.")
-            return
-        self.progress_value.set(0)
-        self.status_text.set("Создание final ANALYSIS_HANDOFF.zip...")
-        threading.Thread(target=self._create_final_analysis_handoff_worker, daemon=True).start()
-
-    def _create_final_analysis_handoff_worker(self) -> None:
-        try:
-            project_root = self.current_issue28_project_root
-            assert project_root is not None
-            project_name = project_root.name
-            ffmpeg_tools = FFmpegTools(project_root=_app_resource_root())
-            payload = create_final_analysis_handoff(
-                project_root=project_root,
-                project_id=slugify(project_name, fallback="project"),
-                project_name=project_name,
-                ffmpeg_tools=ffmpeg_tools,
-            )
-            self.events.put(("final_handoff_done", payload))
-        except Exception as exc:
-            self.events.put(("error", str(exc)))
-
-    def _open_master_package_folder(self) -> None:
-        if self.last_master_result is not None:
-            self._open_path(self.last_master_result.master_package_dir)
-            return
-        if self.current_issue28_project_root is not None:
-            self._open_path(self.current_issue28_project_root / "handoffs")
-
-    def _open_master_project_in_shotcut(self) -> None:
-        if self.last_master_result is None:
-            self._show_warning("Нет MLT", "Сначала выполните Prepare Master Package.")
-            return
-        self._open_path(self.last_master_result.master_mlt_path)
-
-    def _copy_gemini_prompt(self) -> None:
-        if self.last_master_result is None:
-            self._show_warning("Нет prompt", "Сначала выполните Prepare Master Package.")
-            return
-        prompt_text = self.last_master_result.prompt_path.read_text(encoding="utf-8")
-        self.clipboard_clear()
-        self.clipboard_append(prompt_text)
-        self._show_info("Prompt copied", "Gemini prompt copied to clipboard.")
 
     def _cancel(self) -> None:
         if self.active_builder:
@@ -2772,79 +2517,48 @@ class App(tk.Tk):
                     self._append_log(str(payload))
                 elif kind == "done":
                     result = payload
-                    if isinstance(result, MasterPackageResult):
-                        self.last_master_result = result
-                        self.current_issue28_project_root = result.project_root
-                        self.start_button.configure(state="normal")
-                        self.cancel_button.configure(state="disabled")
-                        self.retry_button.configure(state="disabled")
-                        self.status_text.set(f"Master package ready: {result.master_package_dir.name}")
-                        self.metadata_status_text.set("ExifTool: see analysis metadata")
-                        state_payload = {
-                            "state": result.state,
-                            "project_root": str(result.project_root),
-                            "master_package_dir": str(result.master_package_dir),
-                            "master_mlt_path": str(result.master_mlt_path),
-                            "master_audio_path": str(result.master_audio_path),
-                            "prompt_path": str(result.prompt_path),
-                            "timeline_item_count": result.timeline_item_count,
-                            "video_count": result.video_count,
-                            "photo_count": result.photo_count,
-                            "master_duration": f"{result.master_duration_ms} ms",
-                            "mp3_duration": f"{result.mp3_duration_ms} ms",
-                            "duration_delta": f"{result.duration_delta_ms} ms",
-                            "transcript_event_count": result.transcript_event_count,
-                            "transcript_validation_errors": result.transcript_validation_errors,
-                            "final_zip_path": str(result.final_zip_path) if result.final_zip_path else None,
-                        }
-                        self._apply_issue28_state_payload(state_payload)
-                        self._save_issue28_state(state_payload)
-                        self._update_master_workflow_widgets()
+                    assert isinstance(result, BuildResult)
+                    self.last_result = result
+                    self.last_output = result.archive_path
+                    if result.project_root is not None:
+                        self.v2_workspace_path.set(str(result.project_root))
+                        self.v2_project_id.set(result.project_root.name)
+                        self.v2_status_text.set("Project root подготовлен. Можно сразу выбрать standalone Edit Plan JSON.")
+                    self.last_failed_sources = [Path(value) for value in result.failed_sources if value]
+                    self.start_button.configure(state="normal")
+                    self.cancel_button.configure(state="disabled")
+                    self.retry_button.configure(state="normal" if self.last_failed_sources else "disabled")
+                    self.open_button.configure(state="normal")
+                    coverage_ok = bool(result.validation.get("coverage_ok"))
+                    exiftool_status = (
+                        result.validation.get("metadata_tool_status", {})
+                        .get("exiftool", {})
+                        .get("status", "unknown")
+                    )
+                    self.metadata_status_text.set(f"ExifTool: {exiftool_status}")
+                    if coverage_ok:
+                        self.status_text.set(f"Готово: {self.last_output.name}")
                         if not self.acceptance_mode_enabled:
-                            self._show_info("Master package ready", f"Created:\n{result.master_package_dir}")
+                            self._show_info("Готово", f"Создан файл:\n{self.last_output}")
                     else:
-                        assert isinstance(result, BuildResult)
-                        self.last_result = result
-                        self.last_output = result.archive_path
-                        if result.project_root is not None:
-                            self.v2_workspace_path.set(str(result.project_root))
-                            self.v2_project_id.set(result.project_root.name)
-                            self.v2_status_text.set("Project root подготовлен. Можно сразу выбрать standalone Edit Plan JSON.")
-                        self.last_failed_sources = [Path(value) for value in result.failed_sources if value]
-                        self.start_button.configure(state="normal")
-                        self.cancel_button.configure(state="disabled")
-                        self.retry_button.configure(state="normal" if self.last_failed_sources else "disabled")
-                        self.open_button.configure(state="normal")
-                        coverage_ok = bool(result.validation.get("coverage_ok"))
-                        exiftool_status = (
-                            result.validation.get("metadata_tool_status", {})
-                            .get("exiftool", {})
-                            .get("status", "unknown")
-                        )
-                        self.metadata_status_text.set(f"ExifTool: {exiftool_status}")
-                        if coverage_ok:
-                            self.status_text.set(f"Готово: {self.last_output.name}")
-                            if not self.acceptance_mode_enabled:
-                                self._show_info("Готово", f"Создан файл:\n{self.last_output}")
-                        else:
-                            self.status_text.set("Завершено с проблемами покрытия")
-                            if not self.acceptance_mode_enabled:
-                                self._show_warning(
-                                    "Проверка покрытия не пройдена",
-                                    f"Архив создан, но coverage_ok=false.\n\n{self.last_output}",
-                                )
+                        self.status_text.set("Завершено с проблемами покрытия")
                         if not self.acceptance_mode_enabled:
-                            self._show_summary(result)
-                        if self.acceptance_mode_enabled:
-                            self.acceptance_project_root = result.project_root
-                            self._acceptance_set_banner(f"handoff ready: {self.last_output.name}")
-                            self._acceptance_write_state(
-                                "handoff_ready",
-                                archive_path=str(result.archive_path),
-                                project_root=str(result.project_root) if result.project_root else None,
+                            self._show_warning(
+                                "Проверка покрытия не пройдена",
+                                f"Архив создан, но coverage_ok=false.\n\n{self.last_output}",
                             )
-                            self.acceptance_wait_deadline = time.time() + 120
-                            self.after(250, self._acceptance_wait_for_plan_json)
+                    if not self.acceptance_mode_enabled:
+                        self._show_summary(result)
+                    if self.acceptance_mode_enabled:
+                        self.acceptance_project_root = result.project_root
+                        self._acceptance_set_banner(f"handoff ready: {self.last_output.name}")
+                        self._acceptance_write_state(
+                            "handoff_ready",
+                            archive_path=str(result.archive_path),
+                            project_root=str(result.project_root) if result.project_root else None,
+                        )
+                        self.acceptance_wait_deadline = time.time() + 120
+                        self.after(250, self._acceptance_wait_for_plan_json)
                 elif kind == "error":
                     self.start_button.configure(state="normal")
                     self.cancel_button.configure(state="disabled")
@@ -2856,47 +2570,6 @@ class App(tk.Tk):
                         self._acceptance_mark_failed("v1_error", str(payload))
                     else:
                         self._show_error("Ошибка", str(payload))
-                elif kind == "transcript_done":
-                    result = payload
-                    assert isinstance(result, TranscriptImportResult)
-                    self.last_transcript_result = result
-                    state_payload = {
-                        "state": result.state,
-                        "project_root": str(result.project_root),
-                        "transcript_event_count": result.event_count,
-                        "transcript_validation_errors": result.errors,
-                        "final_zip_path": self.master_final_zip_text.get() if self.master_final_zip_text.get() != "-" else None,
-                    }
-                    self._apply_issue28_state_payload(state_payload)
-                    self._save_issue28_state(state_payload)
-                    self._update_master_workflow_widgets()
-                    if result.errors:
-                        self.status_text.set("Transcript invalid")
-                        self._show_warning("Transcript invalid", "\n".join(result.errors))
-                    else:
-                        self.status_text.set("Transcript ready")
-                        self._show_info("Transcript ready", f"Events: {result.event_count}")
-                elif kind == "final_handoff_done":
-                    result = payload
-                    assert isinstance(result, FinalHandoffResult)
-                    self.last_final_handoff_result = result
-                    self.last_output = result.archive_path
-                    state_payload = {
-                        "state": result.state,
-                        "project_root": str(result.project_root),
-                        "master_duration": f"{result.master_duration_ms} ms",
-                        "mp3_duration": f"{result.mp3_duration_ms} ms",
-                        "duration_delta": f"{result.duration_delta_ms} ms",
-                        "timeline_item_count": result.timeline_item_count,
-                        "transcript_event_count": result.transcript_event_count,
-                        "final_zip_path": str(result.archive_path),
-                    }
-                    self._apply_issue28_state_payload(state_payload)
-                    self._save_issue28_state(state_payload)
-                    self._update_master_workflow_widgets()
-                    self.status_text.set(f"Final handoff ready: {result.archive_path.name}")
-                    if not self.acceptance_mode_enabled:
-                        self._show_info("Final handoff ready", f"Created:\n{result.archive_path}")
                 elif kind == "v2_state":
                     self.v2_status_text.set(f"State: {payload}")
                 elif kind in {"workspace_ready", "workspace_refreshed"}:

@@ -1,26 +1,5 @@
 # Latest Log
 
-Date: 2026-08-02
-Step: Issue #28 master package + transcript workflow groundwork
-
-## Completed
-
-- Added the initial repository service layer for the Issue `#28` owner workflow:
-  - `handoff_builder/v2/services/master_package_service.py`
-  - `handoff_builder/v2/services/transcript_service.py`
-- Added workflow-state persistence hooks to the existing local project metadata path:
-  - `handoff_builder/v2/workspace.py`
-- Added the transcript schema scaffold:
-  - `schemas/master_audio_transcript/1.0.json`
-- Updated repository-owned handoff templates so they now describe:
-  - `MLT + MP3 + timeline map -> Gemini transcript import -> validated final ANALYSIS_HANDOFF`
-  instead of claiming the older standalone edit-plan JSON path as the current final owner contract.
-
-## Validation
-
-- `python -m py_compile app.py handoff_builder\pipeline.py handoff_builder\models.py handoff_builder\v2\workspace.py handoff_builder\v2\project_registry.py handoff_builder\v2\services\master_package_service.py handoff_builder\v2\services\transcript_service.py handoff_builder\v2\services\__init__.py` -> success
-- `python -m pytest -q tests\test_app_v2_ui.py tests\test_pipeline.py tests\test_v2_shotcut_service.py` -> `40 passed, 1 skipped in 25.28s`
-
 Date: 2026-08-01
 Step: Issue #27 owner-visible application version
 

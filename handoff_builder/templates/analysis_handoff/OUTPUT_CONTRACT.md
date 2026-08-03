@@ -1,45 +1,77 @@
 # Output Contract
 
-This final handoff is no longer the old “return one standalone JSON edit-plan first” contract.
+> The AI must produce exactly one valid standalone JSON edit plan for Shotcut.
 
-The authoritative local workflow is already completed up to:
+## DIRECT SHOTCUT MLT MODE - NO USER FILE MOVEMENT
 
-`MASTER package -> transcript import -> transcript validation -> final ZIP validation`
+- Status: `{{DIRECT_MLT_MODE_STATUS}}`
+- `{{DIRECT_MLT_MODE_NOTE}}`
+- If the owner explicitly asks for a ready Shotcut project and direct mode is available:
+  - return one `.mlt`, not JSON
+  - use absolute original-media paths from `ASSISTANT_CONTEXT.json`
+  - never substitute proxies when preferred media is `originals`
+  - never tell the owner to move the `.mlt` beside any media folder
+  - never create a physical filename containing literal `%20`
+  - validate every `.mlt` resource against `ASSISTANT_CONTEXT.json.asset_map`
+  - hard-fail when a selected asset has no mapped original path
 
-## What Downstream Analysis May Trust
+## Required Schema Version
 
-- `MASTER/*_MASTER_ALL_MEDIA.mlt`
-- `MASTER/*_MASTER_AUDIO.mp3`
-- `MASTER/*_MASTER_TIMELINE_MAP.json`
-- `MASTER/*_MASTER_EDIT_PLAN.json`
-- `MASTER/*_MASTER_EDIT_PLAN.csv`
-- `MASTER/*_MASTER_AUDIO_TRANSCRIPT_ORIGINAL.json`
-- `MASTER/*_MASTER_AUDIO_TRANSCRIPT.json`
-- `REPORTS/BUILD_VALIDATION_REPORT.json`
+- `edit_plan`: **3.0**
 
-## Shotcut Context
+## Required Output Filename
 
-- the master editable project is a Shotcut `.mlt`
-- the validated timeline map remains the canonical local ordering source
-- the older standalone JSON path belongs to the previous Issue `#27` workflow, not this final package
+- exact filename: `{{EXPECTED_OUTPUT_FILENAME}}`
+- exactly one returned file
+- no ZIP wrapper
+- no copied input media
 
-## What Downstream Analysis Must Not Invent
+## Edit Plan JSON
 
-- local-only people identities
-- scene boundaries not supported by the validated timeline map
-- hook labels when the placeholder map says `pending_ai_analysis`
-- creative decisions that were not derived from the validated transcript/timeline package
+Required top-level fields:
 
-## Transcript Rules
+- `schema_version` = `"3.0"`
+- `document_type` = `"edit_plan"`
+- `project_id` = from `handoff_manifest.json`
+- `project_name` = from `handoff_manifest.json`
+- `handoff_id` = from `handoff_manifest.json`
+- `handoff_content_hash` = `handoff_manifest.json.content_hash`
+- `plan_id` = stable non-empty plan id
+- `plan_version` = integer >= 1
+- `canvas`
+- `timebase`
+- `assets`
+- `visual_items`
+- `audio_items`
+- `text_items`
+- `renderer.primary_renderer` = `"shotcut"`
 
-1. Preserve event ordering.
-2. Preserve overlapping events.
-3. Preserve low-confidence events.
-4. Preserve Gemini text fields without automatic correction.
-5. Use `source_mappings[]` when an event crosses more than one source item.
+## Asset Rules
 
-## Non-Goals
+- `assets` may contain only `asset_id`, `media_type`, and optional `original_name`.
+- `visual_items` must use explicit `track_id`, `timeline_start_frame`, `duration_frames`, `source_in_us`, `source_out_us`, and `source_audio_policy`.
+- Photo items use `source_in_us=0` and `source_out_us=0`.
+- Audio items may reference only already-registered local assets by `audio_id`.
 
-- no required master MP4 by default
-- no required WAV by default
-- no assumption that Gemini processed source video instead of the canonical master MP3
+## Forbidden Content
+
+Do not include:
+
+- local paths or absolute paths
+- original file SHA-256 or size
+- registry records
+- commands, scripts, Python, JavaScript, shell
+- FFmpeg fields or filters
+- MLT/XML
+- remote URLs
+- manifest wrappers
+- ZIP structure instructions
+- returned proxies, previews, photos, video, audio, metadata copies, or any other media files
+
+## Validation Rules
+
+1. Unknown schema versions must hard-fail.
+2. `renderer.primary_renderer` must be exactly `shotcut`.
+3. Only implemented `source_audio_policy` values may pass validation.
+4. Every `asset_id` used in timeline items must appear in `assets`.
+5. The local app will verify `project_id`, `handoff_id`, and `handoff_content_hash` against the saved handoff manifest and local asset registry before creating the `.mlt`.

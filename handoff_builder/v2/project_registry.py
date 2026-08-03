@@ -46,15 +46,6 @@ class ProjectRegistryStore:
         self.path.parent.mkdir(parents=True, exist_ok=True)
         self.path.write_text(json.dumps(payload, ensure_ascii=False, indent=2), encoding="utf-8")
 
-    def latest_project_root(self) -> Path | None:
-        payload = self.load()
-        projects = list(payload.get("projects") or [])
-        if not projects:
-            return None
-        projects.sort(key=lambda item: str(item.get("updated_at") or ""))
-        candidate = Path(str(projects[-1].get("project_root") or "")).expanduser()
-        return candidate.resolve() if candidate.exists() else None
-
     def register_project(
         self,
         *,

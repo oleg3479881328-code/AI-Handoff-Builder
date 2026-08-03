@@ -79,20 +79,3 @@ def init_project_workspace(workspace_dir: Path, project_id: str) -> Path:
 
 def load_project_config(project_root: Path) -> dict:
     return json.loads((project_root / "project.json").read_text(encoding="utf-8"))
-
-
-def load_project_workflow_state(project_root: Path) -> dict:
-    config = load_project_config(project_root.resolve())
-    payload = config.get("issue28_workflow")
-    if not isinstance(payload, dict):
-        return {}
-    return dict(payload)
-
-
-def save_project_workflow_state(project_root: Path, workflow_state: dict) -> dict:
-    resolved_root = project_root.resolve()
-    project_file = resolved_root / "project.json"
-    config = load_project_config(resolved_root)
-    config["issue28_workflow"] = workflow_state
-    project_file.write_text(json.dumps(config, ensure_ascii=False, indent=2), encoding="utf-8")
-    return dict(workflow_state)
