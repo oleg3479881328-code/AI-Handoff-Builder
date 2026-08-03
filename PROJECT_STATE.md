@@ -5,12 +5,7 @@
   - `Подготовить для ChatGPT` is now placed immediately below the source list
   - it remains above the expandable settings and `MASTER_AUDIO workflow` blocks
   - opening settings no longer pushes the primary preparation action below the viewport
-  - empty source list, MASTER_AUDIO metrics, and log are now collapsed by default
-  - owner-facing path starts with compact buttons and reveals details only on demand
-  - focused UI/workflow validation: `11 passed, 1 skipped`
-  - rebuilt executable:
-    - `dist\V0.1.0_AI_Handoff_Builder\V0.1.0_AI_Handoff_Builder.exe`
-    - SHA-256: `2A498FC2A42C21475D1AECE92D614FE26EB690C0C1E1B41E93F10B3E6BB5E286`
+  - focused UI/workflow validation: `10 passed, 1 skipped`
 - Issue #28 master-audio transcript workflow:
   - `Prepare Handoff (v1)` is being extended toward:
     - `Prepare Master Package`
