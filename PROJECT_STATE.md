@@ -1,6 +1,11 @@
 # Current State
 
 - Date: 2026-08-02
+- Issue #28 owner-facing action visibility correction:
+  - `Подготовить для ChatGPT` is now placed immediately below the source list
+  - it remains above the expandable settings and `MASTER_AUDIO workflow` blocks
+  - opening settings no longer pushes the primary preparation action below the viewport
+  - focused UI/workflow validation: `10 passed, 1 skipped`
 - Issue #28 master-audio transcript workflow:
   - `Prepare Handoff (v1)` is being extended toward:
     - `Prepare Master Package`

@@ -354,7 +354,7 @@ class App(tk.Tk):
 
         ttk.Label(
             outer,
-            text="ZIP / папка / файлы → один проверенный <project_name>_ANALYSIS_HANDOFF.zip",
+            text="ZIP / папка / файлы → MASTER_PACKAGE → проверенный <project_name>_ANALYSIS_HANDOFF.zip",
         ).pack(anchor="w", pady=(0, 12))
 
         source_frame = ttk.LabelFrame(outer, text="Исходные материалы", padding=10)
@@ -370,6 +370,21 @@ class App(tk.Tk):
         self.source_list = tk.Listbox(source_frame, height=10)
         self.source_list.pack(fill="both", expand=True, pady=(10, 0))
         self._register_listbox(self.source_list)
+
+        primary_actions = ttk.Frame(outer, style="App.TFrame")
+        primary_actions.pack(fill="x", pady=(10, 0))
+        self.start_button = ttk.Button(
+            primary_actions,
+            text="Подготовить для ChatGPT",
+            command=self._start,
+            style="Accent.TButton",
+        )
+        self.start_button.pack(side="left")
+        ttk.Label(
+            primary_actions,
+            text="Шаг 1: создаст MASTER_PACKAGE и MP3 для анализа транскрипции.",
+            style="Muted.TLabel",
+        ).pack(side="left", padx=(10, 0))
 
         self.v1_settings_toggle_button = ttk.Button(
             outer,
@@ -420,7 +435,8 @@ class App(tk.Tk):
         ttk.Label(outer, textvariable=self.status_text).pack(anchor="w", pady=(6, 6))
         ttk.Label(outer, textvariable=self.metadata_status_text).pack(anchor="w", pady=(0, 6))
 
-        workflow_frame = ttk.LabelFrame(outer, text="MASTER_AUDIO workflow", padding=10)
+        self.master_workflow_frame = ttk.LabelFrame(outer, text="MASTER_AUDIO workflow", padding=10)
+        workflow_frame = self.master_workflow_frame
         workflow_frame.pack(fill="x", pady=(0, 10))
         workflow_frame.columnconfigure(1, weight=1)
         ttk.Label(workflow_frame, text="Current state:").grid(row=0, column=0, sticky="w")
@@ -461,8 +477,6 @@ class App(tk.Tk):
 
         actions = ttk.Frame(outer)
         actions.pack(fill="x")
-        self.start_button = ttk.Button(actions, text="Prepare Master Package", command=self._start, style="Accent.TButton")
-        self.start_button.pack(side="left")
         self.import_transcript_button = ttk.Button(
             actions,
             text="Import Gemini Transcript JSON",
