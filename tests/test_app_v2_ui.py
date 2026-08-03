@@ -71,9 +71,25 @@ def test_prepare_for_chatgpt_action_stays_visible_above_master_workflow():
     try:
         assert app.start_button.cget("text") == "Подготовить для ChatGPT"
         assert app.start_button.winfo_manager() == "pack"
+        assert app.master_workflow_frame.winfo_manager() == ""
+        assert app.master_workflow_toggle_button.cget("text") == "Показать статус MASTER_AUDIO"
         app._toggle_v1_settings()
         app.update_idletasks()
-        assert app.start_button.winfo_y() < app.master_workflow_frame.winfo_y()
+        assert app.start_button.winfo_y() < app.master_workflow_toggle_button.winfo_y()
+        app._toggle_master_workflow()
+        app.update_idletasks()
+        assert app.master_workflow_frame.winfo_manager() == "pack"
+        assert app.master_workflow_toggle_button.cget("text") == "Скрыть статус MASTER_AUDIO"
+    finally:
+        app.destroy()
+
+
+def test_empty_owner_facing_panels_start_collapsed():
+    app = _make_app()
+    try:
+        assert app.source_list.winfo_manager() == ""
+        assert app.log.winfo_manager() == ""
+        assert app.log_toggle_button.cget("text") == "Показать журнал"
     finally:
         app.destroy()
 

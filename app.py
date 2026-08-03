@@ -175,6 +175,8 @@ class App(tk.Tk):
         self.worker_count = tk.IntVar(value=2)
         self.retry_only_failed = False
         self.v1_settings_expanded = False
+        self.master_workflow_expanded = False
+        self.log_expanded = False
         self.master_workflow_state = tk.StringVar(value="SOURCE_READY")
         self.master_duration_text = tk.StringVar(value="-")
         self.master_mp3_duration_text = tk.StringVar(value="-")
@@ -357,8 +359,8 @@ class App(tk.Tk):
             text="ZIP / папка / файлы → MASTER_PACKAGE → проверенный <project_name>_ANALYSIS_HANDOFF.zip",
         ).pack(anchor="w", pady=(0, 12))
 
-        source_frame = ttk.LabelFrame(outer, text="Исходные материалы", padding=10)
-        source_frame.pack(fill="both", expand=True)
+        source_frame = ttk.LabelFrame(outer, text="Исходные материалы", padding=8)
+        source_frame.pack(fill="x", expand=False)
 
         buttons = ttk.Frame(source_frame)
         buttons.pack(fill="x")
@@ -367,9 +369,9 @@ class App(tk.Tk):
         ttk.Button(buttons, text="Удалить выбранное", command=self._remove_selected, style="Secondary.TButton").pack(side="left")
         ttk.Button(buttons, text="Очистить", command=self._clear, style="Secondary.TButton").pack(side="left", padx=6)
 
-        self.source_list = tk.Listbox(source_frame, height=10)
-        self.source_list.pack(fill="both", expand=True, pady=(10, 0))
+        self.source_list = tk.Listbox(source_frame, height=5)
         self._register_listbox(self.source_list)
+        self.source_list.pack_forget()
 
         primary_actions = ttk.Frame(outer, style="App.TFrame")
         primary_actions.pack(fill="x", pady=(10, 0))
@@ -435,45 +437,47 @@ class App(tk.Tk):
         ttk.Label(outer, textvariable=self.status_text).pack(anchor="w", pady=(6, 6))
         ttk.Label(outer, textvariable=self.metadata_status_text).pack(anchor="w", pady=(0, 6))
 
-        self.master_workflow_frame = ttk.LabelFrame(outer, text="MASTER_AUDIO workflow", padding=10)
+        self.master_workflow_toggle_button = ttk.Button(
+            outer,
+            text="Показать статус MASTER_AUDIO",
+            command=self._toggle_master_workflow,
+            style="Secondary.TButton",
+        )
+        self.master_workflow_toggle_button.pack(anchor="w", pady=(8, 0))
+
+        self.master_workflow_frame = ttk.LabelFrame(outer, text="MASTER_AUDIO workflow", padding=8)
         workflow_frame = self.master_workflow_frame
-        workflow_frame.pack(fill="x", pady=(0, 10))
+        workflow_frame.pack_forget()
         workflow_frame.columnconfigure(1, weight=1)
+        workflow_frame.columnconfigure(3, weight=1)
         ttk.Label(workflow_frame, text="Current state:").grid(row=0, column=0, sticky="w")
         ttk.Label(workflow_frame, textvariable=self.master_workflow_state).grid(row=0, column=1, sticky="w")
-        ttk.Label(workflow_frame, text="Master duration:").grid(row=1, column=0, sticky="w", pady=(6, 0))
-        ttk.Label(workflow_frame, textvariable=self.master_duration_text).grid(row=1, column=1, sticky="w", pady=(6, 0))
-        ttk.Label(workflow_frame, text="MP3 duration:").grid(row=2, column=0, sticky="w", pady=(6, 0))
-        ttk.Label(workflow_frame, textvariable=self.master_mp3_duration_text).grid(row=2, column=1, sticky="w", pady=(6, 0))
-        ttk.Label(workflow_frame, text="Duration delta:").grid(row=3, column=0, sticky="w", pady=(6, 0))
-        ttk.Label(workflow_frame, textvariable=self.master_duration_delta_text).grid(row=3, column=1, sticky="w", pady=(6, 0))
-        ttk.Label(workflow_frame, text="Timeline items:").grid(row=4, column=0, sticky="w", pady=(6, 0))
-        ttk.Label(workflow_frame, textvariable=self.master_timeline_item_count_text).grid(row=4, column=1, sticky="w", pady=(6, 0))
-        ttk.Label(workflow_frame, text="Videos / photos:").grid(row=5, column=0, sticky="w", pady=(6, 0))
-        ttk.Label(
-            workflow_frame,
-            textvariable=tk.StringVar(value=""),
+        ttk.Label(workflow_frame, text="Master duration:").grid(row=0, column=2, sticky="w", padx=(18, 0))
+        ttk.Label(workflow_frame, textvariable=self.master_duration_text).grid(row=0, column=3, sticky="w")
+        ttk.Label(workflow_frame, text="MP3 duration:").grid(row=1, column=0, sticky="w", pady=(5, 0))
+        ttk.Label(workflow_frame, textvariable=self.master_mp3_duration_text).grid(row=1, column=1, sticky="w", pady=(5, 0))
+        ttk.Label(workflow_frame, text="Duration delta:").grid(row=1, column=2, sticky="w", padx=(18, 0), pady=(5, 0))
+        ttk.Label(workflow_frame, textvariable=self.master_duration_delta_text).grid(row=1, column=3, sticky="w", pady=(5, 0))
+        ttk.Label(workflow_frame, text="Timeline items:").grid(row=2, column=0, sticky="w", pady=(5, 0))
+        ttk.Label(workflow_frame, textvariable=self.master_timeline_item_count_text).grid(row=2, column=1, sticky="w", pady=(5, 0))
+        ttk.Label(workflow_frame, text="Videos / photos:").grid(row=2, column=2, sticky="w", padx=(18, 0), pady=(5, 0))
+        self.master_counts_label = ttk.Label(workflow_frame, text="")
+        self.master_counts_label.grid(row=2, column=3, sticky="w", pady=(5, 0))
+        ttk.Label(workflow_frame, text="Transcript events:").grid(row=3, column=0, sticky="w", pady=(5, 0))
+        ttk.Label(workflow_frame, textvariable=self.master_transcript_event_count_text).grid(row=3, column=1, sticky="w", pady=(5, 0))
+        ttk.Label(workflow_frame, text="Transcript validation errors:").grid(row=3, column=2, sticky="w", padx=(18, 0), pady=(5, 0))
+        ttk.Label(workflow_frame, textvariable=self.master_transcript_errors_text, wraplength=520, justify="left").grid(
+            row=3, column=3, sticky="w", pady=(5, 0)
         )
-        self.master_counts_label = ttk.Label(
-            workflow_frame,
-            text="",
-        )
-        self.master_counts_label.grid(row=5, column=1, sticky="w", pady=(6, 0))
-        ttk.Label(workflow_frame, text="Transcript events:").grid(row=6, column=0, sticky="w", pady=(6, 0))
-        ttk.Label(workflow_frame, textvariable=self.master_transcript_event_count_text).grid(row=6, column=1, sticky="w", pady=(6, 0))
-        ttk.Label(workflow_frame, text="Transcript validation errors:").grid(row=7, column=0, sticky="nw", pady=(6, 0))
-        ttk.Label(workflow_frame, textvariable=self.master_transcript_errors_text, wraplength=760, justify="left").grid(
-            row=7, column=1, sticky="w", pady=(6, 0)
-        )
-        ttk.Label(workflow_frame, text="Final ZIP path:").grid(row=8, column=0, sticky="nw", pady=(6, 0))
-        ttk.Label(workflow_frame, textvariable=self.master_final_zip_text, wraplength=760, justify="left").grid(
-            row=8, column=1, sticky="w", pady=(6, 0)
+        ttk.Label(workflow_frame, text="Final ZIP path:").grid(row=4, column=0, sticky="nw", pady=(5, 0))
+        ttk.Label(workflow_frame, textvariable=self.master_final_zip_text, wraplength=1100, justify="left").grid(
+            row=4, column=1, columnspan=3, sticky="w", pady=(5, 0)
         )
         ttk.Checkbutton(
             workflow_frame,
             text="Create visual master MP4",
             variable=self.create_visual_master,
-        ).grid(row=9, column=1, sticky="w", pady=(10, 0))
+        ).grid(row=5, column=1, sticky="w", pady=(8, 0))
 
         actions = ttk.Frame(outer)
         actions.pack(fill="x")
@@ -543,8 +547,15 @@ class App(tk.Tk):
         )
         self.copy_prompt_button.pack(side="left", padx=(8, 0))
 
-        self.log = tk.Text(outer, height=9, wrap="word", state="disabled")
-        self.log.pack(fill="both", expand=False, pady=(10, 0))
+        self.log_toggle_button = ttk.Button(
+            outer,
+            text="Показать журнал",
+            command=self._toggle_log,
+            style="Secondary.TButton",
+        )
+        self.log_toggle_button.pack(anchor="w", pady=(10, 0))
+        self.log = tk.Text(outer, height=6, wrap="word", state="disabled")
+        self.log.pack_forget()
         self._register_text_widget(self.log)
 
     def _build_v2_tab(self) -> None:
@@ -1248,16 +1259,26 @@ class App(tk.Tk):
                 self.sources.append(resolved)
                 existing.add(resolved)
                 self.source_list.insert("end", str(resolved))
+        self._update_source_list_visibility()
 
     def _remove_selected(self) -> None:
         selected = list(self.source_list.curselection())
         for index in reversed(selected):
             self.source_list.delete(index)
             del self.sources[index]
+        self._update_source_list_visibility()
 
     def _clear(self) -> None:
         self.sources.clear()
         self.source_list.delete(0, "end")
+        self._update_source_list_visibility()
+
+    def _update_source_list_visibility(self) -> None:
+        if self.sources:
+            if self.source_list.winfo_manager() != "pack":
+                self.source_list.pack(fill="x", expand=False, pady=(8, 0))
+        else:
+            self.source_list.pack_forget()
 
     def _choose_output(self) -> None:
         value = filedialog.askdirectory(title="Куда сохранить готовый ZIP")
@@ -3062,6 +3083,24 @@ class App(tk.Tk):
         else:
             self.v1_settings_frame.pack_forget()
             self.v1_settings_toggle_button.configure(text="Показать настройки")
+
+    def _toggle_master_workflow(self) -> None:
+        self.master_workflow_expanded = not self.master_workflow_expanded
+        if self.master_workflow_expanded:
+            self.master_workflow_frame.pack(fill="x", pady=(8, 8), after=self.master_workflow_toggle_button)
+            self.master_workflow_toggle_button.configure(text="Скрыть статус MASTER_AUDIO")
+        else:
+            self.master_workflow_frame.pack_forget()
+            self.master_workflow_toggle_button.configure(text="Показать статус MASTER_AUDIO")
+
+    def _toggle_log(self) -> None:
+        self.log_expanded = not self.log_expanded
+        if self.log_expanded:
+            self.log.pack(fill="x", expand=False, pady=(8, 0), after=self.log_toggle_button)
+            self.log_toggle_button.configure(text="Скрыть журнал")
+        else:
+            self.log.pack_forget()
+            self.log_toggle_button.configure(text="Показать журнал")
 
     def _open_path(self, path: Path) -> None:
         if not path.exists():
