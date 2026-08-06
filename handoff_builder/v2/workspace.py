@@ -1,0 +1,81 @@
+from __future__ import annotations
+
+import json
+from pathlib import Path
+
+from .common import utc_now_iso
+from .storage import apply_migrations, connect_workspace_db
+from .storage.repositories import WorkspaceRepository
+from .errors import UnsafePackageError
+
+
+def init_project_workspace(workspace_dir: Path, project_id: str) -> Path:
+    project_root = workspace_dir.resolve()
+    project_file = project_root / "project.json"
+    created_at: str | None = None
+    if project_file.exists():
+        config = json.loads(project_file.read_text(encoding="utf-8"))
+        existing_project_id = str(config["project_id"])
+        if existing_project_id != project_id:
+            raise UnsafePackageError(
+                f"Workspace already belongs to another project: {existing_project_id} != {project_id}"
+            )
+        created_at = str(config.get("created_at") or "") or None
+    else:
+        project_root.mkdir(parents=True, exist_ok=True)
+        created_at = utc_now_iso()
+    for relative in (
+        "originals",
+        "handoffs",
+        "incoming_ai_packages",
+        "imports",
+        "ai_packages",
+        "patches",
+        "renders",
+        "logs",
+        "cache",
+        "analysis",
+        "analysis/contact_sheets",
+        "analysis/metadata",
+        "analysis/photo_analysis_copies",
+        "analysis/scene_keyframes",
+        "analysis/scene_previews",
+        "analysis/video_storyboards",
+        "proxies",
+        "voice",
+        "voice/runtime",
+        "voice/profiles",
+        "voice/reports",
+    ):
+        (project_root / relative).mkdir(parents=True, exist_ok=True)
+
+    project_file.write_text(
+        json.dumps(
+            {
+                "project_id": project_id,
+                "created_at": created_at or utc_now_iso(),
+                "workspace_path": str(project_root),
+            },
+            ensure_ascii=False,
+            indent=2,
+        ),
+        encoding="utf-8",
+    )
+    source_snapshot_path = project_root / "source_snapshot.json"
+    if not source_snapshot_path.exists():
+        source_snapshot_path.write_text(
+            json.dumps({"project_id": project_id, "sources": []}, ensure_ascii=False, indent=2),
+            encoding="utf-8",
+        )
+    connection = connect_workspace_db(project_root / "project.sqlite")
+    try:
+        apply_migrations(connection)
+        WorkspaceRepository(connection).create_project(project_id, project_root)
+        connection.commit()
+    finally:
+        connection.close()
+    return project_root
+
+
+def load_project_config(project_root: Path) -> dict:
+    return json.loads((project_root / "project.json").read_text(encoding="utf-8"))

@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import json
 import math
+import os
 import re
 import subprocess
 import threading
@@ -23,6 +24,8 @@ def run_command(
     capture: bool = True,
     check: bool = True,
     cancel_event: threading.Event | None = None,
+    cwd: str | Path | None = None,
+    env: dict[str, str] | None = None,
 ) -> subprocess.CompletedProcess[str]:
     process = subprocess.Popen(
         args,
@@ -31,6 +34,8 @@ def run_command(
         stderr=subprocess.PIPE if capture else None,
         creationflags=CREATE_NO_WINDOW,
         errors="replace",
+        cwd=os.fspath(cwd) if cwd is not None else None,
+        env=env,
     )
     try:
         while True:
@@ -82,6 +87,10 @@ class FFmpegTools:
             (stream for stream in data.get("streams", []) if stream.get("codec_type") == "video"),
             {},
         )
+        audio_stream = next(
+            (stream for stream in data.get("streams", []) if stream.get("codec_type") == "audio"),
+            None,
+        )
         tags = video_stream.get("tags", {})
         side_data = video_stream.get("side_data_list", [])
         rotation = tags.get("rotate")
@@ -95,13 +104,35 @@ class FFmpegTools:
             or data.get("format", {}).get("duration")
             or 0
         )
+        frame_rate = video_stream.get("avg_frame_rate") or video_stream.get("r_frame_rate") or "0/0"
         return {
             "duration": float(duration or 0),
             "width": int(video_stream.get("width") or 0),
             "height": int(video_stream.get("height") or 0),
             "rotation": int(float(rotation or 0)),
             "codec": video_stream.get("codec_name"),
+            "fps": self._parse_frame_rate(frame_rate),
+            "audio_present": audio_stream is not None,
         }
+
+    def _parse_frame_rate(self, value: str | int | float | None) -> float | None:
+        if value in (None, "", "0/0"):
+            return None
+        text = str(value)
+        if "/" in text:
+            numerator, denominator = text.split("/", 1)
+            try:
+                num = float(numerator)
+                den = float(denominator)
+            except ValueError:
+                return None
+            if den == 0:
+                return None
+            return round(num / den, 6)
+        try:
+            return round(float(text), 6)
+        except ValueError:
+            return None
 
     def make_proxy(self, source: Path, destination: Path, target_height: int = 720) -> None:
         destination.parent.mkdir(parents=True, exist_ok=True)

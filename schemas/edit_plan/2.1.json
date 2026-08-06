@@ -1,0 +1,86 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://github.com/oleg3479881328-code/AI-Handoff-Builder/schemas/edit_plan/2.1.json",
+  "title": "Edit Plan",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schema_version",
+    "project_id",
+    "handoff_id",
+    "handoff_sha256",
+    "plan_id",
+    "created_at",
+    "assets",
+    "mode",
+    "output",
+    "operations"
+  ],
+  "properties": {
+    "schema_version": { "const": "2.1" },
+    "project_id": { "type": "string", "minLength": 1 },
+    "handoff_id": { "type": "string", "minLength": 1 },
+    "handoff_sha256": { "type": "string", "pattern": "^[a-f0-9]{64}$" },
+    "plan_id": { "type": "string", "minLength": 1 },
+    "plan_version": { "type": "integer", "minimum": 1 },
+    "parent_plan_id": { "type": "string", "minLength": 1 },
+    "base_plan_hash": { "type": "string", "pattern": "^[a-f0-9]{64}$" },
+    "patch_id": { "type": "string", "minLength": 1 },
+    "created_at": { "type": "string", "format": "date-time" },
+    "mode": {
+      "type": "string",
+      "enum": ["preview"]
+    },
+    "output": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["width", "height", "fps", "audio"],
+      "properties": {
+        "width": { "type": "integer", "minimum": 1 },
+        "height": { "type": "integer", "minimum": 1 },
+        "fps": { "type": "integer", "minimum": 1 },
+        "audio": { "type": "boolean" }
+      }
+    },
+    "assets": {
+      "type": "array",
+      "minItems": 1,
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["asset_id", "media_type"],
+        "properties": {
+          "asset_id": { "type": "string", "minLength": 1 },
+          "media_type": {
+            "type": "string",
+            "enum": ["photo"]
+          },
+          "original_name": { "type": "string", "minLength": 1 }
+        }
+      }
+    },
+    "operations": {
+      "type": "array",
+      "minItems": 1,
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["op", "asset_id"],
+        "properties": {
+          "operation_id": { "type": "string", "minLength": 1 },
+          "op": {
+            "type": "string",
+            "enum": ["image_hold", "text_overlay"]
+          },
+          "asset_id": { "type": "string", "minLength": 1 },
+          "duration_ms": { "type": "integer", "minimum": 1 },
+          "text": { "type": "string", "minLength": 1 },
+          "position": {
+            "type": "string",
+            "enum": ["bottom_center"]
+          }
+        }
+      }
+    }
+  }
+}

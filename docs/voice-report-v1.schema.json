@@ -1,0 +1,14 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://github.com/oleg3479881328-code/AI-Handoff-Builder/docs/voice-report-v1.schema.json",
+  "title": "Voice Report v1",
+  "type": "object",
+  "additionalProperties": true,
+  "required": ["generated_at", "job", "takes"],
+  "properties": {
+    "generated_at": { "type": "string", "format": "date-time" },
+    "job": { "type": "object" },
+    "takes": { "type": "array", "items": { "type": "object" } },
+    "primary_approval": { "type": ["object", "null"] }
+  }
+}

@@ -1,0 +1,76 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://github.com/oleg3479881328-code/AI-Handoff-Builder/schemas/edit_plan/1.0.json",
+  "title": "Edit Plan",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schema_version",
+    "project_id",
+    "handoff_id",
+    "handoff_sha256",
+    "plan_id",
+    "created_at",
+    "assets",
+    "mode",
+    "operations"
+  ],
+  "properties": {
+    "schema_version": { "const": "1.0" },
+    "project_id": { "type": "string", "minLength": 1 },
+    "handoff_id": { "type": "string", "minLength": 1 },
+    "handoff_sha256": { "type": "string", "pattern": "^[a-f0-9]{64}$" },
+    "plan_id": { "type": "string", "minLength": 1 },
+    "plan_version": { "type": "integer", "minimum": 1 },
+    "parent_plan_id": { "type": "string", "minLength": 1 },
+    "base_plan_hash": { "type": "string", "pattern": "^[a-f0-9]{64}$" },
+    "patch_id": { "type": "string", "minLength": 1 },
+    "created_at": { "type": "string", "format": "date-time" },
+    "mode": {
+      "type": "string",
+      "enum": ["preview"]
+    },
+    "assets": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["asset_id", "path", "media_type"],
+        "properties": {
+          "asset_id": { "type": "string", "minLength": 1 },
+          "path": { "type": "string", "minLength": 1 },
+          "media_type": {
+            "type": "string",
+            "enum": ["video"]
+          }
+        }
+      }
+    },
+    "operations": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["op", "asset_id", "source_in_ms", "source_out_ms"],
+        "properties": {
+          "operation_id": { "type": "string", "minLength": 1 },
+          "op": {
+            "type": "string",
+            "enum": ["video_segment"]
+          },
+          "asset_id": { "type": "string", "minLength": 1 },
+          "source_in_ms": { "type": "integer", "minimum": 0 },
+          "source_out_ms": { "type": "integer", "minimum": 0 }
+        }
+      }
+    },
+    "voiceover": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["spec_path"],
+      "properties": {
+        "spec_path": { "type": "string", "minLength": 1 }
+      }
+    }
+  }
+}

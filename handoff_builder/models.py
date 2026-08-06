@@ -9,7 +9,12 @@ from typing import Any
 class BuilderConfig:
     project_name: str
     output_dir: Path
+    project_id: str | None = None
+    workspace_root: Path | None = None
+    source_zip_path: Path | None = None
+    include_local_path_context: bool = True
     include_video_proxies: bool = True
+    gps_export_mode: str = "rounded"
     worker_count: int = 2
     photo_long_side: int = 1280
     photo_quality: int = 85
@@ -22,6 +27,15 @@ class BuilderConfig:
     storyboard_frames: int = 11
     overwrite: bool = False
 
+    def __post_init__(self) -> None:
+        allowed = {"exact", "rounded", "venue_label_only", "excluded"}
+        if self.gps_export_mode not in allowed:
+            raise ValueError(
+                "gps_export_mode must be one of: exact, rounded, venue_label_only, excluded"
+            )
+        if self.project_id is None:
+            self.project_id = self.project_name
+
 
 @dataclass(slots=True)
 class AssetRecord:
@@ -32,6 +46,7 @@ class AssetRecord:
     relative_source_path: str
     extension: str
     size_bytes: int
+    original_project_path: str | None = None
     status: str = "pending"
     error: str | None = None
     duration_ms: int | None = None
@@ -39,13 +54,28 @@ class AssetRecord:
     height: int | None = None
     rotation: int | None = None
     folder_category: str | None = None
+    metadata_status: str = "pending"
+    capture_time_iso: str | None = None
+    capture_time_source: str | None = None
+    capture_time_confidence: float | None = None
+    timezone_source: str | None = None
+    gps_present: bool = False
+    location_confidence: float | None = None
+    device_id: str | None = None
+    fps: float | None = None
+    audio_present: bool | None = None
+    chronology_rank: int | None = None
+    location_cluster_id: str | None = None
     analysis_copy: str | None = None
     proxy: str | None = None
     storyboard: str | None = None
+    proxy_project_path: str | None = None
     scene_ids: list[str] = field(default_factory=list)
 
     def to_dict(self) -> dict[str, Any]:
-        return asdict(self)
+        payload = asdict(self)
+        payload.pop("source_path", None)
+        return payload
 
 
 @dataclass(slots=True)
@@ -60,6 +90,9 @@ class SceneRecord:
     keyframe_time_ms: int
     keyframe_path: str
     preview_path: str
+    chronology_rank: int | None = None
+    location_cluster_id: str | None = None
+    capture_time_iso: str | None = None
 
     def to_dict(self) -> dict[str, Any]:
         return asdict(self)
@@ -73,4 +106,12 @@ class BuildResult:
     validation_path: Path
     validation: dict[str, Any]
     failed_sources: list[str]
+    project_id: str | None = None
+    project_name: str | None = None
+    metadata_warnings_path: Path | None = None
+    local_asset_registry_path: Path | None = None
+    project_root: Path | None = None
+    handoff_id: str | None = None
+    handoff_sha256: str | None = None
+    handoff_content_hash: str | None = None
     canceled: bool = False

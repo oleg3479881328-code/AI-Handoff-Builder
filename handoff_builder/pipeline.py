@@ -1,6 +1,8 @@
 from __future__ import annotations
 
 import datetime as dt
+import json
+import shutil
 import threading
 import zipfile
 from concurrent.futures import ThreadPoolExecutor, as_completed
@@ -11,8 +13,11 @@ from PIL import Image, ImageOps
 
 from .contact_sheets import build_contact_sheet, paginate_contact_sheets
 from .ffmpeg_tools import FFmpegTools
+from .metadata import AssetMetadataBuilder, METADATA_SCHEMA_VERSION
 from .models import AssetRecord, BuildResult, BuilderConfig, SceneRecord
 from .utils import (
+    file_sha256,
+    extract_supported_media_from_zip,
     human_bytes,
     iter_media,
     json_dump,
@@ -22,6 +27,10 @@ from .utils import (
     slugify,
     stable_asset_id,
 )
+from .v2.common import stable_v2_id
+from .v2.packages.guards import compute_content_hash
+from .v2.project_registry import ProjectRegistryStore, record_local_handoff
+from .v2.workspace import init_project_workspace
 
 
 ProgressCallback = Callable[[float, str], None]
@@ -51,6 +60,7 @@ class HandoffBuilder:
         self.project_root = project_root
         self.cancel_event = threading.Event()
         self.ffmpeg = FFmpegTools(project_root, cancel_event=self.cancel_event)
+        self.metadata = AssetMetadataBuilder(config, project_root=project_root)
 
     def cancel(self) -> None:
         self.cancel_event.set()
@@ -59,8 +69,14 @@ class HandoffBuilder:
         if self.cancel_event.is_set():
             raise RuntimeError("Processing was canceled by the user.")
 
-    def _prepare_sources(self, inputs: Iterable[Path], workspace: Path) -> tuple[list[Path], Path]:
-        source_root = workspace / "source"
+    def _prepare_sources(
+        self,
+        inputs: Iterable[Path],
+        workspace: Path,
+        *,
+        project_root: Path | None = None,
+    ) -> tuple[list[Path], Path]:
+        source_root = (project_root or workspace) / "originals" if project_root is not None else workspace / "source"
         source_root.mkdir(parents=True, exist_ok=True)
         prepared: list[Path] = []
 
@@ -68,9 +84,20 @@ class HandoffBuilder:
             self._ensure_not_canceled()
             item = item.resolve()
             if item.suffix.lower() == ".zip":
-                target = source_root / f"zip_{index:03d}_{slugify(item.stem)}"
+                if project_root is not None:
+                    self._prepare_project_zip_sources(item, project_root, source_root)
+                    target = source_root
+                else:
+                    target = source_root / f"zip_{index:03d}_{slugify(item.stem)}"
                 self.log(f"Extracting ZIP: {item.name}")
-                safe_extract_zip(item, target)
+                if project_root is None:
+                    extraction = extract_supported_media_from_zip(item, target)
+                    if extraction.ignored_members:
+                        self.log(
+                            "Ignored non-media ZIP members: "
+                            + ", ".join(sorted(extraction.ignored_members)[:10])
+                            + (" ..." if len(extraction.ignored_members) > 10 else "")
+                        )
                 prepared.append(target)
             elif item.is_dir():
                 target = source_root / f"folder_{index:03d}_{slugify(item.name)}"
@@ -84,6 +111,160 @@ class HandoffBuilder:
                 self.log(f"Skipped missing input: {item}")
 
         return prepared, source_root
+
+    def _prepare_project_zip_sources(self, zip_path: Path, project_root: Path, originals_root: Path) -> None:
+        snapshot = self._load_source_snapshot(project_root)
+        existing_zip = str(snapshot.get("source_zip_path") or "")
+        if originals_root.exists() and any(originals_root.rglob("*")):
+            if existing_zip and Path(existing_zip).resolve() != zip_path.resolve():
+                raise ValueError(
+                    f"Project already contains extracted originals from another source ZIP: {existing_zip}"
+                )
+        stage_root = project_root / "cache" / "source_import_staging"
+        if stage_root.exists():
+            shutil.rmtree(stage_root, ignore_errors=True)
+        stage_originals = stage_root / "originals"
+        try:
+            extraction = extract_supported_media_from_zip(zip_path, stage_originals)
+            if not extraction.extracted_files:
+                raise ValueError(f"No supported media files were found in {zip_path.name}.")
+            if originals_root.exists():
+                shutil.rmtree(originals_root, ignore_errors=True)
+            originals_root.parent.mkdir(parents=True, exist_ok=True)
+            shutil.move(str(stage_originals), str(originals_root))
+            if extraction.ignored_members:
+                self.log(
+                    "Ignored non-media ZIP members: "
+                    + ", ".join(sorted(extraction.ignored_members)[:10])
+                    + (" ..." if len(extraction.ignored_members) > 10 else "")
+                )
+            proxies_root = project_root / "proxies"
+            if proxies_root.exists():
+                shutil.rmtree(proxies_root, ignore_errors=True)
+            proxies_root.mkdir(parents=True, exist_ok=True)
+        finally:
+            if stage_root.exists():
+                shutil.rmtree(stage_root, ignore_errors=True)
+
+    def _load_source_snapshot(self, project_root: Path) -> dict:
+        path = project_root / "source_snapshot.json"
+        if not path.exists():
+            return {}
+        try:
+            payload = json.loads(path.read_text(encoding="utf-8"))
+        except (OSError, json.JSONDecodeError):
+            return {}
+        return payload if isinstance(payload, dict) else {}
+
+    def _next_available_file(self, path: Path) -> Path:
+        if not path.exists():
+            return path
+        for index in range(2, 1000):
+            candidate = path.with_name(f"{path.stem}_{index}{path.suffix}")
+            if not candidate.exists():
+                return candidate
+        raise FileExistsError(f"Could not allocate a unique output path for {path.name}")
+
+    def _load_analysis_template(self, name: str) -> str:
+        path = Path(__file__).resolve().parent / "templates" / "analysis_handoff" / name
+        return path.read_text(encoding="utf-8")
+
+    def _render_analysis_template(self, name: str, replacements: dict[str, object]) -> str:
+        template = self._load_analysis_template(name)
+        for key, value in replacements.items():
+            template = template.replace(f"{{{{{key}}}}}", str(value))
+        return template
+
+    def _build_assistant_context(
+        self,
+        *,
+        assets: list[AssetRecord],
+        project_id: str,
+        handoff_id: str,
+        created_at: str,
+        project_root: Path | None,
+    ) -> dict[str, object]:
+        direct_mode_available = bool(self.config.include_local_path_context and project_root is not None)
+        payload: dict[str, object] = {
+            "schema_version": "1.0",
+            "document_type": "assistant_context",
+            "project_id": project_id,
+            "project_name": self.config.project_name,
+            "handoff_id": handoff_id,
+            "created_at": created_at,
+            "preferred_edit_source": "originals",
+            "must_use_absolute_original_media_paths": direct_mode_available,
+            "mlt_may_be_opened_from_any_folder": direct_mode_available,
+            "user_file_movement_required": False,
+            "direct_mlt_support": {
+                "available": direct_mode_available,
+                "reason_unavailable": None,
+            },
+            "project_root": None,
+            "originals_root": None,
+            "proxies_root": None,
+            "asset_map": {},
+            "asset_originals": [],
+            "asset_proxies": [],
+        }
+        if not direct_mode_available:
+            payload["direct_mlt_support"] = {
+                "available": False,
+                "reason_unavailable": (
+                    "Local path context is disabled in owner settings."
+                    if project_root is not None
+                    else "Direct Shotcut MLT mode requires a project-root workspace."
+                ),
+            }
+            return payload
+
+        assert project_root is not None
+        resolved_project_root = project_root.resolve()
+        originals_root = (resolved_project_root / "originals").resolve()
+        proxies_root = (resolved_project_root / "proxies").resolve()
+        payload["project_root"] = str(resolved_project_root)
+        payload["originals_root"] = str(originals_root)
+        payload["proxies_root"] = str(proxies_root)
+
+        asset_map: dict[str, dict[str, object]] = {}
+        asset_originals: list[dict[str, object]] = []
+        asset_proxies: list[dict[str, object]] = []
+        for asset in assets:
+            if not asset.original_project_path:
+                raise ValueError(f"Direct Shotcut MLT mode requires original_project_path for {asset.asset_id}")
+            original_path = (resolved_project_root / asset.original_project_path).resolve()
+            if not original_path.is_file():
+                raise ValueError(f"Direct Shotcut MLT mode missing original file for {asset.asset_id}: {original_path}")
+            original_entry = {
+                "asset_id": asset.asset_id,
+                "media_type": asset.media_type,
+                "original_filename": original_path.name,
+                "original_name": asset.original_name,
+                "original_path": str(original_path),
+                "original_project_path": asset.original_project_path,
+            }
+            proxy_entry: dict[str, object] | None = None
+            if asset.proxy_project_path:
+                proxy_path = (resolved_project_root / asset.proxy_project_path).resolve()
+                proxy_entry = {
+                    "asset_id": asset.asset_id,
+                    "proxy_filename": proxy_path.name,
+                    "proxy_path": str(proxy_path),
+                    "proxy_project_path": asset.proxy_project_path,
+                }
+                if proxy_path.exists():
+                    asset_proxies.append(proxy_entry)
+            asset_originals.append(original_entry)
+            asset_map[asset.asset_id] = {
+                **original_entry,
+                "proxy_filename": proxy_entry["proxy_filename"] if proxy_entry is not None else None,
+                "proxy_path": proxy_entry["proxy_path"] if proxy_entry is not None else None,
+                "proxy_project_path": proxy_entry["proxy_project_path"] if proxy_entry is not None else None,
+            }
+        payload["asset_map"] = asset_map
+        payload["asset_originals"] = asset_originals
+        payload["asset_proxies"] = asset_proxies
+        return payload
 
     def _process_photo(self, source: Path, asset: AssetRecord, package_root: Path) -> None:
         self._ensure_not_canceled()
@@ -125,11 +306,16 @@ class HandoffBuilder:
         asset.width = meta["width"]
         asset.height = meta["height"]
         asset.rotation = meta["rotation"]
+        asset.fps = meta.get("fps")
+        asset.audio_present = bool(meta.get("audio_present"))
 
         if self.config.include_video_proxies:
-            proxy = package_root / "video_proxies" / f"asset_{asset.asset_id}.mp4"
+            proxy_root = self.config.workspace_root.resolve() / "proxies" if self.config.workspace_root is not None else package_root / "proxies"
+            proxy = proxy_root / f"asset_{asset.asset_id}.mp4"
             self.ffmpeg.make_proxy(source, proxy, self.config.proxy_height)
-            asset.proxy = relative_posix(proxy, package_root)
+            relative_root = self.config.workspace_root.resolve() if self.config.workspace_root is not None else package_root
+            asset.proxy = relative_posix(proxy, relative_root)
+            asset.proxy_project_path = asset.proxy
 
         segments, mode = self.ffmpeg.scene_segments(
             source,
@@ -204,18 +390,37 @@ class HandoffBuilder:
         self.cancel_event.clear()
         timestamp = dt.datetime.now().strftime("%Y%m%d_%H%M%S")
         project_slug = slugify(self.config.project_name)
-        job_root = self.config.output_dir.resolve() / f"{project_slug}_{timestamp}"
-        package_root = job_root / "package"
-        package_root.mkdir(parents=True, exist_ok=False)
+        owner_filename_project_name = "".join(
+            "_" if ch in '<>:"/\\|?*' else ch for ch in self.config.project_name
+        ).rstrip(" .") or project_slug
+        project_id = str(self.config.project_id or self.config.project_name)
+        handoff_id = stable_v2_id(project_id, timestamp, length=20)
+        project_root: Path | None = None
+        if self.config.workspace_root is not None:
+            project_root = init_project_workspace(self.config.workspace_root, project_id)
+            job_root = project_root
+            archive_dir = project_root / "handoffs"
+            local_asset_registry_path = project_root / "analysis" / "local_asset_registry.json"
+            package_root = project_root / "analysis"
+        else:
+            job_root = self.config.output_dir.resolve() / f"{project_slug}_{timestamp}"
+            archive_dir = self.config.output_dir.resolve()
+            local_asset_registry_path = job_root / "local_asset_registry.json"
+            package_root = job_root / "package"
+        if project_root is None:
+            package_root.mkdir(parents=True, exist_ok=False)
+        else:
+            self._reset_analysis_workspace(package_root)
 
         self.log(f"Project workspace: {job_root}")
-        prepared, source_root = self._prepare_sources(inputs, job_root)
+        prepared, source_root = self._prepare_sources(inputs, job_root, project_root=project_root)
         media_files = iter_media(prepared)
         if not media_files:
             raise ValueError("No supported photo or video files were found.")
 
         assets: list[AssetRecord] = []
         scenes: list[SceneRecord] = []
+        asset_index: dict[str, AssetRecord] = {}
         work_items: list[tuple[Path, AssetRecord]] = []
         registry_failures: list[tuple[Path, str]] = []
 
@@ -245,8 +450,10 @@ class HandoffBuilder:
                     extension=source.suffix.lower(),
                     size_bytes=source.stat().st_size,
                     folder_category=category,
+                    original_project_path=relative_posix(source, project_root) if project_root is not None else None,
                 )
                 assets.append(asset)
+                asset_index[asset.asset_id] = asset
                 work_items.append((source, asset))
             except Exception as exc:
                 registry_failures.append((source, str(exc)))
@@ -284,6 +491,8 @@ class HandoffBuilder:
                         self.log(f"FAILED: {source.name}: {exc}")
                     completed += 1
                     self.progress(completed / total, f"{completed}/{total}: {source.name}")
+
+        metadata_result = self.metadata.build(assets)
 
         photo_items = [
             (package_root / asset.analysis_copy, asset.relative_source_path)
@@ -337,15 +546,65 @@ class HandoffBuilder:
         missing_paths: list[str] = []
         for asset in assets:
             for rel in (asset.analysis_copy, asset.proxy, asset.storyboard):
-                if rel and not (package_root / rel).exists():
+                if rel and not self._artifact_abspath(rel, package_root).exists():
                     missing_paths.append(rel)
         for scene in scenes:
+            source_asset = asset_index.get(scene.asset_id)
+            if source_asset:
+                scene.chronology_rank = source_asset.chronology_rank
+                scene.location_cluster_id = source_asset.location_cluster_id
+                scene.capture_time_iso = source_asset.capture_time_iso
             for rel in (scene.keyframe_path, scene.preview_path):
-                if not (package_root / rel).exists():
+                if not self._artifact_abspath(rel, package_root).exists():
                     missing_paths.append(rel)
+        scenes = self._stable_scene_order(scenes)
+
+        metadata_dir = package_root / "metadata"
+        json_dump(local_asset_registry_path, metadata_result.local_asset_registry)
+        json_dump(
+            metadata_dir / "asset_metadata_raw.json",
+            {
+                "schema_version": METADATA_SCHEMA_VERSION,
+                "tool_status": metadata_result.tool_status,
+                "assets": metadata_result.raw_records,
+            },
+        )
+        json_dump(
+            metadata_dir / "asset_metadata_normalized.json",
+            {
+                "schema_version": METADATA_SCHEMA_VERSION,
+                "gps_export_mode": self.config.gps_export_mode,
+                "assets": metadata_result.normalized_records,
+            },
+        )
+        json_dump(metadata_dir / "device_clock_profiles.json", metadata_result.device_clock_profiles)
+        json_dump(metadata_dir / "chronology_report.json", metadata_result.chronology_report)
+        json_dump(metadata_dir / "location_clusters.json", metadata_result.location_clusters)
+        json_dump(metadata_dir / "metadata_warnings.json", metadata_result.warnings_payload)
+
+        metadata_by_asset_id = {record["asset_id"]: record for record in metadata_result.normalized_records}
+        metadata_ids = [record["asset_id"] for record in metadata_result.normalized_records]
+        duplicate_metadata_ids = sorted({value for value in metadata_ids if metadata_ids.count(value) > 1})
+        metadata_hard_failures: list[str] = []
+        if len(metadata_result.normalized_records) != len(assets):
+            metadata_hard_failures.append("metadata record count does not match asset count")
+        if len(metadata_ids) != len(set(metadata_ids)):
+            metadata_hard_failures.append("duplicate asset_id in metadata records")
+        if any(not value for value in metadata_ids):
+            metadata_hard_failures.append("missing asset_id in metadata records")
+        missing_manifest_metadata = sorted(asset.asset_id for asset in assets if asset.asset_id not in set(metadata_ids))
+        if missing_manifest_metadata:
+            metadata_hard_failures.append("manifest references assets without metadata records")
+            raise ValueError(
+                "manifest references assets without metadata records: "
+                + ", ".join(missing_manifest_metadata)
+            )
+        metadata_hard_failures.extend(self._metadata_contract_failures(metadata_result.normalized_records))
 
         validation = {
             "schema_version": "1.0",
+            "project_id": project_id,
+            "handoff_id": handoff_id,
             "project_name": self.config.project_name,
             "source_asset_count": len(assets),
             "source_video_count": len(source_videos),
@@ -355,6 +614,36 @@ class HandoffBuilder:
             "video_assets_represented": len(source_videos) - len(videos_without_scenes),
             "photo_assets_represented": len(source_photos) - len(photos_without_copies),
             "scene_count": len(scenes),
+            "metadata_records_total": metadata_result.coverage_summary["metadata_records_total"],
+            "assets_with_capture_time": metadata_result.coverage_summary["assets_with_capture_time"],
+            "assets_with_gps": metadata_result.coverage_summary["assets_with_gps"],
+            "assets_with_device_identity": metadata_result.coverage_summary["assets_with_device_identity"],
+            "assets_using_filename_fallback": metadata_result.coverage_summary["assets_using_filename_fallback"],
+            "assets_using_filesystem_fallback": metadata_result.coverage_summary["assets_using_filesystem_fallback"],
+            "missing_metadata_count": metadata_result.coverage_summary["missing_metadata_count"],
+            "extraction_error_count": metadata_result.coverage_summary["extraction_error_count"],
+            "gps_export_mode": metadata_result.coverage_summary["gps_export_mode"],
+            "metadata_coverage_status": metadata_result.coverage_summary["metadata_coverage_status"],
+            "metadata_status_counts": {
+                "ok": metadata_result.coverage_summary["ok_count"],
+                "partial": metadata_result.coverage_summary["partial_count"],
+                "missing": metadata_result.coverage_summary["missing_count"],
+                "error": metadata_result.coverage_summary["error_count"],
+            },
+            "metadata_tool_status": metadata_result.tool_status,
+            "metadata_warning_count": len(metadata_result.warnings_payload["warnings"]),
+            "metadata_warning_path": "metadata/metadata_warnings.json",
+            "metadata_report_paths": {
+                "raw": "metadata/asset_metadata_raw.json",
+                "normalized": "metadata/asset_metadata_normalized.json",
+                "device_clock_profiles": "metadata/device_clock_profiles.json",
+                "chronology_report": "metadata/chronology_report.json",
+                "location_clusters": "metadata/location_clusters.json",
+                "warnings": "metadata/metadata_warnings.json",
+            },
+            "metadata_hard_failures": metadata_hard_failures,
+            "missing_manifest_metadata": missing_manifest_metadata,
+            "duplicate_metadata_ids": duplicate_metadata_ids,
             "videos_without_scenes": [a.asset_id for a in videos_without_scenes],
             "photos_without_analysis_copies": [a.asset_id for a in photos_without_copies],
             "failed_assets": [
@@ -371,76 +660,166 @@ class HandoffBuilder:
                 and not videos_without_scenes
                 and not photos_without_copies
                 and not missing_paths
+                and not metadata_hard_failures
             ),
         }
 
+        expected_output_filename = f"{self.config.project_name}.json"
+        created_at = dt.datetime.now(dt.timezone.utc).isoformat()
+        assistant_context = self._build_assistant_context(
+            assets=assets,
+            project_id=project_id,
+            handoff_id=handoff_id,
+            created_at=created_at,
+            project_root=project_root,
+        )
+        direct_mlt_available = bool((assistant_context.get("direct_mlt_support") or {}).get("available"))
+        template_context = {
+            "PROJECT_ID": project_id,
+            "PROJECT_NAME": self.config.project_name,
+            "HANDOFF_ID": handoff_id,
+            "CREATED_AT": created_at,
+            "PHOTO_COUNT": len(source_photos),
+            "VIDEO_COUNT": len(source_videos),
+            "AUDIO_COUNT": 0,
+            "EXPECTED_OUTPUT_FILENAME": expected_output_filename,
+            "DIRECT_MLT_MODE_STATUS": "available" if direct_mlt_available else "unavailable",
+            "DIRECT_MLT_MODE_NOTE": (
+                "Use `ASSISTANT_CONTEXT.json` and return one `.mlt` when the owner explicitly asks for a ready Shotcut project."
+                if direct_mlt_available
+                else "If `ASSISTANT_CONTEXT.json.direct_mlt_support.available=false`, direct Shotcut MLT mode is unavailable and the normal JSON workflow stays authoritative."
+            ),
+        }
+        start_here_text = self._render_analysis_template("00_START_HERE.md", template_context)
+        project_brief_text = self._render_analysis_template("PROJECT_BRIEF.md", template_context)
+        output_contract_text = self._render_analysis_template("OUTPUT_CONTRACT.md", template_context)
+
+        (package_root / "00_START_HERE.md").write_text(start_here_text, encoding="utf-8")
+        (package_root / "PROJECT_BRIEF.md").write_text(project_brief_text, encoding="utf-8")
+        (package_root / "OUTPUT_CONTRACT.md").write_text(output_contract_text, encoding="utf-8")
+        json_dump(package_root / "ASSISTANT_CONTEXT.json", assistant_context)
+
+        manifest_assets: list[dict[str, object]] = []
+        inventory_candidates: list[dict[str, object]] = []
+        for asset in assets:
+            representations: list[dict[str, object]] = []
+            for rel_path, rep_type in (
+                (asset.analysis_copy, "resized_photo"),
+                (asset.proxy, "video_proxy"),
+                (asset.storyboard, "contact_sheet"),
+            ):
+                if not rel_path:
+                    continue
+                abs_path = self._artifact_abspath(rel_path, package_root)
+                if abs_path.exists():
+                    sha256 = file_sha256(abs_path)
+                    size_bytes = abs_path.stat().st_size
+                    representations.append(
+                        {
+                            "path": rel_path,
+                            "representation_type": rep_type,
+                            "sha256": sha256,
+                            "size_bytes": size_bytes,
+                        }
+                    )
+                    inventory_candidates.append(
+                        {
+                            "path": rel_path,
+                            "sha256": sha256,
+                            "size_bytes": size_bytes,
+                        }
+                    )
+            manifest_assets.append(
+                {
+                    "asset_id": asset.asset_id,
+                    "media_type": asset.media_type,
+                    "original_name": asset.original_name,
+                    "status": "included" if asset.status == "processed" else "failed_with_error",
+                    "error_message": asset.error,
+                    "analysis_representations": representations,
+                }
+            )
+        for scene in scenes:
+            for rel_path in (scene.keyframe_path,):
+                abs_path = self._artifact_abspath(rel_path, package_root)
+                if abs_path.exists():
+                    inventory_candidates.append(
+                        {
+                            "path": rel_path,
+                            "sha256": file_sha256(abs_path),
+                            "size_bytes": abs_path.stat().st_size,
+                        }
+                    )
+        for rel_path in (
+            "00_START_HERE.md",
+            "PROJECT_BRIEF.md",
+            "OUTPUT_CONTRACT.md",
+            "ASSISTANT_CONTEXT.json",
+            "metadata/asset_metadata_normalized.json",
+            "metadata/chronology_report.json",
+            "metadata/location_clusters.json",
+            "metadata/metadata_warnings.json",
+            "validation_report.json",
+            "scene_manifest.json",
+        ):
+            abs_path = package_root / rel_path
+            if abs_path.exists():
+                inventory_candidates.append(
+                    {
+                        "path": rel_path,
+                        "sha256": file_sha256(abs_path),
+                        "size_bytes": abs_path.stat().st_size,
+                    }
+                )
+
         manifest = {
             "schema_version": "1.0",
+            "package_type": "analysis_handoff",
+            "project_id": project_id,
             "project_name": self.config.project_name,
-            "created_at": dt.datetime.now(dt.timezone.utc).isoformat(),
+            "handoff_id": handoff_id,
+            "created_at": created_at,
+            "entrypoint": "00_START_HERE.md",
+            "entrypoint_sha256": file_sha256(package_root / "00_START_HERE.md"),
+            "project_brief": "PROJECT_BRIEF.md",
+            "project_brief_sha256": file_sha256(package_root / "PROJECT_BRIEF.md"),
+            "output_contract": "OUTPUT_CONTRACT.md",
+            "output_contract_sha256": file_sha256(package_root / "OUTPUT_CONTRACT.md"),
+            "expected_output_filename": expected_output_filename,
+            "target_editor": "shotcut",
+            "file_inventory": sorted(inventory_candidates, key=lambda item: str(item["path"])),
+            "content_hash": "0" * 64,
+            "asset_selection": {
+                "total_selected": len(manifest_assets),
+                "assets": manifest_assets,
+            },
             "settings": {
                 "include_video_proxies": self.config.include_video_proxies,
-                "photo_long_side": self.config.photo_long_side,
-                "photo_quality": self.config.photo_quality,
-                "proxy_height": self.config.proxy_height,
-                "scene_threshold": self.config.scene_threshold,
-                "short_video_seconds": self.config.short_video_seconds,
-                "fallback_segment_seconds": self.config.fallback_segment_seconds,
-                "max_segments_per_video": self.config.max_segments_per_video,
+                "gps_export_mode": self.config.gps_export_mode,
             },
             "summary": validation,
-            "assets": [asset.to_dict() for asset in assets],
+            "assets": [self._build_asset_manifest_entry(asset, metadata_by_asset_id[asset.asset_id]) for asset in assets],
             "contact_sheets": [
                 relative_posix(path, package_root)
                 for path in photo_sheets + video_sheets + scene_sheets
             ],
         }
+        manifest["content_hash"] = compute_content_hash(manifest, self_hash_field="content_hash")
         scene_manifest = {
             "schema_version": "1.0",
             "project_name": self.config.project_name,
             "scene_count": len(scenes),
-            "scenes": [scene.to_dict() for scene in scenes],
+            "gps_export_mode": self.config.gps_export_mode,
+            "scenes": [self._build_scene_manifest_entry(scene, metadata_by_asset_id.get(scene.asset_id)) for scene in scenes],
         }
 
         json_dump(package_root / "handoff_manifest.json", manifest)
         json_dump(package_root / "scene_manifest.json", scene_manifest)
         json_dump(package_root / "validation_report.json", validation)
 
-        readme = f"""AI HANDOFF BUILDER v1
-
-PROJECT
-{self.config.project_name}
-
-SUMMARY
-- Assets: {len(assets)}
-- Videos: {len(source_videos)}
-- Photos: {len(source_photos)}
-- Scenes/coverage segments: {len(scenes)}
-- Failed assets: {len(failed)}
-- Coverage OK: {validation['coverage_ok']}
-
-IMPORTANT
-Every source video must have at least one keyframe and one preview.
-Short videos are represented as one full-video scene.
-Long videos use detected cuts or uniform coverage segments.
-Photos are resized from every source folder, not just one category.
-
-FILES
-- handoff_manifest.json
-- scene_manifest.json
-- validation_report.json
-- photo_analysis_copies/
-- video_proxies/
-- scene_keyframes/
-- scene_previews/
-- video_storyboards/
-- contact_sheets/
-"""
-        (package_root / "README.txt").write_text(readme, encoding="utf-8")
-
-        archive_path = self.config.output_dir.resolve() / f"{project_slug}_ANALYSIS_HANDOFF.zip"
-        if archive_path.exists():
-            archive_path.unlink()
+        archive_path = self._next_available_file(
+            archive_dir / f"{owner_filename_project_name}_ANALYSIS_HANDOFF.zip"
+        )
         self.progress(0.98, "Creating final ZIP...")
         with zipfile.ZipFile(
             archive_path,
@@ -449,11 +828,51 @@ FILES
             compresslevel=6,
             allowZip64=True,
         ) as archive:
-            for file_path in sorted(package_root.rglob("*")):
-                if file_path.is_file():
-                    archive.write(file_path, file_path.relative_to(package_root).as_posix())
+            for rel_path in self._handoff_archive_members(package_root):
+                file_path = self._artifact_abspath(rel_path, package_root)
+                archive.write(file_path, rel_path)
 
         self.progress(1.0, f"Done: {archive_path.name}")
+        archive_sha256 = file_sha256(archive_path)
+        if project_root is not None:
+            source_snapshot_path = project_root / "source_snapshot.json"
+            source_snapshot_path.write_text(
+                json.dumps(
+                    {
+                        "project_id": project_id,
+                        "project_name": self.config.project_name,
+                        "source_zip_path": str(self.config.source_zip_path.resolve()) if self.config.source_zip_path else None,
+                        "original_count": len(assets),
+                        "original_paths": [asset.original_project_path for asset in assets if asset.original_project_path],
+                        "proxy_count": len([asset for asset in assets if asset.proxy_project_path]),
+                        "proxy_paths": [asset.proxy_project_path for asset in assets if asset.proxy_project_path],
+                        "updated_at": created_at,
+                    },
+                    ensure_ascii=False,
+                    indent=2,
+                ),
+                encoding="utf-8",
+            )
+            record_local_handoff(
+                project_root=project_root,
+                project_id=project_id,
+                project_name=self.config.project_name,
+                handoff_id=handoff_id,
+                handoff_sha256=archive_sha256,
+                handoff_content_hash=str(manifest["content_hash"]),
+                source_zip_path=self.config.source_zip_path,
+                archive_path=archive_path,
+            )
+            ProjectRegistryStore().register_project(
+                project_root=project_root,
+                project_id=project_id,
+                project_name=self.config.project_name,
+                handoff_id=handoff_id,
+                handoff_sha256=archive_sha256,
+                handoff_content_hash=str(manifest["content_hash"]),
+                source_zip_path=self.config.source_zip_path,
+                archive_path=archive_path,
+            )
         self.log(
             f"Created {archive_path} ({human_bytes(archive_path.stat().st_size)}), "
             f"coverage_ok={validation['coverage_ok']}"
@@ -465,5 +884,126 @@ FILES
             validation_path=package_root / "validation_report.json",
             validation=validation,
             failed_sources=[asset.source_path for asset in failed if asset.source_path],
+            project_id=project_id,
+            project_name=self.config.project_name,
+            metadata_warnings_path=metadata_dir / "metadata_warnings.json",
+            local_asset_registry_path=local_asset_registry_path,
+            project_root=project_root,
+            handoff_id=handoff_id,
+            handoff_sha256=archive_sha256,
+            handoff_content_hash=str(manifest["content_hash"]),
             canceled=False,
         )
+
+    def _reset_analysis_workspace(self, analysis_root: Path) -> None:
+        for relative in (
+            "contact_sheets",
+            "metadata",
+            "photo_analysis_copies",
+            "scene_keyframes",
+            "scene_previews",
+            "video_storyboards",
+        ):
+            target = analysis_root / relative
+            if target.exists():
+                shutil.rmtree(target, ignore_errors=True)
+            target.mkdir(parents=True, exist_ok=True)
+        for relative in ("handoff_manifest.json", "scene_manifest.json", "validation_report.json", "00_START_HERE.md", "PROJECT_BRIEF.md", "OUTPUT_CONTRACT.md", "ASSISTANT_CONTEXT.json"):
+            target = analysis_root / relative
+            if target.exists():
+                target.unlink()
+
+    def _artifact_abspath(self, rel_path: str, package_root: Path) -> Path:
+        candidate = (package_root / rel_path).resolve()
+        if candidate.exists() or self.config.workspace_root is None:
+            return candidate
+        return (self.config.workspace_root.resolve() / rel_path).resolve()
+
+    def _handoff_archive_members(self, package_root: Path) -> list[str]:
+        members: set[str] = set()
+        for file_path in package_root.rglob("*"):
+            if file_path.is_file():
+                members.add(file_path.relative_to(package_root).as_posix())
+        if self.config.workspace_root is not None:
+            proxy_root = self.config.workspace_root.resolve() / "proxies"
+            if proxy_root.exists():
+                for file_path in proxy_root.rglob("*"):
+                    if file_path.is_file():
+                        members.add(file_path.relative_to(self.config.workspace_root.resolve()).as_posix())
+        return sorted(members)
+
+    def _stable_scene_order(self, scenes: list[SceneRecord]) -> list[SceneRecord]:
+        return sorted(
+            scenes,
+            key=lambda scene: (
+                scene.chronology_rank if scene.chronology_rank is not None else 10**9,
+                scene.capture_time_iso or "",
+                scene.asset_id,
+                scene.scene_index,
+                scene.scene_id,
+            ),
+        )
+
+    def _build_asset_manifest_entry(self, asset: AssetRecord, metadata_record: dict[str, object]) -> dict[str, object]:
+        location = dict(metadata_record.get("location") or {})
+        location["cluster_id"] = metadata_record.get("location_cluster_id")
+        return {
+            **asset.to_dict(),
+            "type": asset.media_type,
+            "resolution": {"width": asset.width, "height": asset.height},
+            "orientation": self._orientation_for(asset.width, asset.height, asset.rotation),
+            "fps": asset.fps,
+            "audio_present": asset.audio_present,
+            "capture_time": metadata_record.get("capture_time_project"),
+            "capture_time_utc": metadata_record.get("capture_time_utc"),
+            "capture_time_source": metadata_record.get("capture_time_source"),
+            "time_confidence": metadata_record.get("time_confidence"),
+            "location": location,
+            "location_confidence": metadata_record.get("location_confidence"),
+            "metadata_warnings": metadata_record.get("warnings", []),
+        }
+
+    def _build_scene_manifest_entry(self, scene: SceneRecord, metadata_record: dict[str, object] | None) -> dict[str, object]:
+        payload = scene.to_dict()
+        payload["metadata_asset_id"] = scene.asset_id
+        payload["device_id"] = metadata_record.get("device_id") if metadata_record else None
+        payload["time_confidence"] = metadata_record.get("time_confidence") if metadata_record else None
+        payload["location_confidence"] = metadata_record.get("location_confidence") if metadata_record else None
+        payload["normalized_start_time"] = self._shift_iso_by_ms(
+            metadata_record.get("capture_time_project") if metadata_record else None,
+            scene.start_ms,
+        )
+        payload["normalized_end_time"] = self._shift_iso_by_ms(
+            metadata_record.get("capture_time_project") if metadata_record else None,
+            scene.end_ms,
+        )
+        return payload
+
+    def _shift_iso_by_ms(self, iso_value: object, offset_ms: int) -> str | None:
+        if not iso_value:
+            return None
+        try:
+            parsed = dt.datetime.fromisoformat(str(iso_value))
+        except ValueError:
+            return None
+        return (parsed + dt.timedelta(milliseconds=offset_ms)).isoformat(timespec="seconds")
+
+    def _orientation_for(self, width: int | None, height: int | None, rotation: int | None) -> str | None:
+        if not width or not height:
+            return None
+        portrait = height > width
+        if rotation in {90, 270}:
+            portrait = not portrait
+        return "portrait" if portrait else "landscape"
+
+    def _metadata_contract_failures(self, normalized_records: list[dict[str, object]]) -> list[str]:
+        failures: list[str] = []
+        for record in normalized_records:
+            asset_id = str(record["asset_id"])
+            if record.get("normalized_capture_time") and (not record.get("capture_time_source") or record.get("time_confidence") is None):
+                failures.append(f"computed capture time missing source/confidence for {asset_id}")
+            location = record.get("location") or {}
+            if any(location.get(key) is not None for key in ("latitude", "longitude", "venue_label")):
+                if not record.get("location_source") or record.get("location_confidence") is None:
+                    failures.append(f"computed location missing source/confidence for {asset_id}")
+        return sorted(set(failures))

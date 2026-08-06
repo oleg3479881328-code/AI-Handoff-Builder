@@ -18,6 +18,13 @@ PROJECT_ANALYSIS_HANDOFF.zip
 ├── handoff_manifest.json
 ├── scene_manifest.json
 ├── validation_report.json
+├── metadata/
+│   ├── asset_metadata_raw.json
+│   ├── asset_metadata_normalized.json
+│   ├── device_clock_profiles.json
+│   ├── chronology_report.json
+│   └── location_clusters.json
+├── metadata_warnings.json
 ├── README.txt
 ├── photo_analysis_copies/
 ├── video_proxies/
@@ -53,7 +60,8 @@ No video is allowed to disappear silently.
 python -m handoff_builder.cli ^
   --project "JEFF BREANNA" ^
   --output "C:\1VIDEO MIX\handoff" ^
-  --input "C:\1VIDEO MIX\source"
+  --input "C:\1VIDEO MIX\source" ^
+  --gps-export-mode rounded
 ```
 
 Use `--no-proxies` to make a smaller ZIP.
@@ -66,7 +74,9 @@ Implemented:
 - recursive media scan;
 - stable IDs;
 - photo resize and EXIF rotation;
-- ffprobe metadata;
+- ExifTool-first metadata extraction with ffprobe/filesystem fallback;
+- normalized chronology, device identity, and location clustering;
+- GPS export privacy modes;
 - 720p proxy generation;
 - FFmpeg scene-cut detection;
 - uniform fallback coverage;

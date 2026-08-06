@@ -1,0 +1,68 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://github.com/oleg3479881328-code/AI-Handoff-Builder/docs/voiceover-spec-v1.schema.json",
+  "title": "Voiceover Spec v1",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["schema_version", "voiceover"],
+  "properties": {
+    "schema_version": { "const": "1.0" },
+    "voiceover": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "provider",
+        "profile_key",
+        "language",
+        "text",
+        "text_hash",
+        "engine",
+        "model_size",
+        "takes",
+        "seeds",
+        "normalize_voice",
+        "word_timestamps_required",
+        "mix"
+      ],
+      "properties": {
+        "provider": { "const": "local_voicebox" },
+        "profile_key": { "type": "string", "minLength": 1 },
+        "language": { "type": "string", "minLength": 2 },
+        "text": { "type": "string", "minLength": 1 },
+        "text_hash": { "type": "string", "pattern": "^sha256:[a-f0-9]{64}$" },
+        "engine": { "type": "string", "enum": ["qwen", "qwen_custom_voice", "luxtts", "chatterbox", "chatterbox_turbo", "tada", "kokoro"] },
+        "model_size": { "type": "string", "minLength": 1 },
+        "delivery": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "preset": { "type": "string" },
+            "instruct": { "type": ["string", "null"] },
+            "pronunciation_notes": { "type": "array", "items": { "type": "string" } },
+            "pause_policy": { "type": "string" }
+          }
+        },
+        "takes": { "type": "integer", "minimum": 1, "maximum": 5 },
+        "seeds": { "type": "array", "items": { "type": "integer", "minimum": 0 }, "minItems": 1, "maxItems": 5 },
+        "target_duration_ms": { "type": ["integer", "null"], "minimum": 1 },
+        "duration_tolerance_percent": { "type": "number", "minimum": 0, "maximum": 100 },
+        "max_auto_tempo_percent": { "type": "number", "minimum": 0, "maximum": 100 },
+        "normalize_voice": { "type": "boolean" },
+        "word_timestamps_required": { "type": "boolean" },
+        "mix": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["voice_gain_percent", "music_gain_percent", "original_audio_gain_percent", "ducking"],
+          "properties": {
+            "profile": { "type": "string" },
+            "voice_gain_percent": { "type": "integer", "minimum": 0, "maximum": 200 },
+            "music_gain_percent": { "type": "integer", "minimum": 0, "maximum": 200 },
+            "original_audio_gain_percent": { "type": "integer", "minimum": 0, "maximum": 200 },
+            "ducking": { "type": "boolean" },
+            "music_fade_out_ms": { "type": "integer", "minimum": 0 }
+          }
+        }
+      }
+    }
+  }
+}

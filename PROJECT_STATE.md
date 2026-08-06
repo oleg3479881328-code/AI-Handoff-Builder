@@ -1,42 +1,942 @@
 # Current State
 
-- Date: 2026-07-20
+- Date: 2026-08-06
 - Repository: `oleg3479881328-code/AI-Handoff-Builder`
-- Active contract: `Yt-Dlp-Download-Manager` issue `#67`
-- Current branch: `main`
-- Current phase: baseline published; ready for v2 discovery and implementation
+- Active contract: issue `#29` standalone `Handoff Light`
+- Active branch: `feat/handoff-light-standalone`
+- Current phase: implementation complete locally; Draft PR and issue completion comment pending publication
+- Standalone application status:
+  - entrypoint: `handoff_light_app.py`
+  - package: `handoff_builder/handoff_light/`
+  - packaged EXE: `dist\V0.1.0_Handoff_Light\V0.1.0_Handoff_Light.exe`
+  - packaged EXE SHA-256:
+    - `3D180C9D4971D92B6DFCF7815D5A44919F3CBE4D71A21F7E70649BDAC227E350`
+  - packaged launch title verified on Thursday, August 6, 2026:
+    - `V0.1.0_Handoff_Light - Handoff Light`
+  - packaged screenshot evidence:
+    - `tmp_handoff_light_launch.png`
 
-## What Exists Now
+## Update: 2026-08-06 Issue #29 standalone Handoff Light implementation
 
-- Windows-ready v1 application for handoff ZIP preparation
-- Tkinter GUI, CLI, FFmpeg-based analysis pipeline, tests, and PyInstaller packaging
-- Local verification evidence from July 19-20, 2026:
-  - `pytest` passed
-  - smoke handoff ZIP built successfully
-  - `coverage_ok=true` on the smoke validation report
-  - portable EXE built with bundled `ffmpeg.exe` and `ffprobe.exe`
+- Implemented a separate standalone Handoff Light application without touching the existing Builder UI or PR `#26`.
+- Added new package surface:
+  - `handoff_builder/handoff_light/__init__.py`
+  - `handoff_builder/handoff_light/models.py`
+  - `handoff_builder/handoff_light/project_store.py`
+  - `handoff_builder/handoff_light/archive.py`
+  - `handoff_builder/handoff_light/reports.py`
+  - `handoff_builder/handoff_light/ingest.py`
+  - `handoff_builder/handoff_light/packager.py`
+  - `handoff_builder/handoff_light/app.py`
+  - `handoff_light_app.py`
+- Implemented persistent project state with:
+  - `project.json`
+  - `asset_registry.json`
+  - `ingestion_history.json`
+- Implemented recursive safe ingestion for:
+  - files
+  - folders
+  - ZIP archives
+  - ZIP inside ZIP
+  - same-name/different-content assets
+  - duplicate-content skip by `size + SHA-256`
+- Implemented recursive ZIP protections:
+  - path traversal rejection
+  - encrypted-member rejection
+  - configurable archive depth
+  - configurable expanded-byte limit
+  - compression-ratio guard
+- Preserved stable archive provenance by storing the physical source archive path in local state while keeping full nested `source_chain` for discovered members.
+- Implemented portable immutable Handoff ZIP exports:
+  - `V001_<project>_HANDOFF.zip`
+  - `V002_<project>_HANDOFF.zip`
+- Implemented required package inventory:
+  - `00_START_HERE.md`
+  - `PROJECT_BRIEF.md`
+  - `handoff_manifest.json`
+  - `asset_registry.json`
+  - `REPORTS/*`
+  - package-relative `PHOTOS/`, `AUDIO/`, `METADATA/`, and `PROXIES/` assets where applicable
+- Added build validation covering:
+  - ZIP CRC
+  - required inventory
+  - JSON UTF-8 parsing
+  - no absolute local paths in package payloads
+- Added a separate packaged build flow:
+  - `Handoff Light.spec`
+  - `build_handoff_light_exe.bat`
+- Evidence bundle created at:
+  - `tmp_handoff_light_evidence\`
+  - key proof:
+    - nested ZIP ingest -> `3` new assets, `1` duplicate skipped
+    - incremental add -> `1` new asset
+    - immutable export progression -> `V001_Evidence_Project_HANDOFF.zip` then `V002_Evidence_Project_HANDOFF.zip`
+    - final package portable registry -> no absolute paths detected
 
-## Current Focus
+- Validation on Thursday, August 6, 2026:
+  - `python -m pytest -q tests\test_handoff_light_ingest.py tests\test_handoff_light_packager.py tests\test_handoff_light_app.py` -> `9 passed in 2.44s`
+  - `python -m pytest -q` -> `178 passed in 54.43s`
+  - `cmd /c "echo.| build_handoff_light_exe.bat"` -> success; packaged output under `dist\V0.1.0_Handoff_Light\`
+  - packaged EXE smoke:
+    - launched `dist\V0.1.0_Handoff_Light\V0.1.0_Handoff_Light.exe`
+    - observed title `V0.1.0_Handoff_Light - Handoff Light`
+    - captured screenshot `tmp_handoff_light_launch.png`
 
-Use the published v1 baseline as the starting point for the v2 local edit runner defined in issue `#67`.
+- Date: 2026-08-01
+- Issue #27 version visibility update:
+  - single source: `handoff_builder/version.py`
+  - human-readable version: `V0.1.0`
+  - packaged filename: `V0.1.0_AI_Handoff_Builder.exe`
+  - window title: `AI Handoff Builder - V0.1.0`
+  - stable visible header label: `Version: V0.1.0`
+  - source-level UI regression and packaged screenshot evidence passed
+  - latest packaged SHA-256: `057A32663C38FB6D17CDDFAFDAAD84045D498F911BD3D631B4D4630FB064D19C`
+  - screenshot evidence: `tmp_version_ui.png`
+
+- Date: 2026-07-31
+- Direct JSON local workspace recovery status:
+  - standalone `Edit Plan JSON` import no longer falls back to an unrelated old workspace just because the same `project_id` appears once in `%LOCALAPPDATA%\\AI Handoff Builder\\project_registry.json`
+  - for direct JSON import, the app now prefers:
+    - exact saved handoff identity match
+    - then the local folder where the selected JSON actually lies
+  - if that local JSON folder already contains:
+    - `analysis/handoff_index.json`
+    the app now initializes `project.json` / `project.sqlite` there automatically and reuses that folder as the project workspace
+  - this restores the owner expectation that the project is created/opened next to the selected `deep` JSON when the handoff folder itself is the correct local project root
+  - focused validation on Friday, July 31, 2026:
+    - `python -m pytest -q tests\test_v2_one_json_workflow.py tests\test_v2_gui_controller.py` -> `13 passed in 8.22s`
+    - `python -m py_compile handoff_builder\v2\project_registry.py handoff_builder\v2\services\import_service.py app.py` -> success
+
+- Date: 2026-07-31
+- Self-describing first-try MLT status:
+  - every new analysis handoff now writes mandatory:
+    - `ASSISTANT_CONTEXT.json`
+  - owner-controlled local path context is now persisted in:
+    - `%LOCALAPPDATA%\AI Handoff Builder\shotcut_settings.json`
+  - owner default for this build:
+    - `include_local_path_context = true`
+  - when enabled, `ASSISTANT_CONTEXT.json` now carries:
+    - project identity and project name
+    - actual `project_root`
+    - actual `originals_root`
+    - actual `proxies_root`
+    - `preferred_edit_source = originals`
+    - complete `asset_id -> original filename -> original path` mapping
+    - proxy mapping when available
+    - explicit flags:
+      - absolute original-media paths required
+      - downloaded `.mlt` may be opened from any folder
+      - no user file movement required
+  - when disabled, `ASSISTANT_CONTEXT.json` still exists but marks:
+    - `direct_mlt_support.available = false`
+  - the analysis handoff templates now document:
+    - `DIRECT SHOTCUT MLT MODE - NO USER FILE MOVEMENT`
+  - new direct-MLT helper now builds a first-try Shotcut `.mlt` from:
+    - `ASSISTANT_CONTEXT.json`
+  - latest packaged acceptance proof on Friday, July 31, 2026:
+    - fresh EXE path:
+      - `dist\AI Handoff Builder\AI Handoff Builder.exe`
+    - fresh EXE SHA-256:
+      - `6365c90fef83ac7895fcfa5089766f1e14c5b1507e20bd468a04282ef94d7976`
+    - evidence root:
+      - `C:\Users\oleg3\Documents\AIHB_issue27_packaged_acceptance_final`
+    - direct MLT opened from unrelated folder:
+      - `C:\Users\oleg3\Documents\AIHB_issue27_packaged_acceptance_final\Unrelated Downloads\Каролина And RÖB direct owner test.mlt`
+    - direct MLT used only original-media resources:
+      - `C:\Users\oleg3\Documents\AIHB_issue27_packaged_acceptance_final\Каролина And RÖB\originals\cover.jpg`
+    - acceptance proof confirmed:
+      - no `Missing Files` dialog
+      - no owner path repair
+      - no proxy `asset_...` media resource in direct-original mode
+      - no physical filename containing literal `%20`
+
+- Date: 2026-07-30
+- Automatic complete local project status:
+  - single-source ZIP now creates a project-owned local workspace with:
+    - `originals/`
+    - `proxies/`
+    - `analysis/`
+    - `handoffs/`
+    - `imports/`
+    - root `<project_name>.mlt`
+  - local registry now preserves project-relative original/proxy paths so standalone JSON import still resolves after moving the workspace folder
+  - workspace re-entry now preserves `source_snapshot.json`, which keeps source-ZIP collision protection intact across reopen/rebuild cycles
+  - frozen packaged Shotcut builds no longer recurse into `AI Handoff Builder.exe` when invoking the donor MCP server; they fall back to a real Python interpreter
+  - still-image editable Shotcut builds now use still-safe duration/keyframe behavior, and the packaged acceptance flow reached:
+    - `shotcut_opened`
+  - latest packaged owner-flow evidence root:
+    - `C:\Users\oleg3\Documents\AIHB_issue27_packaged_acceptance_final`
+  - latest packaged executable from this branch:
+    - `dist\AI Handoff Builder\AI Handoff Builder.exe`
+    - SHA-256:
+      - `aaab08c84c733b8ba181a6e1b84b61082c665b075dce26df07cc281c2e4dc031`
+  - latest packaged acceptance report:
+    - `C:\Users\oleg3\Documents\AIHB_issue27_packaged_acceptance_final\evidence\acceptance_report.json`
+
+- Date: 2026-07-30
+- One-JSON owner workflow status:
+  - source ZIP -> `_ANALYSIS_HANDOFF.zip` -> one standalone `edit_plan 3.0` JSON -> editable Shotcut `.mlt`
+  - implemented on branch `experiment/shotcut-mcp-windows-proof`
+  - v1 `Настройки` block in the current `issue25` app now starts collapsed behind:
+    - `Показать настройки`
+  - the fresh packaged build from this branch preserves that collapsed-start behavior
+  - validated in source with:
+    - `python -m pytest -q` -> `144 passed, 1 skipped`
+    - `python -m py_compile app.py handoff_builder\pipeline.py handoff_builder\v2\services\import_service.py handoff_builder\v2\services\shotcut_service.py handoff_builder\v2\plans\semantic.py handoff_builder\v2\timeline\compiler.py`
+  - packaged build rebuilt on Thursday, July 30, 2026:
+    - `dist\AI Handoff Builder\AI Handoff Builder.exe`
+    - SHA-256: `637050d843f9926095d88ded795a9ae36255751933e763b364ef89966ee2f809`
+  - packaged resources now verified:
+    - `_internal\handoff_builder\templates\analysis_handoff\00_START_HERE.md`
+    - `_internal\handoff_builder\templates\analysis_handoff\PROJECT_BRIEF.md`
+    - `_internal\handoff_builder\templates\analysis_handoff\OUTPUT_CONTRACT.md`
+    - `_internal\schemas\analysis_handoff\1.0.json`
+    - `_internal\schemas\edit_plan\3.0.json`
+    - `_internal\schemas\normalized_timeline\1.0.json`
+
+- Date: 2026-07-29
+- Repository: `oleg3479881328-code/AI-Handoff-Builder`
+- Broad v2 contract: `Yt-Dlp-Download-Manager` issue `#67`
+- HyperFrames contract: repository issue `#3`
+- Shotcut MCP proof contract: repository issue `#25`
+- Shotcut owner-facing GUI MVP contract: repository issue `#27`
+- One-file handoff workflow fix: repository issue `#10`
+- Handoff completeness defect: repository issue `#2`
+- Current branch: `experiment/shotcut-mcp-windows-proof`
+- Base branch: `feat/issue-16-preview-scroll-fix`
+- Draft PR: pending publication from `experiment/shotcut-mcp-windows-proof` -> `feat/issue-16-preview-scroll-fix`
+- Current phase: real Windows Shotcut MCP proof remains passed, and the same branch now adds an owner-facing Shotcut GUI MVP inside `Local Edit Runner (v2)` without replacing the existing FFmpeg production path
+
+## Issue #25 Snapshot
+
+- Gate 0:
+  - isolated worktree from base SHA `67b74e9d512012829efb9c990a1055d3f43eb59b`
+  - `python -m pytest -q` baseline in the clean Issue `#25` worktree:
+    - `124 passed`
+- Gate 1:
+  - official Shotcut `26.6.25` was not already available in the proof workspace
+  - official portable runtime was downloaded from the official Shotcut source and kept outside git
+- Gate 2:
+  - donor `matrodrigs/shotcut-mcp` pinned to `v1.5.0`
+  - full SHA behind the tag:
+    - `7e66c17b92c2058670ae5e4c21aa61e27c51d317`
+  - audit decision:
+    - `ACCEPT_FOR_ISOLATED_PROOF`
+  - audit document:
+    - `docs/shotcut-mcp-donor-audit.md`
+- Gate 3:
+  - official Shotcut portable runtime and donor checkout remain isolated outside the repository
+  - stdio server proof completed with a local JSON-RPC harness
+  - safety policy stayed strict:
+    - allowed roots only
+    - absolute paths required
+    - network resources disabled
+    - unsafe consumer properties disabled
+- Gate 4:
+  - repeated from scratch on one owner-selected real MP4
+  - all 15 required steps completed
+  - project readback proved a real timeline mutation:
+    - pre-edit revision:
+      - `0b9dbe445a750eea37c125dcadac627932a5d9cc3a03029219ea96650301e259`
+    - post-edit revision:
+      - `012c5dc02e3d3164dd996e2f1d369b7d1335b883be729292c59d48bdc6001625`
+  - proof artifacts remained local-only and outside git
+- Gate 5:
+  - added a narrow code-level Shotcut backend boundary:
+    - `handoff_builder/v2/render/shotcut_backend.py`
+    - `handoff_builder/v2/render/backends.py`
+  - existing FFmpeg render service remains unchanged and still instantiates `FFmpegBackend`
+- Gate 6:
+  - new focused adapter tests:
+    - `tests/test_v2_shotcut_backend.py`
+  - initial result:
+    - `14 passed`
+  - full suite after the final `A1` track adapter update:
+    - `138 passed`
+
+## Issue #27 Snapshot
+
+- Goal:
+  - turn the existing Shotcut proof boundary into a real owner-facing MVP inside the current Tkinter app
+  - keep FFmpeg as the default production path
+  - avoid a second application
+- New owner-facing surface inside `Local Edit Runner (v2)`:
+  - backend selector:
+    - `ffmpeg`
+    - `shotcut`
+  - pinned Shotcut runtime folder field
+  - pinned donor `shotcut_mcp_server.py` field
+  - `Check Status`
+  - `Reset Paths`
+  - `Build Editable Project`
+  - `Open Editable Project`
+  - `Open in Shotcut`
+- Persistence:
+  - new local settings store:
+    - `handoff_builder/v2/shotcut_settings.py`
+  - persisted under local app data:
+    - `shotcut_settings.json`
+  - auto-detects the already-proven local proof runtime when present
+- New orchestration layer:
+  - `handoff_builder/v2/services/shotcut_service.py`
+  - responsibilities:
+    - build editable `.mlt` project from imported preview plan `1.0`
+    - reuse the current render output folder
+    - render through Shotcut MCP into `reel.mp4`
+    - write preview / contact sheet / editable project artifacts under:
+      - `renders/<job>/shotcut/`
+    - keep the queue safe when the selected source job is already terminal
+- Live validation on Wednesday, July 29, 2026:
+  - targeted regression:
+    - `python -m pytest -q tests/test_v2_shotcut_backend.py tests/test_v2_shotcut_service.py tests/test_app_v2_ui.py`
+    - `20 passed in 3.09s`
+  - full suite:
+    - `python -m pytest -q`
+    - `142 passed in 49.64s`
+  - real service-path validation:
+    - workspace:
+      - `tmp_rc_real_e2e/workspace` from the existing local AI Handoff Builder acceptance set
+    - source package:
+      - `AI_EDIT_PACKAGE_REAL.zip`
+    - selected render job:
+      - `f35260850bb76dead667`
+    - build result:
+      - `renderer_status=shotcut_editable_ready`
+    - render result:
+      - `renderer_status=completed`
+      - output:
+        - `540x960`
+        - `30.0 fps`
+        - `1.834 s`
+        - `audio_present=1`
+        - SHA-256:
+          - `f0f94ee7b46e85ea1a3a9b95d6c899ea0c3f24676899c0a764f414fccdfcc234`
+  - visual proof:
+    - current application window screenshot with visible `Shotcut MCP` section captured locally on:
+      - Wednesday, July 29, 2026
+
+## New Verified Limitations From Issue #25
+
+- A raw donor checkout on Windows needs donor-root import visibility for detached render workers.
+- `render_status` can briefly surface a false terminal `failed` state before durable metadata settles to `completed`.
+- AI Handoff Builder now compensates for that race inside the adapter boundary before treating the job as failed.
+- The final repository-backed proof now materializes both:
+  - `V1`
+  - `A1`
+  inside the disposable Shotcut project readback, matching the Gate 4 structure contract.
+
+## Accepted Baseline Preserved
+
+- Existing standalone desktop app remains the only app surface:
+  - Tkinter GUI
+  - v1 Prepare Handoff ZIP builder
+  - v2 Local Edit Runner
+  - Voice Studio / Voicebox workflow
+  - CLI
+  - FFmpeg / ffprobe / ExifTool runtime
+  - PyInstaller packaging
+- Release-candidate baseline commit:
+  - `56d927a3e93f1ee4b161cbcfe55f729fc2207091`
+- Existing regression evidence:
+  - `python -m pytest -q` -> `87 passed in 48.49s`
+  - `python -m compileall handoff_builder app.py` -> success
+  - portable build -> success on 2026-07-23
+- Existing real end-to-end FFmpeg rerender proof remains intact.
+
+## Owner Decision Added
+
+HyperFrames will be evaluated **inside the existing AI Handoff Builder**, not as a second application.
+
+The integration is bounded as follows:
+
+- FFmpeg remains the default production renderer;
+- HyperFrames is optional, local, and experimental;
+- no cloud rendering;
+- no arbitrary AI-authored HTML or JavaScript execution;
+- only trusted repository-owned composition templates or allowlisted plan compilation;
+- no personal assets or rendered outputs in GitHub;
+- no merge to `main` without owner authorization.
+
+## Work Completed In This Step
+
+- Re-entered through Project Execution OS `START_HERE.md` and `docs/ROUTER.md`.
+- Read the active project entrypoint, state, latest log, current release-candidate branch, renderer service, semantic validation, schema dispatch, and edit-plan schema.
+- Confirmed the current edit-plan schema `1.0` supports only video assets and `video_segment` operations.
+- Confirmed the current render service directly uses the safe FFmpeg compiler/backend and remains the production default.
+- Checked the official HyperFrames repository and current official CLI/documentation as the selected existing donor.
+- Validated the local Windows runtime with:
+  - `node --version` -> `v24.13.0`
+  - `npm --version` -> `11.6.2`
+  - `hyperframes --version` -> `0.7.71`
+  - `hyperframes doctor --json`
+- Confirmed and copied the six private owner photographs into the ignored local prototype asset folder without modifying originals.
+- Upgraded the checked-in prototype from legacy single-file `comp.html` assumptions to the current HyperFrames `0.7.x` project shape:
+  - `prototypes/hyperframes/index.html`
+  - `prototypes/hyperframes/meta.json`
+  - `prototypes/hyperframes/hyperframes.json`
+  - `prototypes/hyperframes/package.json`
+- Kept `prototypes/hyperframes/comp.html` only as the original discovery draft, no longer a live root composition.
+- Implemented a bounded HyperFrames adapter under:
+  - `handoff_builder/v2/hyperframes_lab.py`
+- Added focused safety/regression coverage:
+  - `tests/test_v2_hyperframes_lab.py`
+- Added a minimal themed `HyperFrames Lab` control surface inside the existing Tkinter application:
+  - project-dir picker
+  - doctor refresh
+  - local preview launch
+  - local MP4 render
+  - cancel request
+  - open output folder
+- Updated:
+  - `prototypes/hyperframes/README.md`
+  - `app.py`
+
+## Fresh Coordinator Bridge And Voice Studio Update From 2026-07-25
+
+- Moved `Voice Studio` into the main application notebook as a first-class tab instead of a separate `Toplevel` window.
+- Kept the `Open Voice Studio` action in `Local Edit Runner (v2)` but changed it to switch the operator into the embedded `Voice Studio` tab and trigger a fresh runtime/job refresh there.
+- Added a bounded `Coordinator Bridge` block to `Local Edit Runner (v2)`:
+  - paste coordinator brief / scenario layout
+  - build a trusted local draft summary
+  - push the extracted voice script directly into `Voice Studio`
+  - save a local coordinator draft package into the active workspace
+  - reopen the saved draft folder from the UI
+- Added a new helper module:
+  - `handoff_builder/v2/coordinator_bridge.py`
+- The coordinator bridge currently supports:
+  - structured JSON briefs
+  - simple plain-text section briefs (`Title`, `Voice`, `Visual`, `Shots`, `Overlay`)
+  - trusted payload export with:
+    - `raw_html_allowed=false`
+    - `remote_urls_allowed=false`
+    - `render_target=local_windows_machine`
+- Added focused regression coverage:
+  - `tests/test_v2_coordinator_bridge.py`
+- Validation for this step:
+  - `python -m pytest -q tests/test_v2_coordinator_bridge.py` -> `3 passed in 0.13s`
+  - `python -m py_compile app.py handoff_builder/v2/coordinator_bridge.py` -> success
+
+## Trusted Prototype
+
+The checked-in prototype is designed for:
+
+- six private local photographs;
+- 1080x1920;
+- 30 FPS;
+- 12 seconds;
+- wide -> medium -> portrait -> close-up flow;
+- deterministic seek-driven pan/zoom and cross-fades;
+- no external scripts, fonts, media, or network dependencies.
+
+The actual photographs are intentionally not committed.
+
+Expected private source filenames:
+
+- `20260722_172637.jpg`
+- `20260722_172633.jpg`
+- `20260722_172635.jpg`
+- `20260722_172119.jpg`
+- `20260722_172122.jpg`
+- `20260722_172124.jpg`
+
+## Current Health
+
+- Existing application baseline: preserved
+- HyperFrames architecture decision: implemented
+- Repository prototype: validated against current HyperFrames CLI
+- Local Windows HyperFrames runtime: checked and working
+- Real owner-media HyperFrames MP4: rendered twice with identical SHA-256
+- Python adapter: implemented with allowlisted path and HTML safety checks
+- Tkinter HyperFrames Lab controls: implemented minimally inside the existing app
+- FFmpeg renderer default: preserved
+- Preview screenshot: satisfied with a loaded Studio capture showing the active project composition and timeline
+- Draft PR state: open as draft into `codex/release-candidate-light-dark-ui`
+- Voice Studio surface: now embedded as a notebook tab in the main desktop app
+- Coordinator workflow gap: reduced by local brief -> draft -> voice-script bridge inside `Local Edit Runner (v2)`
+- GitHub status checks: none configured for PR head `37dbaf1ae1a015e35fcfcd4b5eb9e9b956250424`; local regression evidence remains the validation source
+- Private assets / generated outputs: still ignored and untracked
+
+## Fresh HyperFrames Validation From 2026-07-25
+
+- Official CLI/runtime:
+  - `hyperframes --version` -> `0.7.71`
+  - `hyperframes doctor --json`
+    - required runtime checks passed for:
+      - Version
+      - Node.js
+      - FFmpeg
+      - FFprobe
+      - Chrome after `hyperframes browser ensure`
+    - optional checks still absent:
+      - `whisper-cpp`
+      - `TTS (Kokoro)`
+      - `BGM (MusicGen)`
+      - Docker running
+- Trusted prototype validation:
+  - `hyperframes lint . --json` -> `ok=true`, `0 error`, `0 warning`
+  - `hyperframes inspect .` -> `0 layout issues across 9 sample(s)`
+  - first render:
+    - `prototypes/hyperframes/out/hyperframes_photo_demo.mp4`
+    - size: `22269151` bytes
+    - duration: `12.000000`
+    - dimensions: `1080x1920`
+    - frame rate: `30/1`
+    - audio streams: `0`
+    - SHA-256: `C4CF14908710486616C28B3674E1EB0465FBFD92F5DA9CE3D19718DC3A5EE45D`
+  - second render:
+    - `prototypes/hyperframes/out/hyperframes_photo_demo_second.mp4`
+    - SHA-256: `C4CF14908710486616C28B3674E1EB0465FBFD92F5DA9CE3D19718DC3A5EE45D`
+  - determinism result:
+    - byte-identical output confirmed
+- Preview runtime evidence:
+  - `hyperframes preview . --background --no-open --force-new`
+  - local server responded `200` at `http://localhost:3002`
+  - active preview server listed on port `3002`
+  - loaded Studio route confirmed in a real browser session:
+    - `http://127.0.0.1:3002/#project/hyperframes?v=1&t=0&tab=renders&rc=1`
+  - screenshot artifacts:
+    - `prototypes/hyperframes/out/preview-studio.png`
+    - `prototypes/hyperframes/out/preview-studio-loaded.png`
+- In-app Tkinter validation:
+  - instantiated the existing `App()` locally
+  - confirmed the `Local Edit Runner (v2)` tab remains present
+  - executed the new `HyperFrames Lab` actions through the real UI methods:
+    - `Refresh Doctor`
+    - `Render MP4`
+  - UI returned:
+    - `HyperFrames render completed: 1080x1920 | 12.0s | fps=30.0 | sha256=D18B2EBF2F1CDAA46C0B700D351EC69670E06005E1D4B39A0CCB98554018E1C7`
+  - in-app render artifact:
+    - `prototypes/hyperframes/out/hyperframes_lab_render.mp4`
+- Final regression after the UI thread-safety fix:
+  - `python -m pytest -q tests/test_v2_hyperframes_lab.py` -> `8 passed in 0.15s`
+  - `python -m pytest -q` -> `95 passed in 28.69s`
+  - `python -m compileall app.py` -> success
+- Python regression and compile validation:
+  - `python -m pytest -q tests/test_v2_hyperframes_lab.py` -> `8 passed`
+  - `python -m pytest -q` -> `95 passed in 33.47s`
+  - `python -m compileall handoff_builder app.py` -> success
+- Live owner-facing Windows acceptance rerun on Saturday, July 25, 2026:
+  - relaunched the existing app through `run_windows.bat`
+  - confirmed the `Local Edit Runner (v2)` tab and `HyperFrames Lab` controls remain fully visible in both Light and Dark themes
+  - confirmed `Refresh Doctor` succeeds from the real Tkinter window
+  - identified and fixed a preview acceptance defect:
+    - the adapter originally exposed only the bare Studio root URL
+    - updated `handoff_builder/v2/hyperframes_lab.py` to return a project-aware deep-link while keeping the root URL as structured metadata
+    - new expected route shape:
+      - `http://localhost:3003/#project/hyperframes?v=1&t=0&tab=renders&rc=1`
+  - expanded the focused preview test:
+    - `tests/test_v2_hyperframes_lab.py`
+  - reran validation after the preview routing fix:
+    - `python -m pytest -q tests/test_v2_hyperframes_lab.py` -> `8 passed in 0.20s`
+    - `python -m pytest -q` -> `95 passed in 39.73s`
+  - browser proof from the live UI flow now shows:
+    - loaded `hyperframes` project in `HyperFrames Studio`
+    - six owner-photo thumbnails visible on the timeline
+    - scrubbed playhead at `00:04 / 00:12` with updated preview frame
+  - real UI render proof now shows:
+    - `HyperFrames render completed: 1080x1920 | 12.0s | fps=30.0 | sha256=D18B2EBF2F1CDAA46C0B700D351EC69670E06005E1D4B39A0CCB98554018E1C7`
+    - output file explorer window opened as `out - File Explorer`
+    - `ffprobe` for `prototypes/hyperframes/out/hyperframes_lab_render.mp4`:
+      - size: `22252596` bytes
+      - duration: `12.000000`
+      - dimensions: `1080x1920`
+      - frame rate: `30/1`
+      - audio streams: `0`
+- Final coordinator code-review hardening on Saturday, July 25, 2026:
+  - removed the owner-machine absolute path from `tests/test_v2_hyperframes_lab.py`
+  - switched the `.gitignore` assertion to a repository-relative path derived from the test file location
+  - tightened the trusted HyperFrames HTML/CSS safety boundary in `handoff_builder/v2/hyperframes_lab.py`
+  - trusted compositions now reject any remote `http://` / `https://` reference, including:
+    - remote image assets
+    - remote video/audio assets
+    - remote `<source>` media references
+    - remote CSS `url(...)` references
+  - expanded focused boundary tests accordingly
+  - validation after the hardening pass:
+    - `python -m pytest -q tests/test_v2_hyperframes_lab.py` -> `13 passed in 0.76s`
+    - `python -m pytest -q` -> `100 passed in 32.73s`
+    - `python -m compileall handoff_builder app.py` -> success
+
+## Update: Issue #16 Local Edit Runner scroll + current Preview target
+
+- Created and switched to the dedicated branch:
+  - `feat/issue-16-preview-scroll-fix`
+- Preserved the accepted owner-flow base from Issue `#14` and kept schema compatibility intact:
+  - schema `2.0` unchanged
+  - schema `2.1` unchanged
+  - no fallback to stale preview state
+- Fixed the `Local Edit Runner (v2)` operator path in `app.py`:
+  - wrapped the full v2 content in a vertically scrollable canvas/shell
+  - enabled wheel, touchpad, and scrollbar navigation
+  - kept lower sections reachable at normal and smaller window sizes
+  - auto-focused the latest render job/results after refreshes and `Run Next Pending`
+  - moved the large plan JSON into a collapsed diagnostics block instead of the main operator path
+- Fixed the stale `Open Preview` routing defect by binding Preview to the active imported plan identity instead of the old global HyperFrames project path:
+  - explicit active preview plan tracking now lives in the app state
+  - latest imported plan is used by default unless the operator explicitly selects another plan
+  - no silent fallback to a previous project is allowed when the current plan is not previewable
+- Added a new trusted preview compiler:
+  - `handoff_builder/v2/hyperframes_preview.py`
+  - creates workspace-local HyperFrames preview projects keyed by:
+    - `project_id`
+    - `plan_version`
+    - `plan_id`
+    - `plan_hash`
+  - copies only the resolved local assets needed for the active plan
+  - emits trusted local preview files:
+    - `index.html`
+    - `meta.json`
+    - `hyperframes.json`
+    - `package.json`
+    - `preview_identity.json`
+    - `preview_segments.json`
+- Added focused regression coverage:
+  - `tests/test_v2_hyperframes_preview.py`
+    - verifies `Marusia -> Samarkand -> restart -> explicit switch` preview identity behavior
+    - verifies the rebuilt preview contains only the current plan overlays/content
+  - `tests/test_app_v2_ui.py`
+    - verifies the scroll shell exists
+    - verifies diagnostics JSON is collapsible and hidden by default
+    - verifies latest job/results are auto-focused into view
+- Validation on Sunday, July 26, 2026:
+  - focused preview tests:
+    - `python -m pytest -q tests/test_v2_hyperframes_preview.py`
+    - result: `3 passed in 1.22s`
+  - focused UI + preview tests:
+    - `python -m pytest -q tests/test_v2_hyperframes_preview.py tests/test_app_v2_ui.py`
+    - result: `5 passed in 1.82s`
+  - affected-surface regression:
+    - `python -m pytest -q tests/test_v2_ai_edit_package_2.py tests/test_v2_gui_controller.py tests/test_v2_hyperframes_lab.py tests/test_v2_hyperframes_preview.py tests/test_app_v2_ui.py`
+    - result: `31 passed, 1 skipped in 10.49s`
+  - full suite:
+    - `python -m pytest -q`
+    - result: `124 passed in 42.33s`
+  - compile validation:
+    - `python -m py_compile app.py handoff_builder\\v2\\hyperframes_preview.py` -> success
+    - `python -m compileall handoff_builder app.py` -> success
 
 ## Immediate Next Actions
 
-1. Inspect reusable patterns from the current app, VIDEO MIX renderer/edit-plan code, FFmpeg behavior, and schema-validation tooling.
-2. Design the first persistent local project-workspace layer with SQLite migrations.
-3. Define versioned schemas for `ai_edit_package`, `edit_plan`, `edit_patch`, and `render_report`.
-4. Implement the first safe import-and-validate path before full rendering.
+1. Complete final coordinator verification on draft PR `#4`.
+2. Wait for an explicit owner decision before marking the PR ready or merging.
+3. Keep FFmpeg as default and expand HyperFrames only behind the same trusted-template boundary if a later phase is authorized.
 
-## Published Baseline
+## Constraints Still In Force
 
-- Remote URL: `https://github.com/oleg3479881328-code/AI-Handoff-Builder`
-- Remote branch: `main`
-- Verified remote SHA: `dbaa4199d45137370166c716b40f33b2eafa7c7c`
-
-## Constraints In Force
-
-- No arbitrary FFmpeg strings from AI packages.
+- Extend the existing standalone app only.
+- Do not modify originals on the owner machine.
+- Keep the safe FFmpeg renderer as default.
+- Use explicit subprocess argument arrays only.
 - No `shell=True`.
-- No new second application.
-- No cloud rendering.
-- Keep scope inside the issue `#67` contract unless the owner changes it.
+- No raw untrusted HTML/JavaScript execution.
+- No cloud rendering for HyperFrames.
+- No tracked private media or generated output.
+- No merge to `main` or `codex/release-candidate-light-dark-ui`.
+
+## Update: Issue #14 auto project-root workflow
+
+- Dedicated issue branch:
+  - `feat/issue-14-auto-project-root`
+- Owner-flow changes implemented:
+  - selecting a single source ZIP now derives:
+    - `project_root = parent(selected_source_zip)`
+    - `project_id = basename(project_root)`
+  - the app initializes compact local subfolders directly inside that project root:
+    - `handoffs`
+    - `incoming_ai_packages`
+    - `ai_packages`
+    - `analysis`
+    - `renders`
+    - `logs`
+    - existing voice/cache/patch folders remain intact for back-compat
+  - `ANALYSIS_HANDOFF.zip` now lands in:
+    - `project_root/handoffs/`
+  - the active local asset registry now lands in:
+    - `project_root/analysis/local_asset_registry.json`
+  - a local handoff identity index now lands in:
+    - `project_root/analysis/handoff_index.json`
+  - a persistent app-level project registry now remembers:
+    - `project_id`
+    - `handoff_id`
+    - `handoff_sha256`
+    - `project_root`
+- Import workflow changes implemented:
+  - `AI_EDIT_PACKAGE.zip` import can now resolve the saved project automatically without pre-opening a workspace
+  - if the saved mapping is missing, the UI now asks once for:
+    - the original project folder
+    - or the original source ZIP
+  - the fallback path is verified against the stored local handoff identity before saving the new mapping
+- Safety/compatibility preserved:
+  - no schema `2.0` mutation
+  - Issue `#10` schema `2.1` contract preserved
+  - no local absolute paths added to portable ZIP payloads
+  - no silent overwrite of outgoing handoff ZIPs
+  - no modification of originals
+- New regression coverage:
+  - `tests/test_pipeline.py`
+    - owner-root single-source ZIP workflow
+  - `tests/test_v2_gui_controller.py`
+    - auto-resolve import from saved mapping
+    - emergency fallback import from original project folder
+- Validation after implementation:
+  - `python -m pytest -q tests/test_pipeline.py tests/test_v2_ai_edit_package_2.py tests/test_v2_gui_controller.py` -> `38 passed in 16.69s`
+  - `python -m pytest -q` -> `119 passed in 39.32s`
+  - `python -m compileall handoff_builder app.py` -> success
+
+## Update: Issue #6 AI Edit Package 2.0 Bridge
+
+- New dedicated branch for this issue:
+  - `feat/issue-6-ai-edit-package-2`
+- Owner-approved working base SHA used for the issue branch:
+  - `de459744d4682a14290bb6d4ca7838cfc6475423`
+- Added `AI_EDIT_PACKAGE` schema `2.0`:
+  - plan-only ZIP
+  - required root manifest remains `ai_edit_package.json`
+  - no copied photo/video/audio payloads allowed
+- Added `edit_plan` schema `2.0` for the first photo vertical slice:
+  - stable `asset_id` references only
+  - allowlisted `image_hold`
+  - allowlisted `text_overlay`
+  - explicit output contract (`width`, `height`, `fps`, `audio`)
+- Expanded the local asset registry written by Prepare Handoff:
+  - `asset_id`
+  - absolute `source_path`
+  - `relative_source_path`
+  - `original_name`
+  - `media_type`
+  - `size_bytes`
+  - `sha256`
+  - `capture_time`
+  - `analysis_preview_paths`
+- Preserved the privacy boundary:
+  - `local_asset_registry.json` still stays outside `PROJECT_ANALYSIS_HANDOFF.zip`
+  - absolute local original paths are still excluded from the ChatGPT-facing archive
+- Added active local registry bridging for Local Edit Runner:
+  - workspace active registry path:
+    - `workspace/analysis/local_asset_registry.json`
+  - if missing there, import can bootstrap it from a trusted sibling `local_asset_registry.json` next to `AI_EDIT_PACKAGE.zip`
+- Added strict `asset_id` resolution and failure behavior:
+  - missing asset -> hard fail
+  - ambiguous asset -> hard fail
+  - checksum mismatch -> hard fail
+  - unreadable source -> hard fail
+  - no silent substitution
+- Added a new local photo render path for `edit_plan 2.0`:
+  - local originals resolved from the active registry
+  - staged overlay frames composed locally
+  - FFmpeg remains the production renderer
+  - output can now pass through parameterized QC instead of the old fixed `720x1280` preview-only check
+- Added focused regression coverage:
+  - `tests/test_v2_ai_edit_package_2.py`
+- Local validation after this step:
+  - `python -m pytest -q tests/test_pipeline.py tests/test_v2_vertical_slice.py tests/test_v2_preview_worker.py tests/test_v2_ai_edit_package_2.py` -> passed
+  - `python -m pytest -q` -> `109 passed in 29.30s`
+  - `python -m compileall handoff_builder app.py` -> success
+- Real acceptance proof completed on Saturday, July 25, 2026:
+  - source set:
+    - current local wedding-photo registry at `C:\\Users\\oleg3\\Desktop\\WEDDING_PROJECT_20260724_093205\\local_asset_registry.json`
+    - first 10 real local photographs selected from `zip_001_Photos-1-001_(4)`
+  - lightweight package proof:
+    - `tmp_issue6_acceptance/AI_EDIT_PACKAGE.zip`
+    - ZIP entries only:
+      - `ai_edit_package.json`
+      - `plans/plan-photos-issue6-10.json`
+  - render proof:
+    - `tmp_issue6_acceptance/workspace/renders/78d6ca7e6b67f69b1818/reel.mp4`
+    - duration: `10.0`
+    - dimensions: `1080x1920`
+    - FPS: `30.0`
+    - audio: `0`
+    - SHA-256: `0515025A8C677B72A99830DEC555CF38C74C6EFEC2D8B727EBCFD9911079205B`
+  - asset resolution proof:
+    - `tmp_issue6_acceptance/workspace/renders/78d6ca7e6b67f69b1818/asset_resolution.json`
+    - `resolved_asset_count=10`
+
+## Update: Issue #8 packaged release-candidate acceptance
+
+- Accepted release-candidate baseline verified on Saturday, July 25, 2026:
+  - branch: `codex/release-candidate-light-dark-ui`
+  - HEAD: `bd3867280c19b252489011c3c3b589c05c87c061`
+- Dedicated packaging-fix branch created per issue contract:
+  - `feat/issue-8-packaged-schema-fix`
+- Source validation on the accepted baseline after the packaging fix:
+  - `python -m pytest -q` -> `111 passed in 30.35s`
+  - `python -m compileall handoff_builder app.py` -> success
+  - `git diff --check` -> line-ending warning only for `build_exe.bat`, no content defects
+- Real packaged-build defect confirmed before any fix:
+  - frozen app contained `prototypes/hyperframes/`
+  - frozen app did **not** contain `_internal/schemas/`
+  - this broke the repository schema loader path for packaged `AI_EDIT_PACKAGE 2.0` workflows
+- Packaging fix implemented:
+  - `AI Handoff Builder.spec`
+    - now includes `('schemas', 'schemas')`
+  - `build_exe.bat`
+    - now includes `--add-data "schemas;schemas"`
+  - `tests/test_packaged_resources.py`
+    - guards both `prototypes/hyperframes` and `schemas` packaging entries
+- Post-fix packaged build evidence:
+  - build command:
+    - `cmd /c build_exe.bat`
+  - exe:
+    - `dist/AI Handoff Builder/AI Handoff Builder.exe`
+  - timestamp (UTC):
+    - `2026-07-25T19:47:29Z`
+  - size:
+    - `6233403` bytes
+  - SHA-256:
+    - `3737F885698D1F71AA9196474676B307E02AF66666D9CC6DA9B2BCCB298E2F97`
+  - packaged resources now confirmed present:
+    - `_internal/prototypes/hyperframes/`
+    - `_internal/schemas/ai_edit_package/1.0.json`
+    - `_internal/schemas/ai_edit_package/2.0.json`
+    - `_internal/schemas/edit_plan/1.0.json`
+    - `_internal/schemas/edit_plan/2.0.json`
+    - `_internal/schemas/edit_patch/1.0.json`
+    - `_internal/schemas/render_report/1.0.json`
+    - `_internal/schemas/voiceover_spec/1.0.json`
+- Packaged GUI acceptance progress:
+  - launched the rebuilt `AI Handoff Builder.exe`
+  - switched to `Local Edit Runner (v2)`
+  - created/opened the packaged workspace at:
+    - `C:\Users\oleg3\Desktop\AI Handoff Workspace`
+  - packaged UI status reached:
+    - `Workspace готов.`
+  - screenshot artifact:
+    - `tmp_issue8_open_workspace_probe/after-open.png`
+- Remaining blocker at handoff time:
+  - unattended automation of the standard Windows `Выберите AI_EDIT_PACKAGE.zip` file picker did not complete the import step yet
+  - the dialog accepts the target `AI_EDIT_PACKAGE.zip` path into the `File name` field, but the automated confirmation path has not yet produced:
+    - `workspace/ai_packages/*/ai_edit_package.json`
+    - `workspace/analysis/local_asset_registry.json`
+  - packaged owner-facing workspace open is therefore proven, but packaged end-to-end import/render acceptance is still pending one final dialog-confirmation step
+
+## Update: Issue #10 handoff-derived AI Edit Package 2.1
+
+- Dedicated issue branch:
+  - `feat/issue-10-handoff-derived-package`
+- Accepted base carried forward:
+  - `codex/release-candidate-light-dark-ui`
+  - plus the packaged schema-resource fix from Issue `#8`
+- New schema support added without mutating `2.0`:
+  - `schemas/ai_edit_package/2.1.json`
+  - `schemas/edit_plan/2.1.json`
+- `2.1` contract:
+  - ChatGPT-facing photo plans now require only handoff-available asset fields:
+    - `asset_id`
+    - `media_type`
+    - optional `original_name`
+  - original-file `sha256` and `size_bytes` are no longer required from ChatGPT
+  - local original-file integrity remains enforced from the active workspace registry
+- Runtime changes:
+  - `handoff_builder/v2/plans/schema.py`
+    - schema dispatch now supports `ai_edit_package 2.1` and `edit_plan 2.1`
+  - `handoff_builder/v2/plans/semantic.py`
+    - local photo validation now accepts `2.0` and `2.1`
+    - `2.1` resolves originals from the registry without requiring plan-declared integrity fields
+  - `handoff_builder/v2/assets/local_registry.py`
+    - registry resolution can now either:
+      - enforce plan-declared integrity for `2.0`
+      - enforce registry-owned integrity for `2.1`
+    - still hard-fails on:
+      - missing asset
+      - ambiguous asset
+      - unreadable source
+      - checksum mismatch
+      - size mismatch
+  - `handoff_builder/v2/services/import_service.py`
+    - `2.1` imports require the active workspace registry only
+    - no sibling sidecar fallback is allowed for `2.1`
+  - `handoff_builder/v2/packages/importer.py`
+    - no-media package enforcement now covers `2.1`
+  - `handoff_builder/v2/render/compiler.py`
+    - render plans preserve the validated source schema version
+  - `handoff_builder/v2/services/render_service.py`
+    - local-photo render path now covers `2.0` and `2.1`
+    - size mismatch maps to a distinct error code
+- Tests:
+  - `tests/test_v2_ai_edit_package_2.py`
+    - active workspace registry path for `2.1`
+    - missing active registry rejection
+    - checksum mismatch rejection
+    - size mismatch rejection
+    - `2.1` slideshow render
+  - `tests/test_v2_architecture.py`
+    - schema loading and dispatch for `2.1`
+- Validation after the implementation:
+  - `python -m pytest -q tests/test_v2_architecture.py tests/test_v2_ai_edit_package_2.py` -> `21 passed in 6.79s`
+  - `python -m pytest -q` -> `116 passed in 40.82s`
+  - `python -m compileall handoff_builder app.py` -> success
+- Handoff-derived package proof:
+  - handoff input:
+    - `C:\Users\oleg3\Desktop\WEDDING_PROJECT_ANALYSIS_HANDOFF.zip`
+  - created package using only handoff contents:
+    - `tmp_issue10_acceptance_tuned/AI_EDIT_PACKAGE.zip`
+  - entries only:
+    - `ai_edit_package.json`
+    - `plans/plan-wedding-8.json`
+  - package checks:
+    - no media payloads
+    - no `source_path`
+    - no registry file
+    - no local-registry reference strings
+- Source acceptance:
+  - matching workspace:
+    - `tmp_issue10_acceptance_tuned/workspace`
+  - imported package:
+    - `schema_version=2.1`
+    - `project_id=WEDDING_PROJECT`
+  - completed render:
+    - `tmp_issue10_acceptance_tuned/workspace/renders/4b29d9e5e82e7d559313/reel.mp4`
+    - SHA-256: `60c1e8c84dd905a04f74de66a6eb1f3320e784ce57a6ef8554d579fa90e99592`
+    - `1080x1920`
+    - `30.0 fps`
+    - `7.766667 s`
+    - `audio_present=0`
+  - asset resolution:
+    - `tmp_issue10_acceptance_tuned/workspace/renders/4b29d9e5e82e7d559313/asset_resolution.json`
+    - `resolved_asset_count=8`
+- Packaged `.exe` proof:
+  - rebuilt app:
+    - `dist/AI Handoff Builder/AI Handoff Builder.exe`
+    - last write UTC: `2026-07-26T00:17:02Z`
+    - size: `6233896` bytes
+    - SHA-256: `DFC1E0647A33C3740B4F1F59D3BB7C0CAE41E766C9AAFB838C7C09C39CCBCCBB`
+  - frozen schema resources confirmed:
+    - `_internal/schemas/ai_edit_package/2.1.json`
+    - `_internal/schemas/edit_plan/2.1.json`
+  - packaged UI first proved a correct safety failure on the wrong workspace:
+    - screenshot:
+      - `tmp_issue10_packaged_evidence/11-after-import-third-pass.png`
+    - error:
+      - `Package project mismatch: WEDDING_PROJECT != proj-photos-issue6`
+  - packaged UI then completed the flow on the matching existing workspace:
+    - matching workspace:
+      - `tmp_issue10_acceptance_tuned/workspace`
+    - packaged import ZIP:
+      - `tmp_issue10_acceptance_tuned/AI_EDIT_PACKAGE_packaged.zip`
+      - same handoff-derived 8-photo contract with a distinct `plan_id=plan-wedding-8-packaged` so the packaged run would not collide with the earlier source-acceptance row already present in the same workspace
+    - packaged UI screenshots:
+      - `tmp_issue10_packaged_evidence/13-matching-workspace-opened.png`
+      - `tmp_issue10_packaged_evidence/14-after-successful-import.png`
+      - `tmp_issue10_packaged_evidence/16-final-packaged-ui.png`
+    - packaged workspace rows:
+      - package:
+        - `package_id=59f161063888f781`
+        - `schema_version=2.1`
+      - plan:
+        - `edit_plan_id=plan-wedding-8-packaged`
+      - render job:
+        - `render_job_id=8bc66f8c13d8c14ae583`
+        - `status=completed`
+        - `started_at=2026-07-26T00:29:07Z`
+        - `finished_at=2026-07-26T00:29:13Z`
+    - packaged render output:
+      - `tmp_issue10_acceptance_tuned/workspace/renders/8bc66f8c13d8c14ae583/reel.mp4`
+      - SHA-256: `60c1e8c84dd905a04f74de66a6eb1f3320e784ce57a6ef8554d579fa90e99592`
+      - `1080x1920`
+      - `30.0 fps`
+      - `7.766667 s`
+      - `audio_present=0`
+    - packaged asset resolution:
+      - `tmp_issue10_acceptance_tuned/workspace/renders/8bc66f8c13d8c14ae583/asset_resolution.json`
+      - `resolved_asset_count=8`
