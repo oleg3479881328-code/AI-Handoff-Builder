@@ -9,8 +9,10 @@ from typing import Any
 class BuilderConfig:
     project_name: str
     output_dir: Path
+    project_id: str | None = None
     workspace_root: Path | None = None
     source_zip_path: Path | None = None
+    include_local_path_context: bool = True
     include_video_proxies: bool = True
     gps_export_mode: str = "rounded"
     worker_count: int = 2
@@ -31,6 +33,8 @@ class BuilderConfig:
             raise ValueError(
                 "gps_export_mode must be one of: exact, rounded, venue_label_only, excluded"
             )
+        if self.project_id is None:
+            self.project_id = self.project_name
 
 
 @dataclass(slots=True)
@@ -42,6 +46,7 @@ class AssetRecord:
     relative_source_path: str
     extension: str
     size_bytes: int
+    original_project_path: str | None = None
     status: str = "pending"
     error: str | None = None
     duration_ms: int | None = None
@@ -64,6 +69,7 @@ class AssetRecord:
     analysis_copy: str | None = None
     proxy: str | None = None
     storyboard: str | None = None
+    proxy_project_path: str | None = None
     scene_ids: list[str] = field(default_factory=list)
 
     def to_dict(self) -> dict[str, Any]:
@@ -100,9 +106,12 @@ class BuildResult:
     validation_path: Path
     validation: dict[str, Any]
     failed_sources: list[str]
+    project_id: str | None = None
+    project_name: str | None = None
     metadata_warnings_path: Path | None = None
     local_asset_registry_path: Path | None = None
     project_root: Path | None = None
     handoff_id: str | None = None
     handoff_sha256: str | None = None
+    handoff_content_hash: str | None = None
     canceled: bool = False

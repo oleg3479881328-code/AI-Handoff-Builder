@@ -6,8 +6,10 @@ import queue
 import subprocess
 import sys
 import threading
+import time
 import tkinter as tk
 import webbrowser
+from dataclasses import dataclass
 from pathlib import Path
 from tkinter import filedialog, ttk
 
@@ -16,6 +18,7 @@ from PIL import Image, ImageTk
 from handoff_builder.models import BuildResult, BuilderConfig
 from handoff_builder.pipeline import HandoffBuilder
 from handoff_builder.theme import ThemePalette, ThemeSettingsStore, get_theme_palette
+from handoff_builder.version import APP_DISPLAY_NAME, APP_VERSION
 from handoff_builder.v2.coordinator_bridge import CoordinatorDraft, build_coordinator_draft, draft_to_payload, draft_to_summary
 from handoff_builder.v2.gui_controller import V2RunnerController
 from handoff_builder.v2.hyperframes_lab import HyperFramesAdapter, HyperFramesLabError
@@ -25,7 +28,15 @@ from handoff_builder.v2.hyperframes_preview import (
     previewable_plan,
     resolve_active_preview_plan_id,
 )
-from handoff_builder.v2.services.import_service import resolve_workspace_for_package
+from handoff_builder.v2.services.shotcut_service import (
+    build_editable_shotcut_project,
+    describe_shotcut_runtime,
+    open_shotcut_project,
+    render_shotcut_job,
+)
+from handoff_builder.v2.shotcut_settings import ShotcutAppSettings, ShotcutSettingsStore
+from handoff_builder.v2.services.import_service import resolve_workspace_for_package, resolve_workspace_for_plan
+from handoff_builder.utils import slugify
 from handoff_builder.v2.services import (
     list_voice_jobs,
     show_plan,
@@ -69,10 +80,57 @@ def _default_hyperframes_project_root() -> Path:
     return candidates[0]
 
 
+@dataclass(frozen=True, slots=True)
+class PackagedAcceptanceConfig:
+    source_zip: Path
+    edit_plan_json: Path
+    output_dir: Path
+
+
+def load_packaged_acceptance_config(env: dict[str, str] | None = None) -> PackagedAcceptanceConfig | None:
+    env_map = env or os.environ
+    if env_map.get("AIHB_PACKAGED_ACCEPTANCE") != "1":
+        return None
+    source_zip = _require_absolute_env_path(env_map, "AIHB_ACCEPTANCE_SOURCE_ZIP", expected_suffix=".zip", must_exist=True)
+    edit_plan_json = _require_absolute_env_path(
+        env_map,
+        "AIHB_ACCEPTANCE_EDIT_PLAN_JSON",
+        expected_suffix=".json",
+        must_exist=False,
+    )
+    output_dir = _require_absolute_env_path(env_map, "AIHB_ACCEPTANCE_OUTPUT_DIR", must_exist=False)
+    return PackagedAcceptanceConfig(
+        source_zip=source_zip,
+        edit_plan_json=edit_plan_json,
+        output_dir=output_dir,
+    )
+
+
+def _require_absolute_env_path(
+    env_map: dict[str, str],
+    name: str,
+    *,
+    expected_suffix: str | None = None,
+    must_exist: bool,
+) -> Path:
+    raw = (env_map.get(name) or "").strip()
+    if not raw:
+        raise ValueError(f"{name} is required when AIHB_PACKAGED_ACCEPTANCE=1.")
+    candidate = Path(raw)
+    if not candidate.is_absolute():
+        raise ValueError(f"{name} must be an absolute path.")
+    if expected_suffix and candidate.suffix.lower() != expected_suffix.lower():
+        raise ValueError(f"{name} must end with {expected_suffix}.")
+    if must_exist and not candidate.exists():
+        raise ValueError(f"{name} does not exist: {candidate}")
+    return candidate.resolve(strict=False)
+
+
 class App(tk.Tk):
     def __init__(self) -> None:
+        self.acceptance_config = load_packaged_acceptance_config()
         super().__init__()
-        self.title("AI Handoff Builder")
+        self.title(f"{APP_DISPLAY_NAME} - {APP_VERSION}")
         self.geometry("1200x860")
         self.minsize(980, 720)
         self.style = ttk.Style(self)
@@ -83,6 +141,14 @@ class App(tk.Tk):
         self.theme_text_widgets: list[tk.Text] = []
         self.theme_listboxes: list[tk.Listbox] = []
         self.theme_windows: list[tk.Misc] = [self]
+        self.acceptance_banner_text = tk.StringVar(value="")
+        self.acceptance_mode_enabled = self.acceptance_config is not None
+        self.acceptance_status_path: Path | None = None
+        self.acceptance_events_path: Path | None = None
+        self.acceptance_stage = "disabled"
+        self.acceptance_wait_deadline = 0.0
+        self.acceptance_expected_job_id: str | None = None
+        self.acceptance_project_root: Path | None = None
 
         self.sources: list[Path] = []
         self.output_dir = tk.StringVar(value=str(Path.home() / "Desktop"))
@@ -99,11 +165,13 @@ class App(tk.Tk):
         self.active_builder: HandoffBuilder | None = None
         self.worker_count = tk.IntVar(value=2)
         self.retry_only_failed = False
+        self.v1_settings_expanded = False
 
         self.v2_controller = V2RunnerController(self.events)
         self.v2_workspace_path = tk.StringVar(value=str(Path.home() / "Desktop" / "AI Handoff Workspace"))
         self.v2_project_id = tk.StringVar(value="proj-1")
-        self.v2_status_text = tk.StringVar(value="Выберите AI_EDIT_PACKAGE.zip или откройте workspace вручную.")
+        self.v2_backend_name = tk.StringVar(value="ffmpeg")
+        self.v2_status_text = tk.StringVar(value="Выберите Edit Plan JSON или откройте project folder вручную.")
         self.v2_summary_text = ""
         self.v2_qc_text = ""
         self.v2_current_details: dict | None = None
@@ -113,6 +181,19 @@ class App(tk.Tk):
         self.v2_diagnostics_visible = False
         self.v2_first_frame_image: ImageTk.PhotoImage | None = None
         self.v2_busy = False
+        self.shotcut_settings_store = ShotcutSettingsStore()
+        self.shotcut_settings = self.shotcut_settings_store.load()
+        self.shotcut_runtime_dir = tk.StringVar(value=self.shotcut_settings.runtime_dir)
+        self.shotcut_server_script = tk.StringVar(value=self.shotcut_settings.server_script)
+        self.include_local_path_context = tk.BooleanVar(value=self.shotcut_settings.include_local_path_context)
+        self.shotcut_runtime_text = tk.StringVar(
+            value="Shotcut: выберите runtime folder и MCP script или нажмите Check Status."
+        )
+        self.shotcut_status_text = tk.StringVar(
+            value="Shotcut backend пока не активирован. FFmpeg остаётся основным путём по умолчанию."
+        )
+        self.shotcut_current_cancel_event: threading.Event | None = None
+        self.shotcut_current_render_job_id: str | None = None
         self.main_notebook: ttk.Notebook | None = None
         self.voice_tab_loaded_once = False
         self.voice_base_url = tk.StringVar(value="http://127.0.0.1:17493")
@@ -144,10 +225,28 @@ class App(tk.Tk):
         self.coordinator_status_text = tk.StringVar(value="Вставьте coordinator brief и соберите trusted local draft.")
         self.coordinator_last_draft: CoordinatorDraft | None = None
         self.coordinator_last_saved_dir: Path | None = None
+        if self.acceptance_config is not None:
+            self.output_dir.set(str(self.acceptance_config.output_dir))
+            self.acceptance_config.edit_plan_json.parent.mkdir(parents=True, exist_ok=True)
+            acceptance_dir = self.acceptance_config.output_dir / "_packaged_acceptance"
+            acceptance_dir.mkdir(parents=True, exist_ok=True)
+            self.acceptance_status_path = acceptance_dir / "status.json"
+            self.acceptance_events_path = acceptance_dir / "events.jsonl"
+            self.acceptance_banner_text.set(
+                "PACKAGED ACCEPTANCE MODE ACTIVE | deterministic env-path harness | non-production"
+            )
+            self._acceptance_write_state(
+                "initialized",
+                source_zip=str(self.acceptance_config.source_zip),
+                edit_plan_json=str(self.acceptance_config.edit_plan_json),
+                output_dir=str(self.acceptance_config.output_dir),
+            )
 
         self._build_ui()
         self._apply_theme()
         self.after(120, self._poll_events)
+        if self.acceptance_config is not None:
+            self.after(250, self._acceptance_start)
 
     def _build_ui(self) -> None:
         outer = ttk.Frame(self, padding=12, style="App.TFrame")
@@ -159,7 +258,17 @@ class App(tk.Tk):
 
         title_col = ttk.Frame(header, style="App.TFrame")
         title_col.grid(row=0, column=0, sticky="w")
-        ttk.Label(title_col, text="AI Handoff Builder", style="Title.TLabel").pack(anchor="w")
+        ttk.Label(
+            title_col,
+            text=f"{APP_DISPLAY_NAME} - {APP_VERSION}",
+            style="Title.TLabel",
+        ).pack(anchor="w")
+        self.app_version_label = ttk.Label(
+            title_col,
+            text=f"Version: {APP_VERSION}",
+            style="Muted.TLabel",
+        )
+        self.app_version_label.pack(anchor="w", pady=(2, 0))
         ttk.Label(
             title_col,
             text="v1 Prepare Handoff + v2 Local Edit Runner в одном Windows приложении",
@@ -186,6 +295,15 @@ class App(tk.Tk):
             command=self._on_theme_changed,
             style="App.TRadiobutton",
         ).pack(side="left")
+
+        if self.acceptance_mode_enabled:
+            ttk.Label(
+                outer,
+                textvariable=self.acceptance_banner_text,
+                style="Warning.TLabel",
+                wraplength=1120,
+                justify="left",
+            ).pack(fill="x", pady=(0, 10), anchor="w")
 
         self.main_notebook = ttk.Notebook(outer, style="App.TNotebook")
         self.main_notebook.pack(fill="both", expand=True)
@@ -215,7 +333,7 @@ class App(tk.Tk):
 
         ttk.Label(
             outer,
-            text="ZIP / папка / файлы → один проверенный PROJECT_ANALYSIS_HANDOFF.zip",
+            text="ZIP / папка / файлы → один проверенный <project_name>_ANALYSIS_HANDOFF.zip",
         ).pack(anchor="w", pady=(0, 12))
 
         source_frame = ttk.LabelFrame(outer, text="Исходные материалы", padding=10)
@@ -232,31 +350,50 @@ class App(tk.Tk):
         self.source_list.pack(fill="both", expand=True, pady=(10, 0))
         self._register_listbox(self.source_list)
 
-        settings = ttk.LabelFrame(outer, text="Настройки", padding=10)
-        settings.pack(fill="x", pady=12)
+        self.v1_settings_toggle_button = ttk.Button(
+            outer,
+            text="Показать настройки",
+            command=self._toggle_v1_settings,
+            style="Secondary.TButton",
+        )
+        self.v1_settings_toggle_button.pack(anchor="w", pady=(12, 0))
 
-        ttk.Label(settings, text="Название проекта:").grid(row=0, column=0, sticky="w")
-        ttk.Entry(settings, textvariable=self.project_name).grid(row=0, column=1, sticky="ew", padx=(8, 0))
-        ttk.Label(settings, text="Куда сохранить:").grid(row=1, column=0, sticky="w", pady=(8, 0))
-        ttk.Entry(settings, textvariable=self.output_dir).grid(row=1, column=1, sticky="ew", padx=(8, 0), pady=(8, 0))
-        ttk.Button(settings, text="Выбрать", command=self._choose_output).grid(row=1, column=2, padx=(8, 0), pady=(8, 0))
+        self.v1_settings_frame = ttk.LabelFrame(outer, text="Настройки", padding=10)
+        self.v1_settings_frame.pack(fill="x", pady=(8, 12))
+
+        ttk.Label(self.v1_settings_frame, text="Название проекта:").grid(row=0, column=0, sticky="w")
+        ttk.Entry(self.v1_settings_frame, textvariable=self.project_name).grid(row=0, column=1, sticky="ew", padx=(8, 0))
+        ttk.Label(self.v1_settings_frame, text="Куда сохранить:").grid(row=1, column=0, sticky="w", pady=(8, 0))
+        ttk.Entry(self.v1_settings_frame, textvariable=self.output_dir).grid(
+            row=1, column=1, sticky="ew", padx=(8, 0), pady=(8, 0)
+        )
+        ttk.Button(self.v1_settings_frame, text="Выбрать", command=self._choose_output).grid(
+            row=1, column=2, padx=(8, 0), pady=(8, 0)
+        )
         ttk.Checkbutton(
-            settings,
+            self.v1_settings_frame,
             text="Включить лёгкие 720p video proxies в ZIP",
             variable=self.include_proxies,
         ).grid(row=2, column=1, sticky="w", pady=(8, 0))
-        ttk.Label(settings, text="GPS export mode:").grid(row=3, column=0, sticky="w", pady=(8, 0))
+        ttk.Label(self.v1_settings_frame, text="GPS export mode:").grid(row=3, column=0, sticky="w", pady=(8, 0))
         ttk.Combobox(
-            settings,
+            self.v1_settings_frame,
             textvariable=self.gps_export_mode,
             values=("exact", "rounded", "venue_label_only", "excluded"),
             state="readonly",
         ).grid(row=3, column=1, sticky="w", padx=(8, 0), pady=(8, 0))
-        ttk.Label(settings, text="Параллельных workers:").grid(row=4, column=0, sticky="w", pady=(8, 0))
-        ttk.Spinbox(settings, from_=1, to=2, textvariable=self.worker_count, width=8).grid(
+        ttk.Label(self.v1_settings_frame, text="Параллельных workers:").grid(row=4, column=0, sticky="w", pady=(8, 0))
+        ttk.Spinbox(self.v1_settings_frame, from_=1, to=2, textvariable=self.worker_count, width=8).grid(
             row=4, column=1, sticky="w", padx=(8, 0), pady=(8, 0)
         )
-        settings.columnconfigure(1, weight=1)
+        ttk.Checkbutton(
+            self.v1_settings_frame,
+            text="Включить self-describing local path context для direct Shotcut MLT",
+            variable=self.include_local_path_context,
+            command=self._shotcut_save_settings,
+        ).grid(row=5, column=1, sticky="w", pady=(8, 0))
+        self.v1_settings_frame.columnconfigure(1, weight=1)
+        self.v1_settings_frame.pack_forget()
 
         ttk.Progressbar(outer, variable=self.progress_value, maximum=100).pack(fill="x")
         ttk.Label(outer, textvariable=self.status_text).pack(anchor="w", pady=(6, 6))
@@ -301,7 +438,7 @@ class App(tk.Tk):
 
         outer = self.v2_scroll_content
         outer.columnconfigure(0, weight=1)
-        outer.rowconfigure(6, weight=1)
+        outer.rowconfigure(7, weight=1)
 
         workspace_frame = ttk.LabelFrame(outer, text="Workspace", padding=10)
         workspace_frame.grid(row=0, column=0, sticky="ew")
@@ -319,7 +456,7 @@ class App(tk.Tk):
 
         action_frame = ttk.Frame(outer)
         action_frame.grid(row=1, column=0, sticky="ew", pady=(10, 0))
-        self.v2_import_package_button = ttk.Button(action_frame, text="Import AI_EDIT_PACKAGE.zip", command=self._v2_import_package)
+        self.v2_import_package_button = ttk.Button(action_frame, text="Import Edit Plan JSON", command=self._v2_import_package)
         self.v2_import_package_button.pack(side="left")
         self.v2_import_patch_button = ttk.Button(action_frame, text="Import AI_EDIT_PATCH", command=self._v2_import_patch)
         self.v2_import_patch_button.pack(side="left", padx=(8, 0))
@@ -337,8 +474,53 @@ class App(tk.Tk):
 
         ttk.Label(outer, textvariable=self.v2_status_text).grid(row=2, column=0, sticky="w", pady=(8, 8))
 
+        shotcut_frame = ttk.LabelFrame(outer, text="Shotcut MCP", padding=10)
+        shotcut_frame.grid(row=3, column=0, sticky="ew")
+        shotcut_frame.columnconfigure(1, weight=1)
+        ttk.Label(shotcut_frame, text="Render backend:").grid(row=0, column=0, sticky="w")
+        ttk.Combobox(
+            shotcut_frame,
+            textvariable=self.v2_backend_name,
+            values=("ffmpeg", "shotcut"),
+            state="readonly",
+            width=18,
+        ).grid(row=0, column=1, sticky="w", padx=(8, 8))
+        ttk.Button(shotcut_frame, text="Check Status", command=self._shotcut_check_status).grid(row=0, column=2, sticky="e")
+        ttk.Button(shotcut_frame, text="Reset Paths", command=self._shotcut_reset_paths).grid(row=0, column=3, sticky="e", padx=(8, 0))
+
+        ttk.Label(shotcut_frame, text="Runtime folder:").grid(row=1, column=0, sticky="w", pady=(8, 0))
+        ttk.Entry(shotcut_frame, textvariable=self.shotcut_runtime_dir).grid(
+            row=1, column=1, columnspan=2, sticky="ew", padx=(8, 8), pady=(8, 0)
+        )
+        ttk.Button(shotcut_frame, text="Choose", command=self._shotcut_choose_runtime).grid(row=1, column=3, sticky="e", pady=(8, 0))
+
+        ttk.Label(shotcut_frame, text="MCP script:").grid(row=2, column=0, sticky="w", pady=(8, 0))
+        ttk.Entry(shotcut_frame, textvariable=self.shotcut_server_script).grid(
+            row=2, column=1, columnspan=2, sticky="ew", padx=(8, 8), pady=(8, 0)
+        )
+        ttk.Button(shotcut_frame, text="Choose", command=self._shotcut_choose_server_script).grid(row=2, column=3, sticky="e", pady=(8, 0))
+
+        shotcut_actions = ttk.Frame(shotcut_frame, style="App.TFrame")
+        shotcut_actions.grid(row=3, column=0, columnspan=4, sticky="ew", pady=(10, 0))
+        self.shotcut_build_button = ttk.Button(
+            shotcut_actions, text="Build editable Shotcut project", command=self._shotcut_build_selected_project
+        )
+        self.shotcut_build_button.pack(side="left")
+        self.shotcut_open_project_button = ttk.Button(
+            shotcut_actions, text="Open Editable Project", command=self._shotcut_open_editable_project
+        )
+        self.shotcut_open_project_button.pack(side="left", padx=(8, 0))
+        self.shotcut_open_button = ttk.Button(shotcut_actions, text="Open in Shotcut", command=self._shotcut_open_in_shotcut)
+        self.shotcut_open_button.pack(side="left", padx=(8, 0))
+        ttk.Label(shotcut_frame, textvariable=self.shotcut_runtime_text, wraplength=980, justify="left").grid(
+            row=4, column=0, columnspan=4, sticky="w", pady=(8, 0)
+        )
+        ttk.Label(shotcut_frame, textvariable=self.shotcut_status_text, wraplength=980, justify="left").grid(
+            row=5, column=0, columnspan=4, sticky="w", pady=(6, 0)
+        )
+
         coordinator_frame = ttk.LabelFrame(outer, text="Coordinator Bridge", padding=10)
-        coordinator_frame.grid(row=3, column=0, sticky="ew")
+        coordinator_frame.grid(row=4, column=0, sticky="ew", pady=(10, 0))
         coordinator_frame.columnconfigure(0, weight=3)
         coordinator_frame.columnconfigure(1, weight=2)
         coordinator_frame.rowconfigure(1, weight=1)
@@ -374,7 +556,7 @@ class App(tk.Tk):
         )
 
         hyperframes_frame = ttk.LabelFrame(outer, text="HyperFrames Lab", padding=10)
-        hyperframes_frame.grid(row=4, column=0, sticky="ew", pady=(10, 0))
+        hyperframes_frame.grid(row=5, column=0, sticky="ew", pady=(10, 0))
         hyperframes_frame.columnconfigure(1, weight=1)
         ttk.Label(hyperframes_frame, text="Project dir:").grid(row=0, column=0, sticky="w")
         ttk.Entry(hyperframes_frame, textvariable=self.hyperframes_project_path).grid(row=0, column=1, sticky="ew", padx=(8, 8))
@@ -400,7 +582,7 @@ class App(tk.Tk):
         )
 
         summary_frame = ttk.LabelFrame(outer, text="Import AI Plan / Patch Summary", padding=10)
-        summary_frame.grid(row=5, column=0, sticky="nsew", pady=(10, 0))
+        summary_frame.grid(row=6, column=0, sticky="nsew", pady=(10, 0))
         summary_frame.columnconfigure(0, weight=1)
         summary_actions = ttk.Frame(summary_frame, style="Surface.TFrame")
         summary_actions.grid(row=0, column=0, sticky="ew")
@@ -425,7 +607,7 @@ class App(tk.Tk):
         self.v2_summary_json_frame.grid_remove()
 
         lower = ttk.Panedwindow(outer, orient="horizontal")
-        lower.grid(row=6, column=0, sticky="nsew", pady=(10, 0))
+        lower.grid(row=7, column=0, sticky="nsew", pady=(10, 0))
 
         queue_frame = ttk.Frame(lower, padding=4)
         queue_frame.columnconfigure(0, weight=1)
@@ -949,6 +1131,88 @@ class App(tk.Tk):
         if value:
             self.output_dir.set(value)
 
+    def _acceptance_set_banner(self, message: str) -> None:
+        if self.acceptance_mode_enabled:
+            self.acceptance_banner_text.set(f"PACKAGED ACCEPTANCE MODE ACTIVE | {message}")
+
+    def _acceptance_write_state(self, stage: str, **payload: object) -> None:
+        self.acceptance_stage = stage
+        if not self.acceptance_mode_enabled or self.acceptance_status_path is None or self.acceptance_events_path is None:
+            return
+        state = {
+            "stage": stage,
+            "timestamp": time.strftime("%Y-%m-%dT%H:%M:%S"),
+            "payload": payload,
+            "status_text": self.status_text.get(),
+            "v2_status_text": self.v2_status_text.get(),
+            "shotcut_status_text": self.shotcut_status_text.get(),
+            "banner_text": self.acceptance_banner_text.get(),
+        }
+        self.acceptance_status_path.write_text(json.dumps(state, ensure_ascii=False, indent=2), encoding="utf-8")
+        with self.acceptance_events_path.open("a", encoding="utf-8") as handle:
+            handle.write(json.dumps(state, ensure_ascii=False) + "\n")
+
+    def _acceptance_mark_failed(self, stage: str, message: str) -> None:
+        self._acceptance_set_banner(f"{stage} FAILED | {message}")
+        self._acceptance_write_state(stage, error=message)
+
+    def _acceptance_start(self) -> None:
+        if self.acceptance_config is None:
+            return
+        self._clear()
+        self.main_notebook.select(self.v1_tab)
+        self._add_paths([self.acceptance_config.source_zip])
+        self._acceptance_set_banner(f"starting v1 callback with {self.acceptance_config.source_zip.name}")
+        self._acceptance_write_state("handoff_starting", source_zip=str(self.acceptance_config.source_zip))
+        self._start()
+
+    def _acceptance_wait_for_plan_json(self) -> None:
+        if self.acceptance_config is None:
+            return
+        if self.acceptance_config.edit_plan_json.exists():
+            self.main_notebook.select(self.v2_tab)
+            self._acceptance_set_banner(f"importing {self.acceptance_config.edit_plan_json.name} through GUI callback")
+            self._acceptance_write_state("plan_import_starting", plan_json=str(self.acceptance_config.edit_plan_json))
+            try:
+                self._v2_import_selected_path(self.acceptance_config.edit_plan_json)
+            except Exception as exc:
+                self._acceptance_mark_failed("plan_import_start_failed", str(exc))
+            return
+        if time.time() > self.acceptance_wait_deadline:
+            self._acceptance_mark_failed(
+                "plan_json_missing",
+                f"Timed out waiting for {self.acceptance_config.edit_plan_json}",
+            )
+            return
+        self._acceptance_set_banner(f"waiting for acceptance JSON: {self.acceptance_config.edit_plan_json.name}")
+        self.after(250, self._acceptance_wait_for_plan_json)
+
+    def _acceptance_try_build_job(self) -> None:
+        if not self.acceptance_mode_enabled or not self.acceptance_expected_job_id:
+            return
+        job_id = self.acceptance_expected_job_id
+        if job_id not in self.v2_queue.get_children():
+            self.after(250, self._acceptance_try_build_job)
+            return
+        self.v2_queue.selection_set(job_id)
+        self.v2_queue.focus(job_id)
+        self.v2_queue.see(job_id)
+        self._acceptance_set_banner(f"building editable Shotcut project for {job_id}")
+        self._acceptance_write_state("shotcut_build_starting", render_job_id=job_id)
+        self._shotcut_build_selected_project()
+
+    def _acceptance_open_current_project(self) -> None:
+        if not self.acceptance_mode_enabled or not self.acceptance_expected_job_id:
+            return
+        job_id = self.acceptance_expected_job_id
+        if job_id in self.v2_queue.get_children():
+            self.v2_queue.selection_set(job_id)
+            self.v2_queue.focus(job_id)
+            self.v2_queue.see(job_id)
+        self._acceptance_set_banner(f"opening Shotcut project for {job_id}")
+        self._acceptance_write_state("shotcut_open_starting", render_job_id=job_id)
+        self._shotcut_open_in_shotcut()
+
     def _append_log(self, text: str) -> None:
         self.log.configure(state="normal")
         self.log.insert("end", text + "\n")
@@ -987,14 +1251,18 @@ class App(tk.Tk):
     def _run_builder(self, selected_sources: list[Path]) -> None:
         try:
             owner_project_root = self._owner_project_root_from_sources(selected_sources)
-            project_name = owner_project_root.name if owner_project_root is not None else self.project_name.get().strip()
+            single_zip = len(selected_sources) == 1 and selected_sources[0].suffix.lower() == ".zip"
+            if single_zip:
+                project_name = selected_sources[0].stem
+            else:
+                project_name = owner_project_root.name if owner_project_root is not None else self.project_name.get().strip()
             config = BuilderConfig(
                 project_name=project_name,
+                project_id=slugify(project_name, fallback="project"),
                 output_dir=Path(self.output_dir.get()).expanduser(),
                 workspace_root=owner_project_root,
-                source_zip_path=selected_sources[0].resolve()
-                if owner_project_root is not None and len(selected_sources) == 1 and selected_sources[0].suffix.lower() == ".zip"
-                else None,
+                source_zip_path=selected_sources[0].resolve() if single_zip else None,
+                include_local_path_context=self._shotcut_save_settings().include_local_path_context,
                 include_video_proxies=self.include_proxies.get(),
                 gps_export_mode=self.gps_export_mode.get(),
                 worker_count=max(1, min(2, int(self.worker_count.get()))),
@@ -1107,22 +1375,33 @@ class App(tk.Tk):
 
     def _v2_import_package(self) -> None:
         value = filedialog.askopenfilename(
-            title="Выберите AI_EDIT_PACKAGE.zip",
-            filetypes=[("AI Edit Package", "*.zip"), ("All files", "*.*")],
+            title="Выберите Edit Plan JSON",
+            filetypes=[("Edit Plan JSON", "*.json"), ("Legacy AI Edit Package", "*.zip"), ("All files", "*.*")],
         )
         if value:
-            package_zip = Path(value)
-            fallback_path: Path | None = None
-            if self.v2_controller.workspace is None:
-                try:
-                    resolved_workspace = resolve_workspace_for_package(package_zip)
-                    self.v2_workspace_path.set(str(resolved_workspace))
-                    self.v2_project_id.set(resolved_workspace.name)
-                except Exception:
-                    fallback_path = self._ask_emergency_project_hint()
-                    if fallback_path is None:
-                        return
-            self._v2_set_busy(True, "Импорт AI_EDIT_PACKAGE.zip...")
+            self._v2_import_selected_path(Path(value))
+
+    def _v2_import_selected_path(self, package_zip: Path) -> None:
+        fallback_path: Path | None = None
+        if self.v2_controller.workspace is None:
+            try:
+                resolved_workspace = (
+                    resolve_workspace_for_plan(package_zip)
+                    if package_zip.suffix.lower() == ".json"
+                    else resolve_workspace_for_package(package_zip)
+                )
+                self.v2_workspace_path.set(str(resolved_workspace))
+                self.v2_project_id.set(resolved_workspace.name)
+            except Exception:
+                if self.acceptance_mode_enabled:
+                    raise
+                fallback_path = self._ask_emergency_project_hint()
+                if fallback_path is None:
+                    return
+        self._v2_set_busy(True, f"Импорт {package_zip.name}...")
+        if package_zip.suffix.lower() == ".json":
+            self.v2_controller.start_import_plan(package_zip, fallback_path=fallback_path)
+        else:
             self.v2_controller.start_import_package(package_zip, fallback_path=fallback_path)
 
     def _v2_import_patch(self) -> None:
@@ -1148,6 +1427,16 @@ class App(tk.Tk):
         if not self.v2_controller.workspace:
             self._show_warning("Нет workspace", "Сначала откройте или создайте v2 workspace.")
             return
+        if self.v2_backend_name.get().strip().lower() == "shotcut":
+            pending_job = next(
+                (job for job in (self.v2_current_snapshot or {}).get("jobs", []) if job.get("status") == "pending"),
+                None,
+            )
+            if pending_job is None:
+                self._show_warning("Нет pending job", "Для Shotcut не найден pending render job.")
+                return
+            self._shotcut_run_render_job(str(pending_job["render_job_id"]))
+            return
         self._v2_set_busy(True, "Запуск next pending render job...")
         self.v2_controller.start_render_next()
 
@@ -1155,6 +1444,9 @@ class App(tk.Tk):
         job_id = self._v2_selected_job_id()
         if not job_id:
             self._show_warning("Нет job", "Выберите render job в очереди.")
+            return
+        if self.v2_backend_name.get().strip().lower() == "shotcut":
+            self._shotcut_run_render_job(job_id)
             return
         self._v2_set_busy(True, f"Запуск render job {job_id}...")
         self.v2_controller.start_render_job(job_id)
@@ -1164,6 +1456,9 @@ class App(tk.Tk):
         if not job_id:
             self._show_warning("Нет job", "Выберите render job в очереди.")
             return
+        if self.shotcut_current_render_job_id == job_id and self.shotcut_current_cancel_event is not None:
+            self.shotcut_current_cancel_event.set()
+            self.shotcut_status_text.set(f"Shotcut cancel requested for {job_id}...")
         self.v2_controller.request_cancel(job_id)
 
     def _v2_retry_selected(self) -> None:
@@ -1217,7 +1512,7 @@ class App(tk.Tk):
             return None
         candidate = selected_sources[0].resolve()
         if candidate.is_file() and candidate.suffix.lower() == ".zip":
-            return candidate.parent
+            return candidate.parent / candidate.stem
         return None
 
     def _ask_emergency_project_hint(self) -> Path | None:
@@ -1237,7 +1532,7 @@ class App(tk.Tk):
             text=(
                 "Сохранённая привязка проекта не найдена. "
                 "Укажите original project folder или original source ZIP один раз, "
-                "и связь с этим AI_EDIT_PACKAGE будет восстановлена."
+                "и связь с этим standalone Edit Plan JSON будет восстановлена."
             ),
             wraplength=490,
             justify="left",
@@ -1282,6 +1577,150 @@ class App(tk.Tk):
     def _v2_open_ffmpeg_command(self) -> None:
         if self.v2_current_details:
             self._open_path(Path(self.v2_current_details["ffmpeg_command_path"]))
+
+    def _shotcut_current_settings(self) -> ShotcutAppSettings:
+        return ShotcutAppSettings(
+            runtime_dir=self.shotcut_runtime_dir.get().strip(),
+            server_script=self.shotcut_server_script.get().strip(),
+            include_local_path_context=bool(self.include_local_path_context.get()),
+        )
+
+    def _shotcut_save_settings(self) -> ShotcutAppSettings:
+        self.shotcut_settings = self.shotcut_settings_store.save(self._shotcut_current_settings())
+        self.shotcut_runtime_dir.set(self.shotcut_settings.runtime_dir)
+        self.shotcut_server_script.set(self.shotcut_settings.server_script)
+        self.include_local_path_context.set(self.shotcut_settings.include_local_path_context)
+        return self.shotcut_settings
+
+    def _shotcut_choose_runtime(self) -> None:
+        value = filedialog.askdirectory(title="Выберите Shotcut runtime folder")
+        if not value:
+            return
+        self.shotcut_runtime_dir.set(value)
+        self._shotcut_save_settings()
+        self.shotcut_status_text.set("Shotcut runtime folder сохранён. Теперь проверьте статус.")
+
+    def _shotcut_choose_server_script(self) -> None:
+        value = filedialog.askopenfilename(
+            title="Выберите shotcut_mcp_server.py",
+            filetypes=[("Python", "*.py"), ("All files", "*.*")],
+        )
+        if not value:
+            return
+        self.shotcut_server_script.set(value)
+        self._shotcut_save_settings()
+        self.shotcut_status_text.set("Shotcut MCP script сохранён. Теперь проверьте статус.")
+
+    def _shotcut_reset_paths(self) -> None:
+        self.shotcut_settings_store.reset()
+        self.shotcut_settings = self.shotcut_settings_store.load()
+        self.shotcut_runtime_dir.set(self.shotcut_settings.runtime_dir)
+        self.shotcut_server_script.set(self.shotcut_settings.server_script)
+        self.include_local_path_context.set(self.shotcut_settings.include_local_path_context)
+        self.shotcut_runtime_text.set("Shotcut paths сброшены. Можно выбрать их заново или использовать autodetect.")
+        self.shotcut_status_text.set("Shotcut config reset completed.")
+
+    def _shotcut_check_status(self) -> None:
+        self._v2_set_busy(True, "Проверка Shotcut runtime и MCP...")
+        threading.Thread(target=self._shotcut_status_worker, daemon=True).start()
+
+    def _shotcut_status_worker(self) -> None:
+        try:
+            settings = self._shotcut_save_settings()
+            workspace = self.v2_controller.workspace
+            payload = describe_shotcut_runtime(settings, workspace_root=workspace)
+            self.events.put(("shotcut_status", payload))
+        except Exception as exc:
+            self.events.put(("shotcut_error", str(exc)))
+
+    def _shotcut_build_selected_project(self) -> None:
+        job_id = self._v2_selected_job_id()
+        if not job_id:
+            self._show_warning("Нет job", "Сначала импортируйте Edit Plan JSON и выберите render job.")
+            return
+        if not self.v2_controller.workspace:
+            self._show_warning("Нет workspace", "Сначала откройте или создайте workspace.")
+            return
+        self._v2_set_busy(True, f"Сборка editable Shotcut project для {job_id}...")
+        threading.Thread(target=self._shotcut_build_worker, args=(job_id,), daemon=True).start()
+
+    def _shotcut_build_worker(self, render_job_id: str) -> None:
+        try:
+            settings = self._shotcut_save_settings()
+            details = build_editable_shotcut_project(
+                self.v2_controller.workspace,
+                render_job_id,
+                settings=settings,
+            )
+            self.events.put(("shotcut_project_built", details))
+        except Exception as exc:
+            self.events.put(("shotcut_error", str(exc)))
+
+    def _shotcut_open_editable_project(self) -> None:
+        if not self.v2_current_details:
+            self._show_warning("Нет результата", "Сначала соберите editable Shotcut project.")
+            return
+        report = self.v2_current_details.get("report") or {}
+        outputs = report.get("outputs") or []
+        build_summary_path = Path(self.v2_current_details["output_directory"]) / "shotcut" / "build_summary.json"
+        project_path = Path(self.v2_current_details["output_directory"]) / "shotcut"
+        if build_summary_path.exists():
+            try:
+                project_path = Path(json.loads(build_summary_path.read_text(encoding="utf-8"))["project_path"])
+            except Exception:
+                project_path = project_path / "editable_project.mlt"
+        else:
+            project_path = project_path / "editable_project.mlt"
+        self._open_path(project_path)
+
+    def _shotcut_open_in_shotcut(self) -> None:
+        job_id = self._v2_selected_job_id()
+        if not job_id:
+            self._show_warning("Нет job", "Выберите render job, для которого уже собран editable project.")
+            return
+        if not self.v2_controller.workspace:
+            self._show_warning("Нет workspace", "Сначала откройте или создайте workspace.")
+            return
+        self._v2_set_busy(True, f"Открытие {job_id} в Shotcut...")
+        threading.Thread(target=self._shotcut_open_worker, args=(job_id,), daemon=True).start()
+
+    def _shotcut_open_worker(self, render_job_id: str) -> None:
+        try:
+            settings = self._shotcut_save_settings()
+            payload = open_shotcut_project(
+                self.v2_controller.workspace,
+                render_job_id,
+                settings=settings,
+            )
+            self.events.put(("shotcut_opened", payload))
+        except Exception as exc:
+            self.events.put(("shotcut_error", str(exc)))
+
+    def _shotcut_run_render_job(self, render_job_id: str) -> None:
+        if not self.v2_controller.workspace:
+            self._show_warning("Нет workspace", "Сначала откройте или создайте workspace.")
+            return
+        self._v2_set_busy(True, f"Shotcut render для {render_job_id}...")
+        self.shotcut_current_cancel_event = threading.Event()
+        self.shotcut_current_render_job_id = render_job_id
+        threading.Thread(target=self._shotcut_render_worker, args=(render_job_id,), daemon=True).start()
+
+    def _shotcut_render_worker(self, render_job_id: str) -> None:
+        try:
+            settings = self._shotcut_save_settings()
+            details = render_shotcut_job(
+                self.v2_controller.workspace,
+                render_job_id,
+                settings=settings,
+                cancel_event=self.shotcut_current_cancel_event,
+                progress_callback=lambda payload: self.events.put(("shotcut_progress", payload)),
+            )
+            self.events.put(("shotcut_render_completed", details))
+        except Exception as exc:
+            self.events.put(("shotcut_error", str(exc)))
+        finally:
+            self.shotcut_current_cancel_event = None
+            self.shotcut_current_render_job_id = None
 
     def _on_v2_scroll_content_configure(self, _event: object | None = None) -> None:
         self.v2_scroll_canvas.configure(scrollregion=self.v2_scroll_canvas.bbox("all"))
@@ -1507,6 +1946,9 @@ class App(tk.Tk):
             self.v2_run_next_button,
             self.v2_run_selected_button,
             self.v2_retry_button,
+            self.shotcut_build_button,
+            self.shotcut_open_project_button,
+            self.shotcut_open_button,
         ):
             button.configure(state=state)
         self.v2_cancel_button.configure(state="normal")
@@ -1566,6 +2008,7 @@ class App(tk.Tk):
         validation = summary.get("validation_summary") or {}
         lines = [
             f"Project ID: {summary.get('project_id')}",
+            f"Project Name: {summary.get('project_name')}",
             f"Package ID: {summary.get('package_id')}",
             f"Handoff ID: {summary.get('handoff_id')}",
             f"Schema Version: {summary.get('schema_version')}",
@@ -1655,10 +2098,12 @@ class App(tk.Tk):
         job = details["job"]
         plan = details["plan"]
         report = details.get("report") or {}
+        backend_label = "Shotcut MCP" if "shotcut" in str(report.get("renderer_status", "")).lower() else "FFmpeg"
         self.v2_result_meta.configure(
             text=(
                 f"Render Job: {job['render_job_id']}\n"
                 f"Status: {job['status']}\n"
+                f"Backend: {backend_label}\n"
                 f"Plan ID: {plan['edit_plan_id']}\n"
                 f"Plan Version: {int(plan['plan_version'] or 1)}\n"
                 f"Output Dir: {details['output_directory']}"
@@ -1685,6 +2130,10 @@ class App(tk.Tk):
 
         first_frame_value = details.get("first_frame_path")
         first_frame_path = Path(first_frame_value) if first_frame_value else None
+        if (first_frame_path is None or not first_frame_path.exists()) and self.v2_current_details:
+            shotcut_preview = Path(self.v2_current_details["output_directory"]) / "shotcut" / "preview.png"
+            if shotcut_preview.exists():
+                first_frame_path = shotcut_preview
         if first_frame_path is not None and first_frame_path.exists():
             try:
                 image = Image.open(first_frame_path)
@@ -2074,7 +2523,7 @@ class App(tk.Tk):
                     if result.project_root is not None:
                         self.v2_workspace_path.set(str(result.project_root))
                         self.v2_project_id.set(result.project_root.name)
-                        self.v2_status_text.set("Project root подготовлен. Позже можно сразу выбрать AI_EDIT_PACKAGE.zip.")
+                        self.v2_status_text.set("Project root подготовлен. Можно сразу выбрать standalone Edit Plan JSON.")
                     self.last_failed_sources = [Path(value) for value in result.failed_sources if value]
                     self.start_button.configure(state="normal")
                     self.cancel_button.configure(state="disabled")
@@ -2089,14 +2538,27 @@ class App(tk.Tk):
                     self.metadata_status_text.set(f"ExifTool: {exiftool_status}")
                     if coverage_ok:
                         self.status_text.set(f"Готово: {self.last_output.name}")
-                        self._show_info("Готово", f"Создан файл:\n{self.last_output}")
+                        if not self.acceptance_mode_enabled:
+                            self._show_info("Готово", f"Создан файл:\n{self.last_output}")
                     else:
                         self.status_text.set("Завершено с проблемами покрытия")
-                        self._show_warning(
-                            "Проверка покрытия не пройдена",
-                            f"Архив создан, но coverage_ok=false.\n\n{self.last_output}",
+                        if not self.acceptance_mode_enabled:
+                            self._show_warning(
+                                "Проверка покрытия не пройдена",
+                                f"Архив создан, но coverage_ok=false.\n\n{self.last_output}",
+                            )
+                    if not self.acceptance_mode_enabled:
+                        self._show_summary(result)
+                    if self.acceptance_mode_enabled:
+                        self.acceptance_project_root = result.project_root
+                        self._acceptance_set_banner(f"handoff ready: {self.last_output.name}")
+                        self._acceptance_write_state(
+                            "handoff_ready",
+                            archive_path=str(result.archive_path),
+                            project_root=str(result.project_root) if result.project_root else None,
                         )
-                    self._show_summary(result)
+                        self.acceptance_wait_deadline = time.time() + 120
+                        self.after(250, self._acceptance_wait_for_plan_json)
                 elif kind == "error":
                     self.start_button.configure(state="normal")
                     self.cancel_button.configure(state="disabled")
@@ -2104,12 +2566,17 @@ class App(tk.Tk):
                     self.status_text.set("Ошибка")
                     self.metadata_status_text.set("ExifTool: unknown")
                     self._append_log(f"ERROR: {payload}")
-                    self._show_error("Ошибка", str(payload))
+                    if self.acceptance_mode_enabled:
+                        self._acceptance_mark_failed("v1_error", str(payload))
+                    else:
+                        self._show_error("Ошибка", str(payload))
                 elif kind == "v2_state":
                     self.v2_status_text.set(f"State: {payload}")
                 elif kind in {"workspace_ready", "workspace_refreshed"}:
                     self._v2_set_busy(False, "Workspace готов.")
                     self._update_v2_snapshot(payload)
+                    if self.acceptance_mode_enabled and self.acceptance_stage == "plan_imported":
+                        self.after(200, self._acceptance_try_build_job)
                 elif kind == "package_imported":
                     self._v2_set_busy(False, "Пакет импортирован и preview job поставлен в очередь.")
                     self._write_text(self.v2_summary, self._format_import_summary(payload))
@@ -2118,6 +2585,17 @@ class App(tk.Tk):
                     self.v2_current_details = payload.get("job_details")
                     if self.v2_current_details:
                         self._v2_update_results(self.v2_current_details)
+                    if self.acceptance_mode_enabled:
+                        job = (payload.get("job_details") or {}).get("job") or {}
+                        self.acceptance_expected_job_id = str(job.get("render_job_id") or "")
+                        self._acceptance_set_banner(
+                            f"standalone JSON imported directly: {self.acceptance_config.edit_plan_json.name if self.acceptance_config else ''}"
+                        )
+                        self._acceptance_write_state(
+                            "plan_imported",
+                            plan_json=str(self.acceptance_config.edit_plan_json) if self.acceptance_config else None,
+                            render_job_id=self.acceptance_expected_job_id,
+                        )
                     self.v2_controller.start_refresh()
                 elif kind == "patch_applied":
                     self._v2_set_busy(False, "Patch применён, создан новый immutable plan и pending render job.")
@@ -2147,10 +2625,65 @@ class App(tk.Tk):
                 elif kind == "render_cancel_requested":
                     self.v2_status_text.set(f"Cancel requested for {payload['render_job_id']}")
                     self.v2_controller.start_refresh()
+                elif kind == "shotcut_status":
+                    self._v2_set_busy(False, "Shotcut status checked.")
+                    ready = payload.get("ready")
+                    status = payload.get("status") or {}
+                    doctor = payload.get("doctor") or {}
+                    if isinstance(status, dict):
+                        shotcut_version = ((status.get("shotcut") or {}).get("version")) or "unknown"
+                        mcp_name = ((doctor.get("validated_stack") or {}).get("shotcut")) or "unknown"
+                        self.shotcut_runtime_text.set(
+                            f"Shotcut ready={ready} | Shotcut={shotcut_version} | Doctor={doctor.get('compatible')} | Stack={mcp_name}"
+                        )
+                    else:
+                        self.shotcut_runtime_text.set(str(payload.get("status")))
+                    self.shotcut_status_text.set(
+                        "Shotcut status OK." if ready else str(payload.get("status"))
+                    )
+                elif kind == "shotcut_project_built":
+                    self._v2_set_busy(False, "Editable Shotcut project готов.")
+                    self._v2_update_results(payload)
+                    self.shotcut_status_text.set("Editable Shotcut project saved. Можно открыть его в Shotcut.")
+                    if self.acceptance_mode_enabled:
+                        self._acceptance_set_banner("editable Shotcut project built")
+                        self._acceptance_write_state(
+                            "shotcut_project_built",
+                            render_job_id=self.acceptance_expected_job_id,
+                            output_directory=payload.get("output_directory"),
+                        )
+                        self.after(250, self._acceptance_open_current_project)
+                    self.v2_controller.start_refresh()
+                elif kind == "shotcut_opened":
+                    self._v2_set_busy(False, "Shotcut project opened.")
+                    self.shotcut_status_text.set("Shotcut opened the editable project.")
+                    if self.acceptance_mode_enabled:
+                        self._acceptance_set_banner("Shotcut opened the editable project")
+                        self._acceptance_write_state("shotcut_opened", payload=payload)
+                elif kind == "shotcut_progress":
+                    progress = payload.get("progress_percent")
+                    status_text = payload.get("status")
+                    suffix = f"{progress}%" if isinstance(progress, (int, float)) else "working"
+                    self.v2_status_text.set(f"Shotcut render {status_text}: {suffix}")
+                elif kind == "shotcut_render_completed":
+                    self._v2_set_busy(False, "Shotcut render completed.")
+                    self._v2_update_results(payload)
+                    self.shotcut_status_text.set("Shotcut render completed and MP4 verified.")
+                    self.v2_controller.start_refresh()
+                elif kind == "shotcut_error":
+                    self._v2_set_busy(False, "Shotcut operation failed.")
+                    self.shotcut_status_text.set(str(payload))
+                    if self.acceptance_mode_enabled:
+                        self._acceptance_mark_failed("shotcut_error", str(payload))
+                    else:
+                        self._show_error("Shotcut MCP", str(payload))
                 elif kind == "v2_error":
                     self._v2_set_busy(False, "Ошибка v2 workflow.")
                     self.v2_status_text.set(f"Ошибка: {payload}")
-                    self._show_error("V2 workflow error", str(payload))
+                    if self.acceptance_mode_enabled:
+                        self._acceptance_mark_failed("v2_error", str(payload))
+                    else:
+                        self._show_error("V2 workflow error", str(payload))
                 elif kind == "voice_refreshed":
                     self._voice_update_ui(payload)
                 elif kind == "voice_generated":
@@ -2179,6 +2712,15 @@ class App(tk.Tk):
     def _open_result(self) -> None:
         if self.last_output:
             self._open_path(self.last_output.parent)
+
+    def _toggle_v1_settings(self) -> None:
+        self.v1_settings_expanded = not self.v1_settings_expanded
+        if self.v1_settings_expanded:
+            self.v1_settings_frame.pack(fill="x", pady=(8, 12), before=self.start_button.master)
+            self.v1_settings_toggle_button.configure(text="Скрыть настройки")
+        else:
+            self.v1_settings_frame.pack_forget()
+            self.v1_settings_toggle_button.configure(text="Показать настройки")
 
     def _open_path(self, path: Path) -> None:
         if not path.exists():

@@ -113,12 +113,14 @@ class AssetMetadataBuilder:
                 {
                     "asset_id": asset.asset_id,
                     "source_path": asset.source_path,
+                    "original_project_path": asset.original_project_path,
                     "relative_source_path": asset.relative_source_path,
                     "original_name": asset.original_name,
                     "media_type": asset.media_type,
                     "size_bytes": asset.size_bytes,
                     "sha256": file_sha256(Path(asset.source_path)),
                     "capture_time": asset.capture_time_iso,
+                    "proxy_project_path": asset.proxy_project_path,
                     "analysis_preview_paths": {
                         "analysis_copy": asset.analysis_copy,
                         "proxy": asset.proxy,

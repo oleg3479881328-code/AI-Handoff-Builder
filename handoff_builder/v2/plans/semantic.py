@@ -9,7 +9,7 @@ from PIL import Image
 from ..assets import resolve_plan_assets_against_registry
 from ..errors import UnsafePackageError
 from ..packages.guards import ensure_allowed_package_path
-from ..plans.schema import validate_payload
+from ..plans.schema import load_bounded_json_object, validate_payload
 from ..render.ffmpeg_backend import FFmpegBackend
 
 
@@ -20,12 +20,13 @@ SOURCE_OUT_TOLERANCE_MS = 50
 @dataclass(frozen=True, slots=True)
 class ValidatedAsset:
     asset_id: str
-    path: Path
-    duration_ms: int
-    width: int
-    height: int
-    rotation: int
-    has_audio: bool
+    path: Path | None
+    duration_ms: int | None
+    width: int | None
+    height: int | None
+    rotation: int | None
+    has_audio: bool | None
+    media_type: str = "video"
 
 
 @dataclass(frozen=True, slots=True)
@@ -75,6 +76,155 @@ class ValidatedLocalPhotoPlan:
 
 
 LOCAL_PHOTO_SCHEMA_VERSIONS = {"2.0", "2.1"}
+EDIT_PLAN_3_SCHEMA_VERSIONS = {"3.0"}
+
+
+@dataclass(frozen=True, slots=True)
+class ValidatedEditPlan3:
+    payload: dict
+    assets: dict[str, ValidatedAsset]
+    audio_assets: dict[str, ValidatedAsset]
+    tracks: tuple[dict, ...]
+    fps_num: int
+    fps_den: int
+    total_duration_frames: int
+
+
+def load_and_validate_edit_plan_3(
+    plan_path: Path,
+    workspace: Path,
+    backend: FFmpegBackend,
+) -> ValidatedEditPlan3:
+    payload = load_bounded_json_object(plan_path)
+    validate_payload("edit_plan", "3.0", payload)
+    _reject_forbidden_keys(payload)
+    if str(payload.get("document_type")) != "edit_plan":
+        raise UnsafePackageError("edit_plan 3.0 must declare document_type=edit_plan.")
+    renderer = payload.get("renderer") or {}
+    if str(renderer.get("primary_renderer")) != "shotcut":
+        raise UnsafePackageError("edit_plan 3.0 must target renderer.primary_renderer=shotcut.")
+    timebase = payload.get("timebase", {})
+    fps_num = int(timebase.get("fps_num", 0))
+    fps_den = int(timebase.get("fps_den", 0))
+    if fps_num <= 0 or fps_den <= 0:
+        raise UnsafePackageError(f"Invalid rational timebase: {fps_num}/{fps_den}")
+
+    assets: dict[str, ValidatedAsset] = {}
+    audio_assets: dict[str, ValidatedAsset] = {}
+    seen_asset_ids: set[str] = set()
+    resolution_report = resolve_plan_assets_against_registry(
+        list(payload.get("assets") or []),
+        json.loads((workspace.resolve() / "analysis" / "local_asset_registry.json").read_text(encoding="utf-8")),
+        require_declared_integrity=False,
+        workspace=workspace,
+    )
+    for resolved in resolution_report["assets"]:
+        asset_id = str(resolved["asset_id"])
+        if asset_id in seen_asset_ids:
+            raise UnsafePackageError(f"Duplicate asset_id in assets: {asset_id}")
+        seen_asset_ids.add(asset_id)
+        source_path = Path(str(resolved["source_path"]))
+        media_type = str(resolved["media_type"])
+        duration_ms: int | None = None
+        width: int | None = None
+        height: int | None = None
+        rotation: int | None = None
+        has_audio: bool | None = None
+        if media_type in {"video", "audio"}:
+            meta = backend.probe(source_path)
+            duration_ms = round(float(meta["duration"]) * 1000)
+            width = int(meta["width"]) if meta.get("width") is not None else None
+            height = int(meta["height"]) if meta.get("height") is not None else None
+            rotation = int(meta["rotation"]) if meta.get("rotation") is not None else 0
+            has_audio = bool(meta.get("audio_present"))
+        elif media_type == "photo":
+            with Image.open(source_path) as image:
+                width, height = image.size
+            rotation = 0
+            has_audio = False
+            duration_ms = None
+        else:
+            raise UnsafePackageError(f"Unsupported asset media_type: {media_type}")
+
+        validated = ValidatedAsset(
+            asset_id=asset_id,
+            path=source_path,
+            duration_ms=duration_ms,
+            width=width,
+            height=height,
+            rotation=rotation,
+            has_audio=has_audio,
+            media_type=media_type,
+        )
+        if media_type == "audio":
+            audio_assets[asset_id] = validated
+        else:
+            assets[asset_id] = validated
+
+    track_ids: list[str] = []
+    validated_items: list[dict] = []
+    total_duration_frames = 0
+    seen_item_ids: set[str] = set()
+    for item in payload.get("visual_items", []):
+        item_id = str(item["item_id"])
+        if item_id in seen_item_ids:
+            raise UnsafePackageError(f"Duplicate visual item_id: {item_id}")
+        seen_item_ids.add(item_id)
+        asset_id = str(item["asset_id"])
+        if asset_id not in assets:
+            raise UnsafePackageError(f"Visual item references unknown asset_id: {asset_id}")
+        media_type = str(item["media_type"])
+        if media_type != assets[asset_id].media_type:
+            raise UnsafePackageError(
+                f"Visual item media_type does not match asset media_type for {asset_id}"
+            )
+        sap = str(item["source_audio_policy"])
+        if sap != "discard":
+            raise UnsafePackageError(
+                f"Unsupported source_audio_policy for current Shotcut compiler: {sap}"
+            )
+        source_in_us = int(item["source_in_us"])
+        source_out_us = int(item["source_out_us"])
+        if media_type == "photo":
+            if source_in_us != 0 or source_out_us != 0:
+                raise UnsafePackageError("Photo items must use source_in_us=0 and source_out_us=0.")
+        else:
+            if source_out_us <= source_in_us:
+                raise UnsafePackageError("source_out_us must be > source_in_us")
+        duration_frames = int(item["duration_frames"])
+        timeline_start_frame = int(item["timeline_start_frame"])
+        track_id = str(item["track_id"])
+        track_ids.append(track_id)
+        total_duration_frames = max(total_duration_frames, timeline_start_frame + duration_frames)
+        validated_items.append(dict(item))
+
+    validated_tracks: list[dict] = []
+    for track_id in sorted(set(track_ids)):
+        validated_tracks.append(
+            {
+                "track_id": track_id,
+                "track_type": "video",
+                "items": tuple(item for item in validated_items if item["track_id"] == track_id),
+            }
+        )
+    for audio_item in payload.get("audio_items", []):
+        audio_id = str(audio_item["audio_id"])
+        if audio_id not in audio_assets:
+            raise UnsafePackageError(f"Audio item references unknown audio asset_id: {audio_id}")
+        duration_frames = int(audio_item["duration_frames"])
+        timeline_start_frame = int(audio_item["timeline_start_frame"])
+        total_duration_frames = max(total_duration_frames, timeline_start_frame + duration_frames)
+    if total_duration_frames <= 0:
+        raise UnsafePackageError("Total timeline duration must be positive.")
+    return ValidatedEditPlan3(
+        payload=payload,
+        assets=assets,
+        audio_assets=audio_assets,
+        tracks=tuple(validated_tracks),
+        fps_num=fps_num,
+        fps_den=fps_den,
+        total_duration_frames=total_duration_frames,
+    )
 
 
 def load_and_validate_preview_plan(
@@ -108,7 +258,8 @@ def load_and_validate_preview_plan(
             width=int(meta["width"]),
             height=int(meta["height"]),
             rotation=int(meta["rotation"]),
-            has_audio=bool(meta["has_audio"]),
+            has_audio=bool(meta.get("audio_present")),
+            media_type=str(asset.get("media_type") or "video"),
         )
 
     if not payload["operations"]:
@@ -172,6 +323,7 @@ def load_and_validate_local_photo_plan(
         list(payload["assets"]),
         registry_payload,
         require_declared_integrity=schema_version == "2.0",
+        workspace=workspace,
     )
     assets: dict[str, ResolvedPhotoAsset] = {}
     for item in resolution_report["assets"]:

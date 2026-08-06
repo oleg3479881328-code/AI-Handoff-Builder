@@ -15,6 +15,17 @@ def _active_registry_path(workspace: Path) -> Path:
     return workspace.resolve() / "analysis" / ACTIVE_REGISTRY_FILENAME
 
 
+def _resolve_registry_source_path(workspace: Path, registry_asset: dict) -> Path:
+    workspace_root = workspace.resolve()
+    relative_project_path = str(registry_asset.get("original_project_path") or "").strip()
+    if relative_project_path:
+        candidate = (workspace_root / relative_project_path).resolve()
+        if workspace_root in candidate.parents or candidate == workspace_root:
+            return candidate
+    source_path = Path(str(registry_asset.get("source_path") or "")).expanduser()
+    return source_path.resolve() if source_path else source_path
+
+
 def load_active_local_registry(workspace: Path, *, fallback_dir: Path | None = None) -> dict:
     registry_path = _active_registry_path(workspace)
     if registry_path.exists():
@@ -42,6 +53,7 @@ def resolve_plan_assets_against_registry(
     registry_payload: dict,
     *,
     require_declared_integrity: bool = True,
+    workspace: Path | None = None,
 ) -> dict:
     registry_assets = registry_payload.get("assets")
     if not isinstance(registry_assets, list):
@@ -65,7 +77,9 @@ def resolve_plan_assets_against_registry(
             raise UnsafePackageError(f"Asset resolution failed: ambiguous asset_id {asset_id}")
 
         registry_asset = matches[0]
-        source_path = Path(str(registry_asset.get("source_path") or "")).expanduser()
+        source_path = _resolve_registry_source_path(workspace, registry_asset) if workspace is not None else Path(
+            str(registry_asset.get("source_path") or "")
+        ).expanduser()
         if not source_path.exists():
             raise UnsafePackageError(f"Asset resolution failed: source file missing for {asset_id}")
         if not source_path.is_file():
@@ -106,6 +120,8 @@ def resolve_plan_assets_against_registry(
                 "size_bytes": actual_size,
                 "original_name": registry_asset.get("original_name"),
                 "capture_time": registry_asset.get("capture_time"),
+                "original_project_path": registry_asset.get("original_project_path"),
+                "proxy_project_path": registry_asset.get("proxy_project_path"),
                 "analysis_preview_paths": registry_asset.get("analysis_preview_paths") or {},
             }
         )

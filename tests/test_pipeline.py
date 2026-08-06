@@ -483,12 +483,183 @@ def test_owner_flow_single_source_zip_uses_project_root_workspace(tmp_path: Path
     assert result.archive_path.parent == (project_root / "handoffs").resolve()
     assert result.local_asset_registry_path == (project_root / "analysis" / "local_asset_registry.json").resolve()
     assert (project_root / "incoming_ai_packages").exists()
+    assert (project_root / "originals" / "IMG-20240716-WA0001.jpg").exists()
     manifest = json.loads((result.package_root / "handoff_manifest.json").read_text(encoding="utf-8"))
     assert manifest["project_id"] == "WEDDING_PROJECT"
     assert manifest["handoff_id"] == result.handoff_id
     handoff_index = json.loads((project_root / "analysis" / "handoff_index.json").read_text(encoding="utf-8"))
     assert handoff_index["handoffs"][0]["handoff_id"] == result.handoff_id
     assert handoff_index["handoffs"][0]["handoff_sha256"] == result.handoff_sha256
+    source_snapshot = json.loads((project_root / "source_snapshot.json").read_text(encoding="utf-8"))
+    assert source_snapshot["source_zip_path"] == str(source_zip.resolve())
+    assert source_snapshot["original_paths"] == ["originals/IMG-20240716-WA0001.jpg"]
+
+
+def test_single_source_zip_derives_owner_visible_names_and_shotcut_contract(tmp_path: Path, monkeypatch):
+    monkeypatch.setenv("LOCALAPPDATA", str(tmp_path / "appdata"))
+    source_dir = tmp_path / "source"
+    photo = source_dir / "IMG-20240716-WA0001.jpg"
+    _make_photo(photo)
+    project_root = tmp_path / "Carolyn and Rob"
+    source_zip = project_root / "Carolyn and Rob.zip"
+    _make_source_zip(source_zip, [photo])
+
+    builder = HandoffBuilder(
+        BuilderConfig(
+            project_name="Carolyn and Rob",
+            project_id="carolyn_and_rob",
+            output_dir=tmp_path / "out",
+            workspace_root=project_root,
+            source_zip_path=source_zip,
+            include_video_proxies=False,
+        ),
+        project_root=tmp_path,
+    )
+    builder.ffmpeg = FakeFFmpegTools()
+
+    result = builder.build([source_zip])
+
+    assert result.archive_path.name == "Carolyn and Rob_ANALYSIS_HANDOFF.zip"
+    manifest = json.loads((result.package_root / "handoff_manifest.json").read_text(encoding="utf-8"))
+    assert manifest["project_name"] == "Carolyn and Rob"
+    assert manifest["project_id"] == "carolyn_and_rob"
+    assert manifest["expected_output_filename"] == "Carolyn and Rob.json"
+    assert manifest["target_editor"] == "shotcut"
+    assert manifest["content_hash"] == result.handoff_content_hash
+
+    start_here = (result.package_root / "00_START_HERE.md").read_text(encoding="utf-8")
+    brief = (result.package_root / "PROJECT_BRIEF.md").read_text(encoding="utf-8")
+    contract = (result.package_root / "OUTPUT_CONTRACT.md").read_text(encoding="utf-8")
+    combined = "\n".join([start_here, brief, contract])
+    assert "Shotcut" in combined
+    assert "standalone JSON" in combined
+    assert "DIRECT SHOTCUT MLT MODE - NO USER FILE MOVEMENT" in combined
+    assert "AI_EDIT_PACKAGE.zip" not in combined
+    assert "DaVinci" not in combined
+
+    assistant_context = json.loads((result.package_root / "ASSISTANT_CONTEXT.json").read_text(encoding="utf-8"))
+    assert assistant_context["direct_mlt_support"]["available"] is True
+    assert assistant_context["preferred_edit_source"] == "originals"
+    assert assistant_context["project_root"] == str(project_root.resolve())
+    asset_id = manifest["assets"][0]["asset_id"]
+    assert assistant_context["asset_map"][asset_id]["original_filename"] == "IMG-20240716-WA0001.jpg"
+    assert assistant_context["asset_map"][asset_id]["original_path"] == str((project_root / "originals" / "IMG-20240716-WA0001.jpg").resolve())
+
+
+def test_assistant_context_preserves_spaces_unicode_onedrive_and_long_names(tmp_path: Path, monkeypatch):
+    monkeypatch.setenv("LOCALAPPDATA", str(tmp_path / "appdata"))
+    source_dir = tmp_path / "source"
+    photo = source_dir / "IMG-20240716-WA0001.jpg"
+    _make_photo(photo)
+    project_root = (
+        tmp_path
+        / "OneDrive - Oleg3"
+        / "Клиенты и свадьбы"
+        / "Очень длинная папка проекта для проверки путей"
+        / "Carolyn and Rob"
+    )
+    source_zip = project_root / "Carolyn and Rob.zip"
+    _make_source_zip(source_zip, [photo])
+
+    builder = HandoffBuilder(
+        BuilderConfig(
+            project_name="Carolyn and Rob",
+            project_id="carolyn_and_rob",
+            output_dir=tmp_path / "out",
+            workspace_root=project_root,
+            source_zip_path=source_zip,
+            include_video_proxies=False,
+            include_local_path_context=True,
+        ),
+        project_root=tmp_path,
+    )
+    builder.ffmpeg = FakeFFmpegTools()
+
+    result = builder.build([source_zip])
+
+    assistant_context = json.loads((result.package_root / "ASSISTANT_CONTEXT.json").read_text(encoding="utf-8"))
+    assert assistant_context["project_root"] == str(project_root.resolve())
+    assert assistant_context["originals_root"] == str((project_root / "originals").resolve())
+    assert assistant_context["proxies_root"] == str((project_root / "proxies").resolve())
+    asset_id = json.loads((result.package_root / "handoff_manifest.json").read_text(encoding="utf-8"))["assets"][0]["asset_id"]
+    assert assistant_context["asset_map"][asset_id]["original_path"] == str((project_root / "originals" / "IMG-20240716-WA0001.jpg").resolve())
+    assert assistant_context["asset_map"][asset_id]["original_project_path"] == "originals/IMG-20240716-WA0001.jpg"
+
+
+def test_assistant_context_marks_direct_mlt_unavailable_when_local_context_disabled(tmp_path: Path, monkeypatch):
+    monkeypatch.setenv("LOCALAPPDATA", str(tmp_path / "appdata"))
+    source_dir = tmp_path / "source"
+    photo = source_dir / "IMG-20240716-WA0001.jpg"
+    _make_photo(photo)
+    project_root = tmp_path / "Carolyn and Rob"
+    source_zip = project_root / "Carolyn and Rob.zip"
+    _make_source_zip(source_zip, [photo])
+
+    builder = HandoffBuilder(
+        BuilderConfig(
+            project_name="Carolyn and Rob",
+            project_id="carolyn_and_rob",
+            output_dir=tmp_path / "out",
+            workspace_root=project_root,
+            source_zip_path=source_zip,
+            include_video_proxies=False,
+            include_local_path_context=False,
+        ),
+        project_root=tmp_path,
+    )
+    builder.ffmpeg = FakeFFmpegTools()
+
+    result = builder.build([source_zip])
+
+    assistant_context = json.loads((result.package_root / "ASSISTANT_CONTEXT.json").read_text(encoding="utf-8"))
+    assert assistant_context["direct_mlt_support"]["available"] is False
+    assert "disabled" in assistant_context["direct_mlt_support"]["reason_unavailable"]
+    assert assistant_context["project_root"] is None
+    assert assistant_context["asset_map"] == {}
+
+
+def test_single_source_zip_rejects_silent_collision_with_other_zip(tmp_path: Path, monkeypatch):
+    monkeypatch.setenv("LOCALAPPDATA", str(tmp_path / "appdata"))
+    source_dir = tmp_path / "source"
+    first_photo = source_dir / "first.jpg"
+    second_photo = source_dir / "second.jpg"
+    _make_photo(first_photo)
+    _make_photo(second_photo)
+    project_root = tmp_path / "Same Project"
+    first_zip = tmp_path / "Same Project.zip"
+    second_zip = tmp_path / "Same Project 2.zip"
+    _make_source_zip(first_zip, [first_photo])
+    _make_source_zip(second_zip, [second_photo])
+
+    builder = HandoffBuilder(
+        BuilderConfig(
+            project_name="Same Project",
+            project_id="same_project",
+            output_dir=tmp_path / "out",
+            workspace_root=project_root,
+            source_zip_path=first_zip,
+            include_video_proxies=False,
+        ),
+        project_root=tmp_path,
+    )
+    builder.ffmpeg = FakeFFmpegTools()
+    builder.build([first_zip])
+
+    colliding = HandoffBuilder(
+        BuilderConfig(
+            project_name="Same Project",
+            project_id="same_project",
+            output_dir=tmp_path / "out",
+            workspace_root=project_root,
+            source_zip_path=second_zip,
+            include_video_proxies=False,
+        ),
+        project_root=tmp_path,
+    )
+    colliding.ffmpeg = FakeFFmpegTools()
+
+    with pytest.raises(ValueError, match="another source ZIP"):
+        colliding.build([second_zip])
 
 
 def test_exiftool_uses_parent_cwd_for_unicode_zip_roots(tmp_path: Path, monkeypatch):

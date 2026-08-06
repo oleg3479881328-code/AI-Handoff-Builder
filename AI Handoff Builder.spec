@@ -1,7 +1,8 @@
 # -*- mode: python ; coding: utf-8 -*-
 from PyInstaller.utils.hooks import collect_all
+from handoff_builder.version import APP_BUNDLE_NAME
 
-datas = [('prototypes\\hyperframes', 'prototypes\\hyperframes'), ('schemas', 'schemas')]
+datas = [('prototypes\\hyperframes', 'prototypes\\hyperframes'), ('handoff_builder\\templates\\analysis_handoff', 'handoff_builder\\templates\\analysis_handoff'), ('schemas', 'schemas')]
 binaries = []
 hiddenimports = []
 tmp_ret = collect_all('PIL')
@@ -28,7 +29,7 @@ exe = EXE(
     a.scripts,
     [],
     exclude_binaries=True,
-    name='AI Handoff Builder',
+    name=APP_BUNDLE_NAME,
     debug=False,
     bootloader_ignore_signals=False,
     strip=False,
@@ -47,5 +48,5 @@ coll = COLLECT(
     strip=False,
     upx=True,
     upx_exclude=[],
-    name='AI Handoff Builder',
+    name=APP_BUNDLE_NAME,
 )

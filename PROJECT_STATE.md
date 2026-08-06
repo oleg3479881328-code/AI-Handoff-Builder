@@ -1,15 +1,247 @@
 # Current State
 
-- Date: 2026-07-26
+- Date: 2026-08-01
+- Issue #27 version visibility update:
+  - single source: `handoff_builder/version.py`
+  - human-readable version: `V0.1.0`
+  - packaged filename: `V0.1.0_AI_Handoff_Builder.exe`
+  - window title: `AI Handoff Builder - V0.1.0`
+  - stable visible header label: `Version: V0.1.0`
+  - source-level UI regression and packaged screenshot evidence passed
+  - latest packaged SHA-256: `057A32663C38FB6D17CDDFAFDAAD84045D498F911BD3D631B4D4630FB064D19C`
+  - screenshot evidence: `tmp_version_ui.png`
+
+- Date: 2026-07-31
+- Direct JSON local workspace recovery status:
+  - standalone `Edit Plan JSON` import no longer falls back to an unrelated old workspace just because the same `project_id` appears once in `%LOCALAPPDATA%\\AI Handoff Builder\\project_registry.json`
+  - for direct JSON import, the app now prefers:
+    - exact saved handoff identity match
+    - then the local folder where the selected JSON actually lies
+  - if that local JSON folder already contains:
+    - `analysis/handoff_index.json`
+    the app now initializes `project.json` / `project.sqlite` there automatically and reuses that folder as the project workspace
+  - this restores the owner expectation that the project is created/opened next to the selected `deep` JSON when the handoff folder itself is the correct local project root
+  - focused validation on Friday, July 31, 2026:
+    - `python -m pytest -q tests\test_v2_one_json_workflow.py tests\test_v2_gui_controller.py` -> `13 passed in 8.22s`
+    - `python -m py_compile handoff_builder\v2\project_registry.py handoff_builder\v2\services\import_service.py app.py` -> success
+
+- Date: 2026-07-31
+- Self-describing first-try MLT status:
+  - every new analysis handoff now writes mandatory:
+    - `ASSISTANT_CONTEXT.json`
+  - owner-controlled local path context is now persisted in:
+    - `%LOCALAPPDATA%\AI Handoff Builder\shotcut_settings.json`
+  - owner default for this build:
+    - `include_local_path_context = true`
+  - when enabled, `ASSISTANT_CONTEXT.json` now carries:
+    - project identity and project name
+    - actual `project_root`
+    - actual `originals_root`
+    - actual `proxies_root`
+    - `preferred_edit_source = originals`
+    - complete `asset_id -> original filename -> original path` mapping
+    - proxy mapping when available
+    - explicit flags:
+      - absolute original-media paths required
+      - downloaded `.mlt` may be opened from any folder
+      - no user file movement required
+  - when disabled, `ASSISTANT_CONTEXT.json` still exists but marks:
+    - `direct_mlt_support.available = false`
+  - the analysis handoff templates now document:
+    - `DIRECT SHOTCUT MLT MODE - NO USER FILE MOVEMENT`
+  - new direct-MLT helper now builds a first-try Shotcut `.mlt` from:
+    - `ASSISTANT_CONTEXT.json`
+  - latest packaged acceptance proof on Friday, July 31, 2026:
+    - fresh EXE path:
+      - `dist\AI Handoff Builder\AI Handoff Builder.exe`
+    - fresh EXE SHA-256:
+      - `6365c90fef83ac7895fcfa5089766f1e14c5b1507e20bd468a04282ef94d7976`
+    - evidence root:
+      - `C:\Users\oleg3\Documents\AIHB_issue27_packaged_acceptance_final`
+    - direct MLT opened from unrelated folder:
+      - `C:\Users\oleg3\Documents\AIHB_issue27_packaged_acceptance_final\Unrelated Downloads\Каролина And RÖB direct owner test.mlt`
+    - direct MLT used only original-media resources:
+      - `C:\Users\oleg3\Documents\AIHB_issue27_packaged_acceptance_final\Каролина And RÖB\originals\cover.jpg`
+    - acceptance proof confirmed:
+      - no `Missing Files` dialog
+      - no owner path repair
+      - no proxy `asset_...` media resource in direct-original mode
+      - no physical filename containing literal `%20`
+
+- Date: 2026-07-30
+- Automatic complete local project status:
+  - single-source ZIP now creates a project-owned local workspace with:
+    - `originals/`
+    - `proxies/`
+    - `analysis/`
+    - `handoffs/`
+    - `imports/`
+    - root `<project_name>.mlt`
+  - local registry now preserves project-relative original/proxy paths so standalone JSON import still resolves after moving the workspace folder
+  - workspace re-entry now preserves `source_snapshot.json`, which keeps source-ZIP collision protection intact across reopen/rebuild cycles
+  - frozen packaged Shotcut builds no longer recurse into `AI Handoff Builder.exe` when invoking the donor MCP server; they fall back to a real Python interpreter
+  - still-image editable Shotcut builds now use still-safe duration/keyframe behavior, and the packaged acceptance flow reached:
+    - `shotcut_opened`
+  - latest packaged owner-flow evidence root:
+    - `C:\Users\oleg3\Documents\AIHB_issue27_packaged_acceptance_final`
+  - latest packaged executable from this branch:
+    - `dist\AI Handoff Builder\AI Handoff Builder.exe`
+    - SHA-256:
+      - `aaab08c84c733b8ba181a6e1b84b61082c665b075dce26df07cc281c2e4dc031`
+  - latest packaged acceptance report:
+    - `C:\Users\oleg3\Documents\AIHB_issue27_packaged_acceptance_final\evidence\acceptance_report.json`
+
+- Date: 2026-07-30
+- One-JSON owner workflow status:
+  - source ZIP -> `_ANALYSIS_HANDOFF.zip` -> one standalone `edit_plan 3.0` JSON -> editable Shotcut `.mlt`
+  - implemented on branch `experiment/shotcut-mcp-windows-proof`
+  - v1 `Настройки` block in the current `issue25` app now starts collapsed behind:
+    - `Показать настройки`
+  - the fresh packaged build from this branch preserves that collapsed-start behavior
+  - validated in source with:
+    - `python -m pytest -q` -> `144 passed, 1 skipped`
+    - `python -m py_compile app.py handoff_builder\pipeline.py handoff_builder\v2\services\import_service.py handoff_builder\v2\services\shotcut_service.py handoff_builder\v2\plans\semantic.py handoff_builder\v2\timeline\compiler.py`
+  - packaged build rebuilt on Thursday, July 30, 2026:
+    - `dist\AI Handoff Builder\AI Handoff Builder.exe`
+    - SHA-256: `637050d843f9926095d88ded795a9ae36255751933e763b364ef89966ee2f809`
+  - packaged resources now verified:
+    - `_internal\handoff_builder\templates\analysis_handoff\00_START_HERE.md`
+    - `_internal\handoff_builder\templates\analysis_handoff\PROJECT_BRIEF.md`
+    - `_internal\handoff_builder\templates\analysis_handoff\OUTPUT_CONTRACT.md`
+    - `_internal\schemas\analysis_handoff\1.0.json`
+    - `_internal\schemas\edit_plan\3.0.json`
+    - `_internal\schemas\normalized_timeline\1.0.json`
+
+- Date: 2026-07-29
 - Repository: `oleg3479881328-code/AI-Handoff-Builder`
 - Broad v2 contract: `Yt-Dlp-Download-Manager` issue `#67`
 - HyperFrames contract: repository issue `#3`
+- Shotcut MCP proof contract: repository issue `#25`
+- Shotcut owner-facing GUI MVP contract: repository issue `#27`
 - One-file handoff workflow fix: repository issue `#10`
 - Handoff completeness defect: repository issue `#2`
-- Current branch: `feat/issue-16-preview-scroll-fix`
-- Base branch: `feat/issue-14-auto-project-root`
-- Draft PR: pending publication from `feat/issue-16-preview-scroll-fix` -> `feat/issue-14-auto-project-root`
-- Current phase: Issue `#16` scroll + current-preview-target fixes implemented and regression-validated in source; the next step is packaged `.exe` acceptance and draft-PR publication
+- Current branch: `experiment/shotcut-mcp-windows-proof`
+- Base branch: `feat/issue-16-preview-scroll-fix`
+- Draft PR: pending publication from `experiment/shotcut-mcp-windows-proof` -> `feat/issue-16-preview-scroll-fix`
+- Current phase: real Windows Shotcut MCP proof remains passed, and the same branch now adds an owner-facing Shotcut GUI MVP inside `Local Edit Runner (v2)` without replacing the existing FFmpeg production path
+
+## Issue #25 Snapshot
+
+- Gate 0:
+  - isolated worktree from base SHA `67b74e9d512012829efb9c990a1055d3f43eb59b`
+  - `python -m pytest -q` baseline in the clean Issue `#25` worktree:
+    - `124 passed`
+- Gate 1:
+  - official Shotcut `26.6.25` was not already available in the proof workspace
+  - official portable runtime was downloaded from the official Shotcut source and kept outside git
+- Gate 2:
+  - donor `matrodrigs/shotcut-mcp` pinned to `v1.5.0`
+  - full SHA behind the tag:
+    - `7e66c17b92c2058670ae5e4c21aa61e27c51d317`
+  - audit decision:
+    - `ACCEPT_FOR_ISOLATED_PROOF`
+  - audit document:
+    - `docs/shotcut-mcp-donor-audit.md`
+- Gate 3:
+  - official Shotcut portable runtime and donor checkout remain isolated outside the repository
+  - stdio server proof completed with a local JSON-RPC harness
+  - safety policy stayed strict:
+    - allowed roots only
+    - absolute paths required
+    - network resources disabled
+    - unsafe consumer properties disabled
+- Gate 4:
+  - repeated from scratch on one owner-selected real MP4
+  - all 15 required steps completed
+  - project readback proved a real timeline mutation:
+    - pre-edit revision:
+      - `0b9dbe445a750eea37c125dcadac627932a5d9cc3a03029219ea96650301e259`
+    - post-edit revision:
+      - `012c5dc02e3d3164dd996e2f1d369b7d1335b883be729292c59d48bdc6001625`
+  - proof artifacts remained local-only and outside git
+- Gate 5:
+  - added a narrow code-level Shotcut backend boundary:
+    - `handoff_builder/v2/render/shotcut_backend.py`
+    - `handoff_builder/v2/render/backends.py`
+  - existing FFmpeg render service remains unchanged and still instantiates `FFmpegBackend`
+- Gate 6:
+  - new focused adapter tests:
+    - `tests/test_v2_shotcut_backend.py`
+  - initial result:
+    - `14 passed`
+  - full suite after the final `A1` track adapter update:
+    - `138 passed`
+
+## Issue #27 Snapshot
+
+- Goal:
+  - turn the existing Shotcut proof boundary into a real owner-facing MVP inside the current Tkinter app
+  - keep FFmpeg as the default production path
+  - avoid a second application
+- New owner-facing surface inside `Local Edit Runner (v2)`:
+  - backend selector:
+    - `ffmpeg`
+    - `shotcut`
+  - pinned Shotcut runtime folder field
+  - pinned donor `shotcut_mcp_server.py` field
+  - `Check Status`
+  - `Reset Paths`
+  - `Build Editable Project`
+  - `Open Editable Project`
+  - `Open in Shotcut`
+- Persistence:
+  - new local settings store:
+    - `handoff_builder/v2/shotcut_settings.py`
+  - persisted under local app data:
+    - `shotcut_settings.json`
+  - auto-detects the already-proven local proof runtime when present
+- New orchestration layer:
+  - `handoff_builder/v2/services/shotcut_service.py`
+  - responsibilities:
+    - build editable `.mlt` project from imported preview plan `1.0`
+    - reuse the current render output folder
+    - render through Shotcut MCP into `reel.mp4`
+    - write preview / contact sheet / editable project artifacts under:
+      - `renders/<job>/shotcut/`
+    - keep the queue safe when the selected source job is already terminal
+- Live validation on Wednesday, July 29, 2026:
+  - targeted regression:
+    - `python -m pytest -q tests/test_v2_shotcut_backend.py tests/test_v2_shotcut_service.py tests/test_app_v2_ui.py`
+    - `20 passed in 3.09s`
+  - full suite:
+    - `python -m pytest -q`
+    - `142 passed in 49.64s`
+  - real service-path validation:
+    - workspace:
+      - `tmp_rc_real_e2e/workspace` from the existing local AI Handoff Builder acceptance set
+    - source package:
+      - `AI_EDIT_PACKAGE_REAL.zip`
+    - selected render job:
+      - `f35260850bb76dead667`
+    - build result:
+      - `renderer_status=shotcut_editable_ready`
+    - render result:
+      - `renderer_status=completed`
+      - output:
+        - `540x960`
+        - `30.0 fps`
+        - `1.834 s`
+        - `audio_present=1`
+        - SHA-256:
+          - `f0f94ee7b46e85ea1a3a9b95d6c899ea0c3f24676899c0a764f414fccdfcc234`
+  - visual proof:
+    - current application window screenshot with visible `Shotcut MCP` section captured locally on:
+      - Wednesday, July 29, 2026
+
+## New Verified Limitations From Issue #25
+
+- A raw donor checkout on Windows needs donor-root import visibility for detached render workers.
+- `render_status` can briefly surface a false terminal `failed` state before durable metadata settles to `completed`.
+- AI Handoff Builder now compensates for that race inside the adapter boundary before treating the job as failed.
+- The final repository-backed proof now materializes both:
+  - `V1`
+  - `A1`
+  inside the disposable Shotcut project readback, matching the Gate 4 structure contract.
 
 ## Accepted Baseline Preserved
 
