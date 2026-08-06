@@ -1,5 +1,87 @@
 # Current State
 
+- Date: 2026-08-06
+- Repository: `oleg3479881328-code/AI-Handoff-Builder`
+- Active contract: issue `#29` standalone `Handoff Light`
+- Active branch: `feat/handoff-light-standalone`
+- Current phase: implementation complete locally; Draft PR and issue completion comment pending publication
+- Standalone application status:
+  - entrypoint: `handoff_light_app.py`
+  - package: `handoff_builder/handoff_light/`
+  - packaged EXE: `dist\V0.1.0_Handoff_Light\V0.1.0_Handoff_Light.exe`
+  - packaged EXE SHA-256:
+    - `3D180C9D4971D92B6DFCF7815D5A44919F3CBE4D71A21F7E70649BDAC227E350`
+  - packaged launch title verified on Thursday, August 6, 2026:
+    - `V0.1.0_Handoff_Light - Handoff Light`
+  - packaged screenshot evidence:
+    - `tmp_handoff_light_launch.png`
+
+## Update: 2026-08-06 Issue #29 standalone Handoff Light implementation
+
+- Implemented a separate standalone Handoff Light application without touching the existing Builder UI or PR `#26`.
+- Added new package surface:
+  - `handoff_builder/handoff_light/__init__.py`
+  - `handoff_builder/handoff_light/models.py`
+  - `handoff_builder/handoff_light/project_store.py`
+  - `handoff_builder/handoff_light/archive.py`
+  - `handoff_builder/handoff_light/reports.py`
+  - `handoff_builder/handoff_light/ingest.py`
+  - `handoff_builder/handoff_light/packager.py`
+  - `handoff_builder/handoff_light/app.py`
+  - `handoff_light_app.py`
+- Implemented persistent project state with:
+  - `project.json`
+  - `asset_registry.json`
+  - `ingestion_history.json`
+- Implemented recursive safe ingestion for:
+  - files
+  - folders
+  - ZIP archives
+  - ZIP inside ZIP
+  - same-name/different-content assets
+  - duplicate-content skip by `size + SHA-256`
+- Implemented recursive ZIP protections:
+  - path traversal rejection
+  - encrypted-member rejection
+  - configurable archive depth
+  - configurable expanded-byte limit
+  - compression-ratio guard
+- Preserved stable archive provenance by storing the physical source archive path in local state while keeping full nested `source_chain` for discovered members.
+- Implemented portable immutable Handoff ZIP exports:
+  - `V001_<project>_HANDOFF.zip`
+  - `V002_<project>_HANDOFF.zip`
+- Implemented required package inventory:
+  - `00_START_HERE.md`
+  - `PROJECT_BRIEF.md`
+  - `handoff_manifest.json`
+  - `asset_registry.json`
+  - `REPORTS/*`
+  - package-relative `PHOTOS/`, `AUDIO/`, `METADATA/`, and `PROXIES/` assets where applicable
+- Added build validation covering:
+  - ZIP CRC
+  - required inventory
+  - JSON UTF-8 parsing
+  - no absolute local paths in package payloads
+- Added a separate packaged build flow:
+  - `Handoff Light.spec`
+  - `build_handoff_light_exe.bat`
+- Evidence bundle created at:
+  - `tmp_handoff_light_evidence\`
+  - key proof:
+    - nested ZIP ingest -> `3` new assets, `1` duplicate skipped
+    - incremental add -> `1` new asset
+    - immutable export progression -> `V001_Evidence_Project_HANDOFF.zip` then `V002_Evidence_Project_HANDOFF.zip`
+    - final package portable registry -> no absolute paths detected
+
+- Validation on Thursday, August 6, 2026:
+  - `python -m pytest -q tests\test_handoff_light_ingest.py tests\test_handoff_light_packager.py tests\test_handoff_light_app.py` -> `9 passed in 2.44s`
+  - `python -m pytest -q` -> `178 passed in 54.43s`
+  - `cmd /c "echo.| build_handoff_light_exe.bat"` -> success; packaged output under `dist\V0.1.0_Handoff_Light\`
+  - packaged EXE smoke:
+    - launched `dist\V0.1.0_Handoff_Light\V0.1.0_Handoff_Light.exe`
+    - observed title `V0.1.0_Handoff_Light - Handoff Light`
+    - captured screenshot `tmp_handoff_light_launch.png`
+
 - Date: 2026-08-01
 - Issue #27 version visibility update:
   - single source: `handoff_builder/version.py`

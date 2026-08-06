@@ -1,5 +1,73 @@
 # Latest Log
 
+Date: 2026-08-06
+Step: Issue #29 standalone Handoff Light implementation
+
+## Completed
+
+- Published the required first issue comment before coding with:
+  - exact starting HEAD
+  - exact new entrypoint and package paths
+  - exact create/modify file list
+  - explicit confirmation that PR `#26` and the existing Builder would remain untouched
+- Added the standalone Handoff Light package and entrypoint:
+  - `handoff_light_app.py`
+  - `handoff_builder/handoff_light/*`
+- Implemented persistent local projects with:
+  - `project.json`
+  - `asset_registry.json`
+  - `ingestion_history.json`
+- Implemented recursive safe input discovery across:
+  - files
+  - folders
+  - ZIP archives
+  - ZIP inside ZIP
+- Implemented portable asset registration and export rules:
+  - dedupe by `size + SHA-256`
+  - same-name / different-content kept as distinct assets
+  - package-relative paths only in exported `asset_registry.json`
+  - immutable `V001 -> V002 -> ...` handoff filenames
+- Fixed the archive-provenance reopen bug so ZIP-derived assets keep the stable physical archive path in local state instead of a deleted temp path.
+- Added the minimal owner-facing GUI with only:
+  - `New Project`
+  - `Open Project`
+  - `Add Material`
+  - `Build Handoff ZIP`
+  - `Open Package Folder`
+- Added separate packaging flow:
+  - `Handoff Light.spec`
+  - `build_handoff_light_exe.bat`
+- Corrected the PyInstaller layout to `onedir` so runtime tools live beside the packaged executable.
+
+## Validation
+
+- Focused Handoff Light regression:
+  - `python -m pytest -q tests\test_handoff_light_ingest.py tests\test_handoff_light_packager.py tests\test_handoff_light_app.py`
+  - result: `9 passed in 2.44s`
+- Full repository regression:
+  - `python -m pytest -q`
+  - result: `178 passed in 54.43s`
+- Packaged build:
+  - `cmd /c "echo.| build_handoff_light_exe.bat"`
+  - result: success
+- Packaged smoke:
+  - launched `dist\V0.1.0_Handoff_Light\V0.1.0_Handoff_Light.exe`
+  - observed title: `V0.1.0_Handoff_Light - Handoff Light`
+  - screenshot: `tmp_handoff_light_launch.png`
+- Evidence bundle:
+  - `tmp_handoff_light_evidence\evidence_summary.json`
+  - confirms:
+    - nested ZIP ingest
+    - incremental new material
+    - `V001` then `V002`
+    - no absolute paths in exported portable registry
+
+## Status
+
+- Issue `#29` local implementation: complete
+- Existing Builder / PR `#26`: untouched
+- Draft PR: not yet created
+
 Date: 2026-08-01
 Step: Issue #27 owner-visible application version
 
